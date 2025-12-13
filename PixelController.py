@@ -9,7 +9,7 @@ class PixelPDController:
 
         self.K_Px = 5
         self.K_Dx = 5
-        self.K_Py = 7
+        self.K_Py = 11
         self.K_Dy = 3
 
     def step(self, frame_width, xL, yL, xR, yR):
