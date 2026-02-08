@@ -1,0 +1,9 @@
+{
+  "serial": {
+    "grbl_port": "/dev/ttyUSB0"
+  },
+  "cameras": {
+    "left": 2,
+    "right": 0
+  }
+}
