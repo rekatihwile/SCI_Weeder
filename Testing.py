@@ -7,7 +7,7 @@ import serial
 import time
 import numpy as np
 import math
-from Laser_Helpers import send, wait_for_idle, connect, move_to, burn, close
+from SCI_Weeder.b1_test.Laser_Helpers import send, wait_for_idle, connect, move_to, burn, close
 # ---------------- Config ----------------
 RIGHT_CAM_ID = 1
 LEFT_CAM_ID  = 2

@@ -1,0 +1,9 @@
+{
+    "Filter_d": 9,
+    "Filter_sigma": 72,
+    "BlockSize": 30,
+    "C_Value": 6,
+    "MinArea": 24,
+    "MinCirc": 64,
+    "UseMask": 1
+}

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.env/
+
+# Data & models
+plant_dataset_crops/
+data_collection/
+*.pt
+*.pth
+torchvision/
+torch_jetson.whl
+
+# OS junk
+.DS_Store

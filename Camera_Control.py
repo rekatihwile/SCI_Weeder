@@ -10,10 +10,10 @@ import math
 from Laser_Helpers import send, wait_for_idle, connect, move_to, burn, close
 
 # ---------------- Config ----------------
-RIGHT_CAM_ID = 1
-LEFT_CAM_ID  = 3  
+RIGHT_CAM_ID = 0
+LEFT_CAM_ID  = 2
 # Change these in your config section
-FRAME_W = 640  # Was 1280
+FRAME_W = 1280  # Was 1280
 FRAME_H = 720  # Was 720
 
 # Partner's best-fit alignment lines
@@ -255,14 +255,14 @@ def send_relative_move(ser, dx_mm=0.0, dy_mm=0.0, feedrate=3000):
 def run_control_loop(capL, capR, ser, left_pt, right_pt):
     print("\n=== CONTROL LOOP ===")
 
-    tol_y = 3
-    tol_x = 3
+    tol_y = 10
+    tol_x = 10
     step_mm = 0.001
 
-    K_Px = 9
-    K_Dx = 10
-    K_Py = 11
-    K_Dy = 10
+    K_Px = 20
+    K_Dx = 1
+    K_Py = 20
+    K_Dy = 1
 
     lastL = left_pt
     lastR = right_pt
@@ -294,10 +294,10 @@ def run_control_loop(capL, capR, ser, left_pt, right_pt):
         deX = eX - prev_eX
         prev_eX = eX
 
-        if abs(eX) > tol_x and abs(deX*K_Dx) < abs(eX*K_Px):
-            dx = round((eX*K_Px + deX*K_Dx)*step_mm, 3)
-        else:
-            dx = 0.0
+        # if abs(eX) > tol_x :#and abs(deX*K_Dx) < abs(eX*K_Px):
+        dx = round((eX*K_Px + deX*K_Dx)*step_mm, 3)
+        # else:
+        #     dx = 0.0
 
         eYL = vertical_error(xL, yL, mL, bL)
         eYR = vertical_error(xR, yR, mR, bR)
@@ -306,10 +306,10 @@ def run_control_loop(capL, capR, ser, left_pt, right_pt):
         deY = eY - prev_eY
         prev_eY = eY
 
-        if abs(eY) > tol_y and abs(deY*K_Dy) < abs(eY*K_Py):
-            dy = round((eY*K_Py + deY*K_Dy)*step_mm, 3)
-        else:
-            dy = 0.0
+        # if abs(eY) > tol_y :#and abs(deY*K_Dy) < abs(eY*K_Py):
+        dy = round((eY*K_Py + deY*K_Dy)*step_mm, 3)
+        # else:
+        #     dy = 0.0
 
         if abs(dx) > 0.0 or abs(dy) > 0.0:
             send_relative_move(ser, dx_mm=dx, dy_mm=dy)

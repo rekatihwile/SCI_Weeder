@@ -1,7 +1,7 @@
 import time, serial
 
 # === CONFIG ===
-PORT = "COM3"
+PORT = "/dev/ttyUSB0"
 BAUD = 115200
 TRAVEL_F = 8000
 MAX_POWER = 1000  # corresponds to $30=1000
@@ -32,7 +32,8 @@ def wait_for_idle(ser, poll_interval=0.1):
 def connect():
     """Open a serial connection and configure GRBL settings."""
     ser = serial.Serial(PORT, baudrate=BAUD, timeout=0.2, write_timeout=0.2)
-    time.sleep(0.2)
+    time.sleep(1)
+    ser.reset_input_buffer()
     send(ser, "$X")       # unlock
     send(ser, "G21")      # mm
     send(ser, "G90")      # absolute
