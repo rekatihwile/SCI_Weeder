@@ -41,7 +41,7 @@ class B1LaserController:
     def fire_high(self):
         """Fires laser at 100% power using a Zero-Distance G1 move."""
         print("☢️ FIRING HIGH (100%)...")
-        self.send_raw("M3 S1000")
+        self.send_raw("M3 S10")
         self.send_raw("G1 G91 X0 Y0 F100")
         self.send_raw("G4 P1.0")
         self.send_raw("M5")
@@ -65,7 +65,7 @@ class B1LaserController:
             # 2. 0.5s STATIONARY (The "Core Hit")
             setup_cmds = [
                 "G1 F10",           # Movement state entry
-                "M3 S1000",          # High Power (85%)
+                "M3 S10",          # High Power (85%)
                 "G1 G91 X0 Y0",     # Trigger PWM
                 "G4 P0.2",          # Hard Dwell 0.5s
                 "G90"               # Absolute mode for spiral
