@@ -61,8 +61,6 @@ class B1ProductionMission:
         self.cap_L = cv2.VideoCapture(self.left_id)
         self.cap_R = cv2.VideoCapture(self.right_id)
 
-
-
         for cap in [self.cap_L, self.cap_R]:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -82,37 +80,24 @@ class B1ProductionMission:
             cfg = json.load(f)
 
         self.port = cfg["serial"]["grbl_port"]
-
         self.left_cam = cfg["cameras"]["left"]
         self.right_cam = cfg["cameras"]["right"]
-
         self.left_id = self.left_cam["index"]
         self.right_id = self.right_cam["index"]
-
         self.left_node = self.left_cam["node"]
         self.right_node = self.right_cam["node"]
-
 
     def apply_nuclear_hardware_lock(self):
         with open(CAMERA_SETTINGS, "r") as f:
             s = json.load(f)
 
         for dev in [self.left_node, self.right_node]:
-            subprocess.run(
-                ["v4l2-ctl", "-d", dev, "-c", "exposure_auto=1"], check=True
-            )
-            subprocess.run(
-                ["v4l2-ctl", "-d", dev, "-c", "exposure_auto_priority=0"], check=True
-            )
-            subprocess.run(
-                ["v4l2-ctl", "-d", dev, "-c", f"exposure_absolute={s['exp']}"], check=True
-            )
-            subprocess.run(
-                ["v4l2-ctl", "-d", dev, "-c", f"gain={s['gain']}"], check=True
-            )
+            subprocess.run(["v4l2-ctl", "-d", dev, "-c", "exposure_auto=1"], check=True)
+            subprocess.run(["v4l2-ctl", "-d", dev, "-c", "exposure_auto_priority=0"], check=True)
+            subprocess.run(["v4l2-ctl", "-d", dev, "-c", f"exposure_absolute={s['exp']}"], check=True)
+            subprocess.run(["v4l2-ctl", "-d", dev, "-c", f"gain={s['gain']}"], check=True)
 
         print("✅ Nuclear lock applied to correct physical cameras.")
-
 
     def wait_for_idle(self, timeout=30.0):
         start_wait = time.time()
@@ -125,6 +110,23 @@ class B1ProductionMission:
                 return True
             time.sleep(0.1) 
         return False
+
+    def save_survey_images(self):
+        """Captures and saves frames from both cameras to local folder."""
+        # Flush buffers to get fresh frames
+        for _ in range(5):
+            self.cap_L.grab()
+            self.cap_R.grab()
+            
+        retL, imgL = self.cap_L.read()
+        retR, imgR = self.cap_R.read()
+        
+        if retL and retR:
+            cv2.imwrite(str(BASE_DIR / "survey_L.png"), imgL)
+            cv2.imwrite(str(BASE_DIR / "survey_R.png"), imgR)
+            print(f"\n📸 [SAVE] New snapshots written to {BASE_DIR}")
+        else:
+            print("\n⚠️ [ERROR] Failed to capture survey images.")
 
     def get_cluster(self, x, y):
         pts = [[float(x + i), float(y + j)] for i in [-2, 0, 2] for j in [-2, 0, 2]]
@@ -173,16 +175,14 @@ class B1ProductionMission:
         self.lk_targets = matched
         self.spatial_anchors["START"] = {'mpos': curr_mpos, 'snapshot': initial_snapshot}
         rem = list(matched.keys()); curr_xy = np.array([W//2, H//2]); self.path_order = []
-        # ... existing code ...
+        
         self.path_order = []
-        last_xy = curr_xy  # Start measuring from the center or current gantry pos
+        last_xy = curr_xy 
 
         while rem:
-            # Find the 'i' in 'rem' that is closest to 'last_xy'
             node = min(rem, key=lambda i: np.linalg.norm(np.array(matched[i]['orig_l']) - last_xy))
-            
             self.path_order.append(node)
-            last_xy = np.array(matched[node]['orig_l']) # Update the reference point
+            last_xy = np.array(matched[node]['orig_l']) 
             rem.remove(node)
         
         self.mode = "EXECUTE"; self.current_step = 0
@@ -206,6 +206,9 @@ class B1ProductionMission:
             self.cap_L.grab(); self.cap_R.grab()
             time.sleep(0.01)
 
+        # Initial Auto-Save
+        self.save_survey_images()
+
         print("\n--- 🔍 SURVEY MODE ---")
         while True:
             retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
@@ -213,14 +216,17 @@ class B1ProductionMission:
             
             self.clicks_L = self.cv_L.return_full(fL)
             self.clicks_R = self.cv_R.return_full(fR)
-            # Swap displayed counts: show right-camera count in the "L" slot and left-camera count in the "R" slot
-            print(f"\r📊 Found: L[{len(self.clicks_R)}] R[{len(self.clicks_L)}] | 'p'+Enter to fire, 'q' to quit", end="")
+            print(f"\r📊 Found: L[{len(self.clicks_L)}] R[{len(self.clicks_R)}] | 'p'=fire, 's'=save pngs, 'q'=quit", end="")
             
             rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
             if rlist:
                 cmd = sys.stdin.readline().strip().lower()
-                if cmd == 'p': break
-                elif cmd == 'q': print("\n👋 Quitting."); return
+                if cmd == 'p': 
+                    break
+                elif cmd == 's':
+                    self.save_survey_images()
+                elif cmd == 'q': 
+                    print("\n👋 Quitting."); return
 
         if not self.match_and_optimize(): return
         self.laser.set_acceleration(NORMAL_ACCEL)
