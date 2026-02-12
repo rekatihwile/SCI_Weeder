@@ -4,14 +4,14 @@
   },
   "cameras": {
     "left": {
-      "index": 2,
+      "index": 0,
       "by_path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.4:1.0-video-index0",
-      "node": "/dev/video2"
+      "node": "/dev/video0"
     },
     "right": {
-      "index": 0,
+      "index": 2,
       "by_path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.3:1.0-video-index0",
-      "node": "/dev/video0"
+      "node": "/dev/video2"
     }
   }
 }
