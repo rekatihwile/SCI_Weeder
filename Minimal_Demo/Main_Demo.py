@@ -3,7 +3,6 @@ import numpy as np
 import time
 import sys
 import json
-import subprocess
 import select
 import platform
 from pathlib import Path
@@ -47,8 +46,6 @@ LK_PARAMS = dict(
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
 )
 
-
-
 class B1ProductionMission:
     def __init__(self):
         print(f"🔍 Loading Configuration for {platform.system()}...")
@@ -75,15 +72,18 @@ class B1ProductionMission:
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, H)
 
         time.sleep(1.0)
-        self.apply_nuclear_hardware_lock()
 
+        # --- FIX: Initialize variables before calling methods that use them ---
+        self.frame_count = 0
         self.clicks_L, self.clicks_R, self.lk_targets = [], [], {}
         self.path_order, self.spatial_anchors = [], {} 
         self.current_step, self.mode = 0, "SURVEY"
         self.old_gray_L, self.old_gray_R = None, None
         self.tracking_frozen = False
         self.current_anchor_id = "START"
-        self.frame_count = 0
+
+        # Now frame_count exists and this won't throw an AttributeError
+        self.apply_nuclear_hardware_lock()
 
     def load_hardware_config(self):
         with open(HARDWARE_CONFIG, "r") as f:
@@ -124,14 +124,22 @@ class B1ProductionMission:
             time.sleep(0.1) 
         return False
 
+    
     def save_survey_images(self):
-        for _ in range(5):
-            self.cap_L.grab(); self.cap_R.grab()
-        retL, imgL = self.cap_L.read(); retR, imgR = self.cap_R.read()
-        if retL and retR:
-            cv2.imwrite(str(BASE_DIR / "survey_L.png"), imgL)
-            cv2.imwrite(str(BASE_DIR / "survey_R.png"), imgR)
-            print(f"\n📸 [SAVE] New snapshots written to {BASE_DIR}")
+            # Flush the buffer to get fresh frames
+            for _ in range(5):
+                self.cap_L.grab(); self.cap_R.grab()
+                
+            retL, imgL = self.cap_L.read(); retR, imgR = self.cap_R.read()
+            
+            if retL and retR:
+                # Stitch images horizontally (Left on left, Right on right)
+                combined = np.hstack((imgL, imgR))
+                
+                save_path = str(BASE_DIR / "survey_combined.png")
+                cv2.imwrite(save_path, combined)
+                print(f"\n📸 [SAVE] Combined survey image written to {save_path}")
+
 
     def get_cluster(self, x, y):
         pts = [[float(x + i), float(y + j)] for i in [-2, 0, 2] for j in [-2, 0, 2]]
@@ -181,6 +189,9 @@ class B1ProductionMission:
         return True
 
     def start(self):
+        print("🔓 Clearing GRBL Alarm Lock...")
+        self.laser.send_raw("$X")  # Add this line
+        time.sleep(0.5)
         print("🤖 Homing Gantry..."); self.laser.home()
         if not self.wait_for_idle(timeout=100): return
         print(f"📍 Moving to Survey Position {START_POS}...")
