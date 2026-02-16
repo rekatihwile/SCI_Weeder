@@ -1,11 +1,22 @@
 {
-    "exp": 350,
-    "gain": 88,
-    "brt": 128,
-    "con": 29,
-    "hue": 0,
-    "gamma": 120,
-    "sat": 64,
-    "wb": 4500,
-    "sharp": 100
+    "left": {
+        "brightness": 15,
+        "contrast": 24,
+        "exposure": -3,
+        "gain": 114,
+        "saturation": 64,
+        "hue": 0,
+        "white_balance": 3984,
+        "sharpness": 19
+    },
+    "right": {
+        "brightness": 15,
+        "contrast": 22,
+        "exposure": -3,
+        "gain": 110,
+        "saturation": 67,
+        "hue": 0,
+        "white_balance": 5575,
+        "sharpness": 100
+    }
 }
