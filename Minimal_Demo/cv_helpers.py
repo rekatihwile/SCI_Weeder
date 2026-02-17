@@ -84,3 +84,59 @@ class WeedCV:
         cv2.putText(canvas, f"WEEDS: {len(coords)}", (15, 35), 0, 1.0, (255, 255, 255), 3)
         cv2.resizeWindow(self.win_main, 800, int(canvas.shape[0] * (800 / canvas.shape[1])))
         cv2.imshow(self.win_main, canvas)
+    def return_burst_stable(self, frames):
+        """
+        frames: List of 5 captured images.
+        Returns: List of (x, y) coordinates that survived the median filter.
+        """
+        all_detections = [] # List of dicts: {'box': [x1,y1,x2,y2], 'point': (x,y)}
+        
+        # 1. Collect all raw detections from the 5 frames
+        for frame in frames:
+            boxes, masks = self._get_detections(frame)
+            # Use your existing sniper logic to get points
+            frame_coords = self.return_full(frame) 
+            
+            # Map the points back to their specific boxes for this frame
+            frame_data = []
+            for i, box in enumerate(self.filtered_boxes):
+                if i < len(frame_coords):
+                    frame_data.append({
+                        'box': box.xyxy[0].cpu().numpy(),
+                        'point': frame_coords[i]
+                    })
+            all_detections.append(frame_data)
+
+        # 2. Group detections across frames by Box Center proximity
+        # (Since the camera is stationary, a plant won't move more than a few pixels)
+        plant_groups = [] # List of lists of points
+
+        for frame_data in all_detections:
+            for det in frame_data:
+                cx, cy = (det['box'][0] + det['box'][2])/2, (det['box'][1] + det['box'][3])/2
+                
+                match_found = False
+                for group in plant_groups:
+                    # Check if this detection is close to an existing group center
+                    group_center = np.mean([p['center'] for p in group], axis=0)
+                    if np.linalg.norm(np.array([cx, cy]) - group_center) < 30: # 30px radius
+                        group.append({'center': [cx, cy], 'point': det['point']})
+                        match_found = True
+                        break
+                
+                if not match_found:
+                    plant_groups.append([{'center': [cx, cy], 'point': det['point']}])
+
+        # 3. Filter and Average
+        stable_coords = []
+        for group in plant_groups:
+            # Only keep plants seen in at least 3 out of 5 frames
+            if len(group) >= 3:
+                pts = np.array([g['point'] for g in group])
+                
+                # Take Median of X and Y separately (Discarding Min/Max outliers)
+                median_x = int(np.median(pts[:, 0]))
+                median_y = int(np.median(pts[:, 1]))
+                stable_coords.append((median_x, median_y))
+
+        return stable_coords

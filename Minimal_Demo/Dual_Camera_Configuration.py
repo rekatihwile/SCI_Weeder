@@ -46,15 +46,26 @@ def main():
     cap_l = cv2.VideoCapture(hw['cameras']['left']['index'], BACKEND)
     cap_r = cv2.VideoCapture(hw['cameras']['right']['index'], BACKEND)
 
+    # --- NEW: FORCE 720p RESOLUTION ---
+    print("📐 Setting Resolution to 640x480...")
+    for cap in [cap_l, cap_r]:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Note: Some cameras need MJPG to hit high res at high FPS
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')) 
+
     if CAM_CFG_PATH.exists():
         with open(CAM_CFG_PATH, 'r') as f:
             config = json.load(f)
     else:
         def_exp = -6 if IS_WINDOWS else 350
+        # Default config structure
         config = {
             "left":  {"brightness": 15, "contrast": 30, "exposure": def_exp, "gain": 0, "saturation": 64, "white_balance": 4500, "sharpness": 100},
             "right": {"brightness": 15, "contrast": 30, "exposure": def_exp, "gain": 0, "saturation": 64, "white_balance": 4500, "sharpness": 100}
         }
+
+    # ... rest of your UI setup code remains exactly the same ...
 
     win_l, win_r = "LEFT_TUNER", "RIGHT_TUNER"
     cv2.namedWindow(win_l); cv2.namedWindow(win_r)

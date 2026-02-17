@@ -16,7 +16,8 @@ BASE_DIR = Path(__file__).resolve().parent
 WEIGHTS_DIR = BASE_DIR / "weights"
 YOLO_PT = str(WEIGHTS_DIR / "yolo_weed.pt")
 SNIPER_PT = str(WEIGHTS_DIR / "sniper.pt")   
-CAMERA_SETTINGS = BASE_DIR / "camera_config.json"
+# Change this line in your script:
+CAMERA_SETTINGS = Path("/home/laser/Documents/Laser_Workspace/SCI_Weeder/Minimal_Demo/camera_config.json")
 HARDWARE_CONFIG = BASE_DIR / "hardware_config.json"
 
 # --- SYSTEM CONSTANTS ---
@@ -187,7 +188,85 @@ class B1ProductionMission:
         self.mode = "EXECUTE"; self.current_step = 0
         print(f"\n🚀 Mission Loaded. Targets: {len(self.path_order)}")
         return True
+    
+    # UPDATE FUNCTION SIGNATURE to accept 'return_pos'
+    # --- NEW PRECISION STRIKE METHOD ---
+    def execute_precision_strike(self, return_pos, lk_L, lk_R):
+        print(f"\n⚔️ ENTERING PRECISION STRIKE MODE (State 2)")
+        self.laser.stop()
+        time.sleep(0.1) 
+        
+        SAMPLES = 10
+        valid_L, valid_R = [], []
+        crop_s = 90  
+        
+        def get_roi(img, cx, cy, size):
+            h, w = img.shape[:2]
+            x1, y1 = int(np.clip(cx-size, 0, w)), int(np.clip(cy-size, 0, h))
+            x2, y2 = int(np.clip(cx+size, 0, w)), int(np.clip(cy+size, 0, h))
+            return img[y1:y2, x1:x2], x1, y1
 
+        for _ in range(SAMPLES):
+            retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
+            if not (retL and retR): continue
+
+            roi_L, offX_L, offY_L = get_roi(fL, lk_L[0], lk_L[1], crop_s)
+            roi_R, offX_R, offY_R = get_roi(fR, lk_R[0], lk_R[1], crop_s)
+
+            pts_L = self.cv_L.return_full(roi_L)
+            boxes_L = self.cv_L.filtered_boxes
+            pts_R = self.cv_R.return_full(roi_R)
+            boxes_R = self.cv_R.filtered_boxes
+
+            # SPATIAL GATING: Only accept points if the box contains the LK coordinate
+            rel_lk_L = (lk_L[0] - offX_L, lk_L[1] - offY_L)
+            for j, box in enumerate(boxes_L):
+                b = box.xyxy[0].cpu().numpy()
+                if (b[0] <= rel_lk_L[0] <= b[2]) and (b[1] <= rel_lk_L[1] <= b[3]):
+                    valid_L.append(np.array([offX_L + pts_L[j][0], offY_L + pts_L[j][1]]))
+                    break
+
+            rel_lk_R = (lk_R[0] - offX_R, lk_R[1] - offY_R)
+            for j, box in enumerate(boxes_R):
+                b = box.xyxy[0].cpu().numpy()
+                if (b[0] <= rel_lk_R[0] <= b[2]) and (b[1] <= rel_lk_R[1] <= b[3]):
+                    valid_R.append(np.array([offX_R + pts_R[j][0], offY_R + pts_R[j][1]]))
+                    break
+
+        # Fallback to LK if gating fails
+        if len(valid_L) < 2 or len(valid_R) < 2:
+            print(f"⚠️ ISOLATION FAIL. Fallback to LK.")
+            final_L, final_R = lk_L, lk_R
+        else:
+            print(f"✅ ISOLATION SUCCESS.")
+            final_L = np.median(np.stack(valid_L), axis=0)
+            final_R = np.median(np.stack(valid_R), axis=0)
+
+        # PID Fine-Tune
+        pt_L, pt_R = np.array([[final_L[0], final_L[1]]], dtype=np.float32), np.array([[final_R[0], final_R[1]]], dtype=np.float32)
+        start_fine = time.time()
+        _, fL = self.cap_L.read(); _, fR = self.cap_R.read()
+        grayL_old, grayR_old = cv2.cvtColor(fL, cv2.COLOR_BGR2GRAY), cv2.cvtColor(fR, cv2.COLOR_BGR2GRAY)
+
+        while (time.time() - start_fine < 2.0):
+            retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
+            if not (retL and retR): break
+            grayL, grayR = cv2.cvtColor(fL, cv2.COLOR_BGR2GRAY), cv2.cvtColor(fR, cv2.COLOR_BGR2GRAY)
+            pt_L, _, _ = cv2.calcOpticalFlowPyrLK(grayL_old, grayL, pt_L, None, **LK_PARAMS)
+            pt_R, _, _ = cv2.calcOpticalFlowPyrLK(grayR_old, grayR, pt_R, None, **LK_PARAMS)
+            xl, yl = pt_L[0]; xr, yr = pt_R[0]
+            ex, ey = -(xl - W + xr), -(((yl - TARGET_Y_L) + (yr - TARGET_Y_R)) / 2)
+            mag = np.sqrt(ex**2 + ey**2)
+            if mag < 2.0: break
+            self.laser.jog(ex/mag, -ey/mag, feed=500)
+            grayL_old, grayR_old = grayL.copy(), grayR.copy()
+
+        self.laser.stop()
+        curr_pos = self.laser.update_status()
+        self.laser.spiral_burn(curr_pos['x'], curr_pos['y'], radius=4.0, steps=20, speed=1000)
+        self.laser.send_raw(f"G1 X{return_pos['x']} Y{return_pos['y']} F{RECOVERY_SPEED}")
+        self.wait_for_idle(timeout=2.0)
+        
     def start(self):
         print("🔓 Clearing GRBL Alarm Lock...")
         self.laser.send_raw("$X")  # Add this line
@@ -200,23 +279,50 @@ class B1ProductionMission:
 
         print("📷 Settling vision buffer (3s)...")
         settle_end = time.time() + 3.0
+
+        self.load_camera_tunings() 
+        self.apply_nuclear_hardware_lock()
+
         while time.time() < settle_end:
             self.cap_L.grab(); self.cap_R.grab(); time.sleep(0.01)
 
         self.save_survey_images()
-        print("\n--- 🔍 SURVEY MODE ---")
+
+        print("\n--- 🔍 STABLE BURST SURVEY MODE ---")
         while True:
-            retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
-            if not (retL and retR): continue
-            self.clicks_L = self.cv_L.return_full(fL)
-            self.clicks_R = self.cv_R.return_full(fR)
-            print(f"\r📊 Found: L[{len(self.clicks_L)}] R[{len(self.clicks_R)}] | 'p'=fire, 's'=save, 'q'=quit", end="")
-            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+            # 1. Rapid Capture Burst (5 frames)
+            burst_L, burst_R = [], []
+            for _ in range(5):
+                # Flush buffer to ensure no stale frames in the burst
+                self.cap_L.grab(); self.cap_R.grab()
+                retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
+                if retL and retR:
+                    burst_L.append(fL)
+                    burst_R.append(fR)
+
+            if len(burst_L) < 3:
+                continue
+
+            # 2. Process Stability logic (Groups by BBox centers + Medians points)
+            self.clicks_L = self.cv_L.return_burst_stable(burst_L)
+            self.clicks_R = self.cv_R.return_burst_stable(burst_R)
+
+            # 3. Headless Dashboard Output
+            sys.stdout.write(f"\r📊 TARGETS [L:{len(self.clicks_L)} R:{len(self.clicks_R)}] | 'p' FIRE | 's' SAVE | 'q' QUIT")
+            sys.stdout.flush()
+
+            # 4. Command Polling
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.05)
             if rlist:
                 cmd = sys.stdin.readline().strip().lower()
-                if cmd == 'p': break
-                elif cmd == 's': self.save_survey_images()
-                elif cmd == 'q': return
+                if cmd == 'p': 
+                    print("\n🚀 [ACTION] Execute confirmed.")
+                    break
+                elif cmd == 's': 
+                    self.save_survey_images()
+                elif cmd == 'q': 
+                    print("\n🛑 [ACTION] Mission Aborted.")
+                    return
 
         if not self.match_and_optimize(): return
         self.laser.set_acceleration(NORMAL_ACCEL)
@@ -243,27 +349,65 @@ class B1ProductionMission:
                     self.lk_targets = new_lk
 
                 tid = self.path_order[self.current_step]
+                
+                # --- RECOVERY LOGIC: If LK is lost, return to Survey Anchor ---
                 if tid not in self.lk_targets:
-                    self.current_step += 1; continue
+                    print(f"⚠️ Target {tid} lost! Returning to Survey Anchor...")
+                    # 1. Look up where we saw this in the survey
+                    anchor_pos = self.spatial_anchors["START"]["mpos"]
+                    self.laser.send_raw(f"G90\nG1 X{anchor_pos[0]} Y{anchor_pos[1]} F{RECOVERY_SPEED}")
+                    self.wait_for_idle()
+                    
+                    # 2. Re-apply trackers from the initial survey snapshot
+                    snap = self.spatial_anchors["START"]["snapshot"][tid]
+                    self.lk_targets[tid] = {'l': snap['l'], 'r': snap['r'], 'orig_l': snap['orig_l']}
+                    
+                    # 3. Refresh gray frames so the tracker has a baseline
+                    for _ in range(10): self.cap_L.grab(); self.cap_R.grab()
+                    _, fL_n = self.cap_L.read(); _, fR_n = self.cap_R.read()
+                    self.old_gray_L, self.old_gray_R = cv2.cvtColor(fL_n, cv2.COLOR_BGR2GRAY), cv2.cvtColor(fR_n, cv2.COLOR_BGR2GRAY)
+                    continue # Restart the loop now that we are back at the anchor
 
                 t = self.lk_targets[tid]
                 xl, yl = np.median(t['l'].reshape(-1,2), axis=0)
                 xr, yr = np.median(t['r'].reshape(-1,2), axis=0)
                 ex, ey = -(xl - W + xr), -(((yl - TARGET_Y_L) + (yr - TARGET_Y_R)) / 2)
                 mag = np.sqrt(ex**2 + ey**2)
-                
+                # The '0.2' means try to move 20% of the distance each loop
+                step_size = mag * 0.1 
+
+                # We still clip the step so it doesn't try to jump 50mm at once
+                step_size = np.clip(step_size, 1.0, 3.0)
+
                 if mag > DEADZONE: 
-                    self.laser.jog(ex/mag, -ey/mag, np.clip(mag*Kp, 0, MAX_SPEED))
+                    # STAGE 1: Fast Approach
+                    self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED))
                 else:
-                    self.laser.stop(); self.tracking_frozen = True
-                    mpos = self.laser.update_status()
-                    print(f"\n🔥 Target {tid}: Firing Spiral Burn...")
-                    self.laser.spiral_burn(mpos['x'], mpos['y'], radius=5.0, steps=20, speed=1500)
-                    self.save_current_as_anchor(mpos)
-                    for _ in range(15): self.cap_L.grab(); self.cap_R.grab()
+                    # STAGE 2: Precision Strike
+                    self.laser.stop()
+                    
+                    # A. SAVE CLEAN STATE
+                    clean_mpos = self.laser.update_status()
+                    self.save_current_as_anchor(clean_mpos)
+                    
+                    # B. EXECUTE PRECISION STRIKE 
+                    # We pass the current LK coordinates so the helper knows where to crop.
+                    self.execute_precision_strike(
+                        return_pos=clean_mpos, 
+                        lk_L=(xl, yl), 
+                        lk_R=(xr, yr)
+                    )
+                    time.sleep(.5)
+                    # C. RESUME & REFRESH TRACKERS
+                    # Flush buffer to remove frames captured during the burn/smoke
+                    for _ in range(5): self.cap_L.grab(); self.cap_R.grab()
                     _, fL_n = self.cap_L.read(); _, fR_n = self.cap_R.read()
-                    self.old_gray_L, self.old_gray_R = cv2.cvtColor(fL_n, cv2.COLOR_BGR2GRAY), cv2.cvtColor(fR_n, cv2.COLOR_BGR2GRAY)
-                    self.tracking_frozen = False; self.current_step += 1
+                    time.sleep(.5)
+                    self.old_gray_L = cv2.cvtColor(fL_n, cv2.COLOR_BGR2GRAY)
+                    self.old_gray_R = cv2.cvtColor(fR_n, cv2.COLOR_BGR2GRAY)
+                    
+                    self.tracking_frozen = False
+                    self.current_step += 1
 
             self.old_gray_L, self.old_gray_R = grayL.copy(), grayR.copy()
             # cv2.imshow("Production Feed", cv2.hconcat([fL, fR]))

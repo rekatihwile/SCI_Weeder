@@ -65,7 +65,7 @@ class B1LaserController:
             # 2. 0.5s STATIONARY (The "Core Hit")
             setup_cmds = [
                 "G1 F10",           # Movement state entry
-                "M3 S1000",          # High Power (85%)
+                "M3 S10",          # High Power (85%)
                 "G1 G91 X0 Y0",     # Trigger PWM
                 "G4 P0.2",          # Hard Dwell 0.5s
                 "G90"               # Absolute mode for spiral
@@ -78,7 +78,7 @@ class B1LaserController:
             # 3. 1.0s SPIRAL (The "Leaf Destruction")
             # Reduced steps to 20 to prevent serial saturation at high speed
             for i in range(1, steps + 1):
-                angle = 0.8 * i
+                angle = 1.0 * i
                 r = (radius / steps) * i
                 tx = sx + (r * np.cos(angle))
                 ty = sy + (r * np.sin(angle))

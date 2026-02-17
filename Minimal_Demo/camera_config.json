@@ -1,9 +1,9 @@
 {
     "left": {
-        "brightness": 23,
-        "contrast": 21,
-        "exposure": 650,
-        "gain": 178,
+        "brightness": 32,
+        "contrast": 18,
+        "exposure": 1030,
+        "gain": 198,
         "saturation": 117,
         "hue": 0,
         "white_balance": 3577,
@@ -11,9 +11,9 @@
     },
     "right": {
         "brightness": 32,
-        "contrast": 22,
-        "exposure": 758,
-        "gain": 198,
+        "contrast": 18,
+        "exposure": 1030,
+        "gain": 218,
         "saturation": 111,
         "hue": 0,
         "white_balance": 4206,
