@@ -1,0 +1,32 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-17-26_17-58-13 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 2 [0.02s]
+
+Tuning firmware acceleration to 2000... [0.02s]
+
+⚔️ ENTERING PRECISION STRIKE [3.13s]
+
+✅ ISOLATION SUCCESS. [7.98s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [8.31s]
+
+⚔️ ENTERING PRECISION STRIKE [17.37s]
+
+✅ ISOLATION SUCCESS. [22.15s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [22.75s]
+
+🏁 Mission Complete. [25.68s]
+
+💾 Compilation Phase: Processing 328 frames... [25.72s]
+
+❌ ERROR: Could not open VideoWriter. Missing H.264 codec? [25.72s]
+
+🔄 Falling back to mp4v codec... [25.72s]
+
+🎬 Video compiled successfully. [29.48s]
+

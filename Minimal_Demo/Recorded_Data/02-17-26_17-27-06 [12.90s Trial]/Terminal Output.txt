@@ -1,0 +1,20 @@
+📁 Trial folder created: 02-17-26_17-27-06 [0.00s]
+
+🚀 [ACTION] Execute confirmed. [0.00s]
+
+📊 Survey Stats: Left=1, Right=1 [0.00s]
+
+🚀 Mission Loaded. Targets: 1 [0.01s]
+
+Tuning firmware acceleration to 2000... [0.01s]
+
+⚔️ ENTERING PRECISION STRIKE [2.98s]
+
+✅ ISOLATION SUCCESS. [7.60s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [7.95s]
+
+🏁 Mission Complete. [11.39s]
+
+💾 Finalizing Trial Data... (Total Frames: 49) [11.40s]
+
