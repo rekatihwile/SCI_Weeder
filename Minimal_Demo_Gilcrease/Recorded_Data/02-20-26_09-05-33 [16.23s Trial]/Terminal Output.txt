@@ -1,0 +1,26 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-20-26_09-05-33 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 1 [0.01s]
+
+Tuning firmware acceleration to 2000... [0.01s]
+
+⚔️ ENTERING PRECISION STRIKE [3.65s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [8.97s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [9.38s]
+
+Tuning firmware acceleration to 1000.0... [10.15s]
+
+Tuning firmware acceleration to 2000... [12.21s]
+
+🏁 Mission Complete. [13.54s]
+
+💾 Compilation Phase: Processing 174 frames... [13.78s]
+
+🎬 Video compiled successfully. [16.23s]
+

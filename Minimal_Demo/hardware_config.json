@@ -1,15 +1,15 @@
 {
     "serial": {
-        "grbl_port": "/dev/ttyUSB0"
+        "grbl_port": "/dev/ttyUSB1"
     },
     "cameras": {
         "left": {
-            "index": 0,
-            "node": "CAM0"
+            "index": 1,
+            "node": "CAM1"
         },
         "right": {
-            "index": 2,
-            "node": "CAM2"
+            "index": 4,
+            "node": "CAM4"
         }
     }
 }

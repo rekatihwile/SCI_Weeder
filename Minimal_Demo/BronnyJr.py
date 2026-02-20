@@ -317,7 +317,7 @@ class B1ProductionMission:
         
         SAMPLES = 10
         valid_L, valid_R = [], []
-        crop_s = 90  
+        crop_s = 120  
         
         def get_roi(img, cx, cy, size):
             h, w = img.shape[:2]
@@ -351,6 +351,7 @@ class B1ProductionMission:
                 if (b[0] <= rel_lk_R[0] <= b[2]) and (b[1] <= rel_lk_R[1] <= b[3]):
                     valid_R.append(np.array([offX_R + pts_R[j][0], offY_R + pts_R[j][1]]))
                     break
+            time.sleep(0.01)
 
         if len(valid_L) < 2 or len(valid_R) < 2:
             print(f"⚠️ ISOLATION FAIL. Fallback to LK.")
@@ -394,8 +395,10 @@ class B1ProductionMission:
         # ------------------------------
         
         # Capture frames during return travel (G90 ensures Absolute Mode)
+        self.laser.set_acceleration(NORMAL_ACCEL/2)
         self.laser.send_raw(f"G90\nG1 X{return_pos['x']} Y{return_pos['y']} F{RECOVERY_SPEED}")
         self.wait_for_idle(timeout=2.0)
+        self.laser.set_acceleration(NORMAL_ACCEL)
         self.mode = old_mode
 
     def start(self):
@@ -411,17 +414,19 @@ class B1ProductionMission:
             settle_end = time.time() + 3.0
             while time.time() < settle_end:
                 self.cap_L.grab(); self.cap_R.grab(); time.sleep(0.01)
-
+            self.save_survey_images()
             print("\n--- 🔍 STABLE BURST SURVEY MODE ---")
             while True:
                 burst_L, burst_R = [], []
-                for _ in range(5):
+                for _ in range(10):
                     self.cap_L.grab(); self.cap_R.grab()
                     retL, fL = self.cap_L.read(); retR, fR = self.cap_R.read()
                     if retL and retR:
                         burst_L.append(fL); burst_R.append(fR)
                         # Ensure the recording thread has access to the most recent frame!
                         self.update_frame_share(fL, fR)
+
+                    time.sleep(0.1)                        
                 
                 if len(burst_L) < 3: continue
                 self.clicks_L = self.cv_L.return_burst_stable(burst_L)
@@ -470,19 +475,34 @@ class B1ProductionMission:
                     tid = self.path_order[self.current_step]
                     
                     if tid not in self.lk_targets:
+                        print(f"⚠️ Target {tid} lost! Returning to Survey Anchor...")
+                        # 1. Move gantry back to the original survey position
                         anchor_pos = self.spatial_anchors["START"]["mpos"]
                         self.laser.send_raw(f"G90\nG1 X{anchor_pos[0]} Y{anchor_pos[1]} F{RECOVERY_SPEED}")
                         self.wait_for_idle()
+                        
+                        # 2. THE FIX: Flush the camera buffer to get rid of frames from the move
+                        for _ in range(10): self.cap_L.grab(); self.cap_R.grab()
+                        
+                        # 3. Capture a fresh baseline so the tracker has a valid "start" point
+                        retL, fL_n = self.cap_L.read(); retR, fR_n = self.cap_R.read()
+                        if retL and retR:
+                            self.old_gray_L = cv2.cvtColor(fL_n, cv2.COLOR_BGR2GRAY)
+                            self.old_gray_R = cv2.cvtColor(fR_n, cv2.COLOR_BGR2GRAY)
+                        
+                        # 4. Re-apply the initial survey coordinates to the tracker
                         snap = self.spatial_anchors["START"]["snapshot"][tid]
                         self.lk_targets[tid] = {'l': snap['l'], 'r': snap['r'], 'orig_l': snap['orig_l']}
-                        continue 
+                        
+                        print(f"🔄 Baseline refreshed at Anchor. Restarting tracking for {tid}.")
+                        continue # Restart the loop with the gantry physically and digitally reset
 
                     t = self.lk_targets[tid]
                     xl, yl = np.median(t['l'].reshape(-1,2), axis=0)
                     xr, yr = np.median(t['r'].reshape(-1,2), axis=0)
                     ex, ey = -(xl - W + xr), -(((yl - TARGET_Y_L) + (yr - TARGET_Y_R)) / 2)
                     mag = np.sqrt(ex**2 + ey**2)
-                    step_size = np.clip(mag * 0.1, 1.0, 3.0)
+                    step_size = np.clip(mag * 0.05, 1.0, 3.0)
 
                     if mag > DEADZONE: 
                         self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED))
@@ -491,10 +511,13 @@ class B1ProductionMission:
                         clean_mpos = self.laser.update_status()
                         self.save_current_as_anchor(clean_mpos)
                         self.execute_precision_strike(return_pos=clean_mpos, lk_L=(xl, yl), lk_R=(xr, yr))
+                        time.sleep(1.0)
                         self.current_step += 1
 
                 self.old_gray_L, self.old_gray_R = grayL.copy(), grayR.copy()
+            self.laser.send_raw(f"G90\nG1 X{10} Y{10} F{TRAVEL_SPEED}")
             
+
             self.laser.close()
         
         except KeyboardInterrupt:

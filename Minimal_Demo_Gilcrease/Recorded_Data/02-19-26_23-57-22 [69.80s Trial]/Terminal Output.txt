@@ -1,0 +1,60 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-19-26_23-57-22 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 4 [0.02s]
+
+Tuning firmware acceleration to 2000... [0.02s]
+
+⚔️ ENTERING PRECISION STRIKE [2.48s]
+
+✅ ISOLATION SUCCESS. [8.17s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [8.82s]
+
+Tuning firmware acceleration to 1000.0... [9.59s]
+
+Tuning firmware acceleration to 2000... [11.65s]
+
+⚔️ ENTERING PRECISION STRIKE [17.48s]
+
+✅ ISOLATION SUCCESS. [22.91s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [23.61s]
+
+Tuning firmware acceleration to 1000.0... [24.38s]
+
+Tuning firmware acceleration to 2000... [26.44s]
+
+⚔️ ENTERING PRECISION STRIKE [32.28s]
+
+✅ ISOLATION SUCCESS. [37.74s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [38.51s]
+
+Tuning firmware acceleration to 1000.0... [39.27s]
+
+Tuning firmware acceleration to 2000... [41.34s]
+
+⚠️ Target 0 lost! Returning to Survey Anchor... [42.40s]
+
+🔄 Baseline refreshed at Anchor. Restarting tracking for 0. [45.76s]
+
+⚔️ ENTERING PRECISION STRIKE [51.33s]
+
+✅ ISOLATION SUCCESS. [56.11s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [56.46s]
+
+Tuning firmware acceleration to 1000.0... [57.24s]
+
+Tuning firmware acceleration to 2000... [59.32s]
+
+🏁 Mission Complete. [60.35s]
+
+💾 Compilation Phase: Processing 785 frames... [60.40s]
+
+🎬 Video compiled successfully. [69.80s]
+

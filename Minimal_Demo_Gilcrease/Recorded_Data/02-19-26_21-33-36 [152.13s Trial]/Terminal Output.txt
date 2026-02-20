@@ -1,0 +1,116 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-19-26_21-33-36 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 10 [0.03s]
+
+Tuning firmware acceleration to 2000... [0.04s]
+
+⚔️ ENTERING PRECISION STRIKE [0.08s]
+
+✅ ISOLATION SUCCESS. [8.13s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [8.45s]
+
+Tuning firmware acceleration to 1000.0... [9.22s]
+
+Tuning firmware acceleration to 2000... [11.26s]
+
+⚔️ ENTERING PRECISION STRIKE [14.42s]
+
+✅ ISOLATION SUCCESS. [21.67s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [22.08s]
+
+Tuning firmware acceleration to 1000.0... [22.84s]
+
+Tuning firmware acceleration to 2000... [24.86s]
+
+⚔️ ENTERING PRECISION STRIKE [28.01s]
+
+✅ ISOLATION SUCCESS. [34.80s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [35.27s]
+
+Tuning firmware acceleration to 1000.0... [36.03s]
+
+Tuning firmware acceleration to 2000... [38.04s]
+
+⚔️ ENTERING PRECISION STRIKE [41.51s]
+
+✅ ISOLATION SUCCESS. [48.56s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [48.96s]
+
+Tuning firmware acceleration to 1000.0... [49.73s]
+
+Tuning firmware acceleration to 2000... [51.74s]
+
+⚔️ ENTERING PRECISION STRIKE [54.64s]
+
+✅ ISOLATION SUCCESS. [61.81s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [62.15s]
+
+Tuning firmware acceleration to 1000.0... [62.92s]
+
+Tuning firmware acceleration to 2000... [64.97s]
+
+⚔️ ENTERING PRECISION STRIKE [68.73s]
+
+✅ ISOLATION SUCCESS. [74.75s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [74.85s]
+
+Tuning firmware acceleration to 1000.0... [75.61s]
+
+Tuning firmware acceleration to 2000... [77.62s]
+
+⚔️ ENTERING PRECISION STRIKE [82.61s]
+
+✅ ISOLATION SUCCESS. [89.75s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [90.10s]
+
+Tuning firmware acceleration to 1000.0... [90.87s]
+
+Tuning firmware acceleration to 2000... [92.88s]
+
+⚔️ ENTERING PRECISION STRIKE [95.75s]
+
+✅ ISOLATION SUCCESS. [102.04s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [102.70s]
+
+Tuning firmware acceleration to 1000.0... [103.47s]
+
+Tuning firmware acceleration to 2000... [105.47s]
+
+⚔️ ENTERING PRECISION STRIKE [108.97s]
+
+✅ ISOLATION SUCCESS. [115.48s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [115.75s]
+
+Tuning firmware acceleration to 1000.0... [116.52s]
+
+Tuning firmware acceleration to 2000... [118.57s]
+
+⚔️ ENTERING PRECISION STRIKE [120.93s]
+
+✅ ISOLATION SUCCESS. [127.42s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [128.02s]
+
+Tuning firmware acceleration to 1000.0... [128.79s]
+
+Tuning firmware acceleration to 2000... [130.80s]
+
+🏁 Mission Complete. [131.81s]
+
+💾 Compilation Phase: Processing 1659 frames... [131.84s]
+
+🎬 Video compiled successfully. [152.13s]
+

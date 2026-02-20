@@ -1,0 +1,30 @@
+📁 Trial folder created: 02-17-26_17-40-15 [0.00s]
+
+📹 Video buffering started (frames will be compiled at the end). [0.00s]
+
+🚀 [ACTION] Execute confirmed. [0.00s]
+
+📊 Survey Stats: Left=2, Right=2 [0.00s]
+
+🚀 Mission Loaded. Targets: 2 [0.01s]
+
+Tuning firmware acceleration to 2000... [0.01s]
+
+⚔️ ENTERING PRECISION STRIKE [2.97s]
+
+✅ ISOLATION SUCCESS. [7.69s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [8.05s]
+
+⚔️ ENTERING PRECISION STRIKE [17.62s]
+
+✅ ISOLATION SUCCESS. [22.38s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [22.49s]
+
+🏁 Mission Complete. [25.83s]
+
+💾 Compilation Phase: Processing 128 buffered frames... [25.84s]
+
+🎬 Video file closed and verified. [27.80s]
+

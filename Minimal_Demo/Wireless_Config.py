@@ -19,6 +19,7 @@ output_frame = None
 frame_ready = False # Flag to signal a new AI-processed frame is ready
 lock = threading.Lock()
 
+# Base defaults (used only if the config file doesn't exist yet or is missing keys)
 config = {
     "left":  {"brightness": 15, "contrast": 30, "exposure": 350, "gain": 0, "saturation": 64, "white_balance": 4500, "sharpness": 100},
     "right": {"brightness": 15, "contrast": 30, "exposure": 350, "gain": 0, "saturation": 64, "white_balance": 4500, "sharpness": 100}
@@ -35,6 +36,16 @@ SNIPER_PT = str(WEIGHTS_DIR / "sniper.pt")
 IS_WINDOWS = sys.platform.startswith('win')
 HAS_DISPLAY = os.environ.get('DISPLAY') is not None or IS_WINDOWS
 BACKEND = cv2.CAP_MSMF if IS_WINDOWS else cv2.CAP_V4L2
+
+# --- LOAD SAVED CONFIG EARLY ---
+# This ensures the dictionary is populated with your saved JSON values 
+# BEFORE the Flask web dashboard ever starts.
+if CAM_CFG_PATH.exists():
+    try:
+        with open(CAM_CFG_PATH, 'r') as f:
+            config.update(json.load(f))
+    except Exception as e:
+        print(f"Could not load {CAM_CFG_PATH}: {e}")
 
 # --- HTML TEMPLATE ---
 HTML_TEMPLATE = """
@@ -57,33 +68,32 @@ HTML_TEMPLATE = """
             document.getElementById(side + '_' + param + '_val').innerText = val;
             fetch(`/set_param?side=${side}&param=${param}&val=${val}`);
         }
-        function saveConfig() { fetch('/save').then(r => r.ok ? alert("Saved!") : alert("Failed")); }
+        function saveConfig() { fetch('/save').then(r => r.ok ? alert("Exposure Saved!") : alert("Failed")); }
     </script>
 </head>
 <body>
-    <h3>🌿 SCI_Weeder Remote Dashboard</h3>
+    <h3>🌿 SCI_Weeder Exposure Control</h3>
     <div class="stream-box"><img src="/video" class="stream-img"></div>
     <div class="controls-grid">
         {% for side in ['left', 'right'] %}
         <div class="column">
             <strong>{{ side.upper() }} CAMERA</strong>
-            {% set sliders = [('brightness', 'B', 0, 32), ('contrast', 'C', 10, 50), ('exposure', 'E', 0, 1000), ('gain', 'G', 0, 255), ('white_balance', 'WB', 2800, 6500)] %}
-            {% for key, label, min, max in sliders %}
             <div class="slider-group">
-                <label>{{ label }}: <span id="{{ side }}_{{ key }}_val">{{ config[side][key] }}</span></label>
-                <input type="range" min="{{ min }}" max="{{ max }}" value="{{ config[side][key] }}" oninput="updateParam('{{ side }}', '{{ key }}', this.value)">
+                <label>Exposure: <span id="{{ side }}_exposure_val">{{ config[side]['exposure'] }}</span></label>
+                <input type="range" min="0" max="1000" value="{{ config[side]['exposure'] }}" 
+                       oninput="updateParam('{{ side }}', 'exposure', this.value)">
             </div>
-            {% endfor %}
         </div>
         {% endfor %}
     </div>
-    <button class="btn-save" onclick="saveConfig()">SAVE TO JSON</button>
+    <button class="btn-save" onclick="saveConfig()">SAVE EXPOSURE TO JSON</button>
 </body>
 </html>
 """
 
 @app.route('/')
-def index(): return render_template_string(HTML_TEMPLATE, config=config)
+def index(): 
+    return render_template_string(HTML_TEMPLATE, config=config)
 
 @app.route('/set_param')
 def set_param():
@@ -93,8 +103,26 @@ def set_param():
 
 @app.route('/save')
 def save():
-    with open(CAM_CFG_PATH, 'w') as f: json.dump(config, f, indent=4)
-    return "OK"
+    try:
+        # 1. Load existing file to preserve all other settings (brightness, contrast, etc.)
+        if CAM_CFG_PATH.exists():
+            with open(CAM_CFG_PATH, 'r') as f:
+                current_file_data = json.load(f)
+        else:
+            current_file_data = config # Fallback to default if file doesn't exist
+
+        # 2. Update ONLY the exposure from our active runtime config
+        for side in ['left', 'right']:
+            if side in current_file_data and side in config:
+                current_file_data[side]['exposure'] = config[side]['exposure']
+
+        # 3. Write the merged data back
+        with open(CAM_CFG_PATH, 'w') as f:
+            json.dump(current_file_data, f, indent=4)
+        return "OK"
+    except Exception as e:
+        print(f"Save Error: {e}")
+        return "Error", 500
 
 @app.route('/video')
 def video():
@@ -118,8 +146,8 @@ def video():
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-    
 def update_camera(cap, props):
+    # Apply all parameters currently held in memory
     cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1) 
     cap.set(cv2.CAP_PROP_BRIGHTNESS, props['brightness'])
     cap.set(cv2.CAP_PROP_CONTRAST, props['contrast'])
@@ -127,8 +155,6 @@ def update_camera(cap, props):
     cap.set(cv2.CAP_PROP_GAIN, props['gain'])
     cap.set(cv2.CAP_PROP_AUTO_WB, 0)
     cap.set(cv2.CAP_PROP_WB_TEMPERATURE, props['white_balance'])
-
-
 
 
 def main():
@@ -148,9 +174,6 @@ def main():
     for cap in [cap_l, cap_r]:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-    if CAM_CFG_PATH.exists():
-        with open(CAM_CFG_PATH, 'r') as f: config.update(json.load(f))
 
     last_applied = {"left": None, "right": None}
 
@@ -177,8 +200,6 @@ def main():
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
     cap_l.release(); cap_r.release(); cv2.destroyAllWindows()
-
-
 
 
 if __name__ == "__main__":

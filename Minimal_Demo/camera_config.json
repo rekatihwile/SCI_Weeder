@@ -2,21 +2,21 @@
     "left": {
         "brightness": 32,
         "contrast": 18,
-        "exposure": 1000,
+        "exposure": 406,
         "gain": 190,
-        "saturation": 117,
+        "saturation": 60,
         "hue": 0,
         "white_balance": 3636,
         "sharpness": 68
     },
     "right": {
-        "brightness": 26,
-        "contrast": 40,
-        "exposure": 510,
-        "gain": 218,
-        "saturation": 111,
+        "brightness": 32,
+        "contrast": 18,
+        "exposure": 420,
+        "gain": 190,
+        "saturation": 60,
         "hue": 0,
-        "white_balance": 4206,
-        "sharpness": 134
+        "white_balance": 3636,
+        "sharpness": 68
     }
 }

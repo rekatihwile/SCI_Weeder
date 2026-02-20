@@ -1,3 +1,5 @@
+import sys
+
 import cv2
 import numpy as np
 import torch
@@ -84,6 +86,7 @@ class WeedCV:
         cv2.putText(canvas, f"WEEDS: {len(coords)}", (15, 35), 0, 1.0, (255, 255, 255), 3)
         cv2.resizeWindow(self.win_main, 800, int(canvas.shape[0] * (800 / canvas.shape[1])))
         cv2.imshow(self.win_main, canvas)
+
     def return_burst_stable(self, frames):
         """
         frames: List of 5 captured images.
@@ -105,6 +108,8 @@ class WeedCV:
                         'box': box.xyxy[0].cpu().numpy(),
                         'point': frame_coords[i]
                     })
+                # sys.stdout.write(f"\r📊 Processing Burst Frame {frame}... Detected {len(frame_data)} plants in this frame")
+                # sys.stdout.flush()
             all_detections.append(frame_data)
 
         # 2. Group detections across frames by Box Center proximity
@@ -130,8 +135,8 @@ class WeedCV:
         # 3. Filter and Average
         stable_coords = []
         for group in plant_groups:
-            # Only keep plants seen in at least 3 out of 5 frames
-            if len(group) >= 3:
+            # Only keep plants seen 
+            if len(group) >= 1:
                 pts = np.array([g['point'] for g in group])
                 
                 # Take Median of X and Y separately (Discarding Min/Max outliers)

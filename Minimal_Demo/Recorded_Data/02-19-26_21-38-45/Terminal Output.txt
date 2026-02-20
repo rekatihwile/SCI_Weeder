@@ -1,0 +1,118 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-19-26_21-38-45 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 10 [0.03s]
+
+Tuning firmware acceleration to 2000... [0.03s]
+
+⚔️ ENTERING PRECISION STRIKE [1.10s]
+
+✅ ISOLATION SUCCESS. [9.58s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [10.15s]
+
+Tuning firmware acceleration to 1000.0... [10.92s]
+
+Tuning firmware acceleration to 2000... [12.93s]
+
+⚔️ ENTERING PRECISION STRIKE [16.16s]
+
+✅ ISOLATION SUCCESS. [23.54s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [23.87s]
+
+Tuning firmware acceleration to 1000.0... [24.64s]
+
+Tuning firmware acceleration to 2000... [26.65s]
+
+⚔️ ENTERING PRECISION STRIKE [29.35s]
+
+✅ ISOLATION SUCCESS. [36.19s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [36.74s]
+
+Tuning firmware acceleration to 1000.0... [37.50s]
+
+Tuning firmware acceleration to 2000... [39.55s]
+
+⚔️ ENTERING PRECISION STRIKE [42.94s]
+
+✅ ISOLATION SUCCESS. [49.80s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [50.16s]
+
+Tuning firmware acceleration to 1000.0... [50.92s]
+
+Tuning firmware acceleration to 2000... [52.95s]
+
+⚔️ ENTERING PRECISION STRIKE [55.80s]
+
+✅ ISOLATION SUCCESS. [63.06s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [63.41s]
+
+Tuning firmware acceleration to 1000.0... [64.18s]
+
+Tuning firmware acceleration to 2000... [66.23s]
+
+⚔️ ENTERING PRECISION STRIKE [69.99s]
+
+✅ ISOLATION SUCCESS. [78.63s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [78.97s]
+
+Tuning firmware acceleration to 1000.0... [79.74s]
+
+Tuning firmware acceleration to 2000... [81.78s]
+
+⚔️ ENTERING PRECISION STRIKE [84.78s]
+
+✅ ISOLATION SUCCESS. [91.75s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [92.10s]
+
+Tuning firmware acceleration to 1000.0... [92.86s]
+
+Tuning firmware acceleration to 2000... [94.86s]
+
+⚔️ ENTERING PRECISION STRIKE [98.28s]
+
+✅ ISOLATION SUCCESS. [104.91s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [105.00s]
+
+Tuning firmware acceleration to 1000.0... [105.76s]
+
+Tuning firmware acceleration to 2000... [107.82s]
+
+⚔️ ENTERING PRECISION STRIKE [110.56s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [116.85s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [117.12s]
+
+Tuning firmware acceleration to 1000.0... [117.88s]
+
+Tuning firmware acceleration to 2000... [119.94s]
+
+⚠️ Target 9 lost! Returning to Survey Anchor... [121.00s]
+
+🔄 Baseline refreshed at Anchor. Restarting tracking for 9. [123.27s]
+
+⚔️ ENTERING PRECISION STRIKE [127.96s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [133.15s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [133.51s]
+
+Tuning firmware acceleration to 1000.0... [134.27s]
+
+Tuning firmware acceleration to 2000... [136.32s]
+
+🏁 Mission Complete. [137.34s]
+
+💾 Compilation Phase: Processing 1713 frames... [137.36s]
+
