@@ -1,0 +1,10 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-20-26_14-07-09 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+💾 Compilation Phase: Processing 1 frames... [0.07s]
+
+🎬 Video compiled successfully. [0.10s]
+

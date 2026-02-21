@@ -2,7 +2,7 @@
     "left": {
         "brightness": 32,
         "contrast": 18,
-        "exposure": 406,
+        "exposure": 250,
         "gain": 190,
         "saturation": 60,
         "hue": 0,
@@ -12,7 +12,7 @@
     "right": {
         "brightness": 32,
         "contrast": 18,
-        "exposure": 420,
+        "exposure": 220,
         "gain": 190,
         "saturation": 60,
         "hue": 0,

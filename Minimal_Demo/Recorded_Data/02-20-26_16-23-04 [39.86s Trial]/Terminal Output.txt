@@ -1,0 +1,46 @@
+🧵 Recording Thread Started at 15.0 FPS [0.00s]
+📁 Trial folder created: 02-20-26_16-23-04 [0.00s]
+
+
+📹 Steady-rate background recording active. [0.00s]
+
+🚀 Mission Loaded. Targets: 3 [0.01s]
+
+Tuning firmware acceleration to 2000... [0.01s]
+
+⚔️ ENTERING PRECISION STRIKE [1.89s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [6.53s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [7.58s]
+
+Tuning firmware acceleration to 1000.0... [8.35s]
+
+Tuning firmware acceleration to 2000... [10.38s]
+
+⚔️ ENTERING PRECISION STRIKE [14.18s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [18.95s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [19.38s]
+
+Tuning firmware acceleration to 1000.0... [20.15s]
+
+Tuning firmware acceleration to 2000... [22.18s]
+
+⚔️ ENTERING PRECISION STRIKE [25.55s]
+
+⚠️ ISOLATION FAIL. Fallback to LK. [30.70s]
+
+🔥 Rapid Spiral Burn: 0.5s Static + 1.0s Motion [31.04s]
+
+Tuning firmware acceleration to 1000.0... [31.80s]
+
+Tuning firmware acceleration to 2000... [33.84s]
+
+🏁 Mission Complete. [34.86s]
+
+💾 Compilation Phase: Processing 433 frames... [34.90s]
+
+🎬 Video compiled successfully. [39.86s]
+

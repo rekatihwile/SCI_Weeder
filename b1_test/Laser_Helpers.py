@@ -4,65 +4,61 @@ import time, serial
 PORT = "/dev/ttyUSB0"
 BAUD = 115200
 TRAVEL_F = 8000
-MAX_POWER = 1000  # corresponds to $30=1000
-
+MAX_POWER = 1000 
 
 def send(ser, line):
-    """Send a G-code line and wait for GRBL to acknowledge 'ok' or 'error'."""
+    """Send a line and return the full response (ok, error, or ALARM)."""
     ser.write((line + "\r\n").encode())
     ser.flush()
+    full_response = []
     while True:
-        resp = ser.readline()
+        resp = ser.readline().decode(errors="ignore").strip()
         if not resp:
-            time.sleep(0.001)
             continue
-        if b"ok" in resp or b"error" in resp:
+        full_response.append(resp)
+        # B1 often sends ALARM or error messages before or instead of 'ok'
+        if "ok" in resp or "error" in resp or "ALARM" in resp:
             break
+    return " | ".join(full_response)
 
 def wait_for_idle(ser, poll_interval=0.1):
-    """Poll GRBL until it reports Idle (movement finished)."""
+    """Poll GRBL and return the status line if an Alarm occurs."""
     while True:
         ser.write(b"?\n")
         line = ser.readline().decode(errors="ignore").strip()
         if "Idle" in line:
             break
+        if "Alarm" in line or "ALARM" in line:
+            return line # Return the alarm status immediately
         time.sleep(poll_interval)
+    return "Idle"
 
-# === CONNECTION SETUP ===
 def connect():
-    """Open a serial connection and configure GRBL settings."""
-    ser = serial.Serial(PORT, baudrate=BAUD, timeout=0.2, write_timeout=0.2)
-    time.sleep(1)
+    ser = serial.Serial(PORT, baudrate=BAUD, timeout=0.5, write_timeout=0.5)
+    time.sleep(2) # Increased for B1 controller boot-up
     ser.reset_input_buffer()
-    send(ser, "$X")       # unlock
-    send(ser, "G21")      # mm
-    send(ser, "G90")      # absolute
-    send(ser, "$30=1000") # power scaling
-    send(ser, "S0")
-    send(ser, "M5")       # laser off
+    # Capture initial boot string
+    print(f"Boot Message: {ser.read_all().decode(errors='ignore')}")
+    send(ser, "$X")       
+    send(ser, "G21")      
+    send(ser, "G90")      
     return ser
 
-# === MOVE FUNCTION ===
 def move_to(ser, x, y, feedrate=8000):
-    """Move the laser head and wait until motion completes."""
-    send(ser, f"G0 X{x:.3f} Y{y:.3f} F{feedrate}")
-    wait_for_idle(ser)
-    print(f"Move complete: X{x:.3f}, Y{y:.3f}")
+    """Moves and returns the response to catch mid-move Alarms."""
+    cmd_resp = send(ser, f"G0 X{x:.3f} Y{y:.3f} F{feedrate}")
+    idle_resp = wait_for_idle(ser)
+    return f"{cmd_resp} | {idle_resp}"
 
-
-# === LASER BURN FUNCTION ===
 def burn(ser, power=1000, duration=0.05):
-    """Fire laser for a given duration, then wait until burn completes."""
-    send(ser, "$32=0")  # disable laser mode for dwell
+    send(ser, "$32=0")  
     send(ser, f"M3 S{power}")
     send(ser, f"G4 P{duration:.3f}")
     send(ser, "M5")
-    send(ser, "$32=1")  # restore laser mode
+    send(ser, "$32=1")  
     print(f"Burn complete ({duration:.3f}s)")
 
-# === DISCONNECT ===
 def close(ser):
-    """Safely turn off laser and close serial connection."""
     send(ser, "M5")
     ser.close()
     print("Serial connection closed safely.")

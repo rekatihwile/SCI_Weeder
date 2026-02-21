@@ -1,0 +1,6 @@
+📁 Trial folder created: 02-20-26_14-28-23 [0.00s]
+
+💾 Compilation Phase: Processing 879 frames... [59.03s]
+
+🎬 Video compiled successfully. [71.58s]
+

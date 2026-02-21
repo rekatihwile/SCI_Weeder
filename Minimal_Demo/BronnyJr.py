@@ -41,7 +41,7 @@ SETTLE_TIME = 0.5
 # --- RECOVERY & MOTION ---
 RECOVERY_SPEED = 18000 
 RECOVERY_ACCEL = 7000  
-NORMAL_ACCEL = 2000
+NORMAL_ACCEL = 500
 
 # Robust LK Parameters
 LK_PARAMS = dict(
@@ -317,7 +317,7 @@ class B1ProductionMission:
         
         SAMPLES = 10
         valid_L, valid_R = [], []
-        crop_s = 120  
+        crop_s = 80  
         
         def get_roi(img, cx, cy, size):
             h, w = img.shape[:2]
@@ -408,7 +408,7 @@ class B1ProductionMission:
             print("🤖 Homing Gantry..."); self.laser.home()
             if not self.wait_for_idle(timeout=100): return
             print(f"📍 Moving to Survey Position {START_POS}...")
-            self.laser.send_raw(f"G90\nG1 X{START_POS[0]} Y{START_POS[1]} F{TRAVEL_SPEED}")
+            self.laser.send_raw(f"G90\nX{START_POS[0]} Y{START_POS[1]} F{TRAVEL_SPEED}")
             if not self.wait_for_idle(): return
 
             settle_end = time.time() + 3.0
@@ -505,7 +505,7 @@ class B1ProductionMission:
                     step_size = np.clip(mag * 0.05, 1.0, 3.0)
 
                     if mag > DEADZONE: 
-                        self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED))
+                        self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED/3))
                     else:
                         self.laser.stop()
                         clean_mpos = self.laser.update_status()

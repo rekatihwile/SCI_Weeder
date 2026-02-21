@@ -1,0 +1,6 @@
+📁 Trial folder created: 02-20-26_14-10-36 [0.00s]
+
+💾 Compilation Phase: Processing 1 frames... [0.07s]
+
+⚠️ Not enough frames for video compilation. [0.07s]
+

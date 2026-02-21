@@ -1,0 +1,8 @@
+📁 Trial folder created: 02-20-26_14-26-41 [0.00s]
+
+💥 FATAL CRASH: 'B1ProductionMission' object has no attribute 'save_current_as_anchor' [18.48s]
+
+💾 Compilation Phase: Processing 276 frames... [18.52s]
+
+🎬 Video compiled successfully. [23.39s]
+

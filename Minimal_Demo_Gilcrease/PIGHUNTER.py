@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 WEIGHTS_DIR = BASE_DIR / "weights"
 YOLO_PT = str(WEIGHTS_DIR / "pigweed-yolo.pt")
 SNIPER_PT = str(WEIGHTS_DIR / "sniper.pt")   
-CAMERA_SETTINGS = BASE_DIR / "camera_config.json"
+CAMERA_SETTINGS = Path("/home/laser/Documents/Laser_Workspace/SCI_Weeder/Minimal_Demo_Gilcrease/camera_config.json")
 HARDWARE_CONFIG = BASE_DIR / "hardware_config.json"
 RECORDED_DATA_DIR = BASE_DIR / "Recorded_Data"
 
@@ -41,7 +41,7 @@ SETTLE_TIME = 0.5
 # --- RECOVERY & MOTION ---
 RECOVERY_SPEED = 18000 
 RECOVERY_ACCEL = 7000  
-NORMAL_ACCEL = 2000
+NORMAL_ACCEL = 500
 
 # Robust LK Parameters
 LK_PARAMS = dict(
@@ -317,7 +317,7 @@ class B1ProductionMission:
         
         SAMPLES = 10
         valid_L, valid_R = [], []
-        crop_s = 120  
+        crop_s = 80  
         
         def get_roi(img, cx, cy, size):
             h, w = img.shape[:2]
@@ -389,7 +389,7 @@ class B1ProductionMission:
         self.laser.send_raw("M4") # 1. Arm Dynamic Laser Mode
         
         # Spiral burn logic
-        self.laser.spiral_burn(curr_pos['x'], curr_pos['y'], radius=7.0, steps=20, speed=700)
+        self.laser.spiral_burn(curr_pos['x'], curr_pos['y'], radius=4.0, steps=20, speed=1000)
         
         self.laser.send_raw("M5") # 2. Disarm Laser for safe travel
         # ------------------------------
@@ -408,7 +408,7 @@ class B1ProductionMission:
             print("🤖 Homing Gantry..."); self.laser.home()
             if not self.wait_for_idle(timeout=100): return
             print(f"📍 Moving to Survey Position {START_POS}...")
-            self.laser.send_raw(f"G90\nG1 X{START_POS[0]} Y{START_POS[1]} F{TRAVEL_SPEED}")
+            self.laser.send_raw(f"G90\nX{START_POS[0]} Y{START_POS[1]} F{TRAVEL_SPEED}")
             if not self.wait_for_idle(): return
 
             settle_end = time.time() + 3.0
@@ -478,7 +478,7 @@ class B1ProductionMission:
                         print(f"⚠️ Target {tid} lost! Returning to Survey Anchor...")
                         # 1. Move gantry back to the original survey position
                         anchor_pos = self.spatial_anchors["START"]["mpos"]
-                        self.laser.send_raw(f"G90\nG1 X{anchor_pos[0]} Y{anchor_pos[1]} F{RECOVERY_SPEED/2}")
+                        self.laser.send_raw(f"G90\nG1 X{anchor_pos[0]} Y{anchor_pos[1]} F{RECOVERY_SPEED}")
                         self.wait_for_idle()
                         
                         # 2. THE FIX: Flush the camera buffer to get rid of frames from the move
@@ -502,10 +502,10 @@ class B1ProductionMission:
                     xr, yr = np.median(t['r'].reshape(-1,2), axis=0)
                     ex, ey = -(xl - W + xr), -(((yl - TARGET_Y_L) + (yr - TARGET_Y_R)) / 2)
                     mag = np.sqrt(ex**2 + ey**2)
-                    step_size = np.clip(mag * 0.05, 1.0, 5.0)
+                    step_size = np.clip(mag * 0.05, 1.0, 3.0)
 
                     if mag > DEADZONE: 
-                        self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED))
+                        self.laser.jog(ex/mag*step_size, -ey/mag*step_size, np.clip(mag*Kp, 0, MAX_SPEED/3))
                     else:
                         self.laser.stop()
                         clean_mpos = self.laser.update_status()
@@ -513,7 +513,7 @@ class B1ProductionMission:
                         self.execute_precision_strike(return_pos=clean_mpos, lk_L=(xl, yl), lk_R=(xr, yr))
                         time.sleep(1.0)
                         self.current_step += 1
-                time.sleep(0.01)
+
                 self.old_gray_L, self.old_gray_R = grayL.copy(), grayR.copy()
             self.laser.send_raw(f"G90\nG1 X{10} Y{10} F{TRAVEL_SPEED}")
             

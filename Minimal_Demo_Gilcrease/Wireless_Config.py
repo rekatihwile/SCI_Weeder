@@ -161,8 +161,8 @@ def main():
     global output_frame, config, frame_ready
     if not HW_CFG_PATH.exists(): return
 
-    if not HAS_DISPLAY:
-        threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5000, threaded=True), daemon=True).start()
+    # if not HAS_DISPLAY:
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5000, threaded=True), daemon=True).start()
 
     ai_L = WeedCV(YOLO_PT, SNIPER_PT) if not STREAM_ONLY else None
     ai_R = WeedCV(YOLO_PT, SNIPER_PT) if not STREAM_ONLY else None
