@@ -1,0 +1,22 @@
+{
+    "left": {
+        "brightness": 32,
+        "contrast": 15,
+        "exposure": 600,
+        "gain": 190,
+        "saturation": 70,
+        "hue": 0,
+        "white_balance": 3636,
+        "sharpness": 68
+    },
+    "right": {
+        "brightness": 32,
+        "contrast": 15,
+        "exposure": 600,
+        "gain": 190,
+        "saturation": 70,
+        "hue": 0,
+        "white_balance": 3636,
+        "sharpness": 68
+    }
+}
