@@ -29,7 +29,7 @@ BASE_DIR = Path(__file__).resolve().parent
 HW_CFG_PATH = BASE_DIR / "hardware_config.json"
 CAM_CFG_PATH = BASE_DIR / "camera_config.json"
 WEIGHTS_DIR = BASE_DIR / "weights"
-YOLO_PT = str(WEIGHTS_DIR / "yolo_weed.pt")
+YOLO_PT = str(WEIGHTS_DIR / "yolo_w_kale.pt")
 SNIPER_PT = str(WEIGHTS_DIR / "sniper.pt")   
 
 IS_WINDOWS = sys.platform.startswith('win')
