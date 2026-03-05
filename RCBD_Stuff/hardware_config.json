@@ -1,0 +1,15 @@
+{
+    "serial": {
+        "grbl_port": "COM6"
+    },
+    "cameras": {
+        "left": {
+            "index": 1,
+            "node": "CAM1"
+        },
+        "right": {
+            "index": 2,
+            "node": "CAM2"
+        }
+    }
+}

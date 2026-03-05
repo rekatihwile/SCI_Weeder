@@ -31,8 +31,8 @@ ZOOM_CROP_SIZE = 50     # 100x100 pixel area from original frame
 ZOOM_DISPLAY_SIZE = 600 # Big visual window size on screen
 
 # PD Gains
-Kp_x, Kd_x = 20.0, 1.0 
-Kp_y, Kd_y = 20.0, 1.0
+Kp_x, Kd_x = 10.0, 1.0 
+Kp_y, Kd_y = 10.0, 1.0
 STEP_MM = 0.001
 DEADZONE = 4 
 MAX_JOG = 10.0 
@@ -216,7 +216,7 @@ class RCBD_Ablator:
             self.old_gray_L, self.old_gray_R = grayL.copy(), grayR.copy()
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'): break
-            elif key == 13 and self.skkktate == "WAITING_ENTER": 
+            elif key == 13 and self.state == "WAITING_ENTER": 
                 self.state, self.prev_ex, self.prev_ey = "HOMING", 0, 0
             elif key == ord('r'): 
                 print("🔄 Resetting Selection & Stopping Laser.")

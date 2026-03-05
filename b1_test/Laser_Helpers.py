@@ -1,7 +1,7 @@
 import time, serial
 
 # === CONFIG ===
-PORT = "/dev/ttyUSB0"
+PORT = "COM6"
 BAUD = 115200
 TRAVEL_F = 8000
 MAX_POWER = 1000  # corresponds to $30=1000
