@@ -23,24 +23,6 @@ class _WeedCVCore:
         self.iom_thresh = iom_thresh
         self.filtered_boxes = []
 
-    def refine_live(self, cameras):
-        left_points, right_points = self.detect_live(cameras)
-
-        if not left_points or not right_points:
-            return None, None
-
-        target_xy = (320.0, 240.0)
-
-        def dist2(p):
-            dx = p[0] - target_xy[0]
-            dy = p[1] - target_xy[1]
-            return dx * dx + dy * dy
-
-        left_pt = min(left_points, key=dist2)
-        right_pt = min(right_points, key=dist2)
-
-        return left_pt, right_pt
-
     def _iom(self, b1, b2):
         x1 = max(b1[0], b2[0])
         y1 = max(b1[1], b2[1])
@@ -183,6 +165,27 @@ class AIDetector:
 
         self.cv_left = _WeedCVCore(self.yolo_path, self.qpoint_path, conf=conf, iom_thresh=iom_thresh)
         self.cv_right = _WeedCVCore(self.yolo_path, self.qpoint_path, conf=conf, iom_thresh=iom_thresh)
+
+
+    
+    def refine_live(self, cameras):
+        left_points, right_points = self.detect_live(cameras)
+
+        if not left_points or not right_points:
+            return None, None
+
+        target_xy = (320.0, 240.0)
+
+        def dist2(p):
+            dx = p[0] - target_xy[0]
+            dy = p[1] - target_xy[1]
+            return dx * dx + dy * dy
+
+        left_pt = min(left_points, key=dist2)
+        right_pt = min(right_points, key=dist2)
+
+        return left_pt, right_pt
+
 
     def _collect_burst(self, cameras):
         left_frames = []

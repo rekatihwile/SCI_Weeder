@@ -98,7 +98,7 @@ SURVEY_POS_Y = 150.0
 # ---------------------------------------------------
 
 # Which detector to use
-DETECTOR_MODE = "manual"
+DETECTOR_MODE = "ai"
 # options: "manual", "ai"
 
 # Coarse move strategy
