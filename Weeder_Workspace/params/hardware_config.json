@@ -1,0 +1,19 @@
+{
+    "serial": {
+        "grbl_port": "COM6"
+    },
+    "cameras": {
+        "left": {
+            "index": 2,
+            "device": null,
+            "path": null,
+            "node": "LEFT_CAM"
+        },
+        "right": {
+            "index": 1,
+            "device": null,
+            "path": null,
+            "node": "RIGHT_CAM"
+        }
+    }
+}
