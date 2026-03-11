@@ -10,7 +10,7 @@ import serial.tools.list_ports
 
 
 BASE_DIR = Path(__file__).resolve().parent
-OUT_CFG = BASE_DIR / "hardware_config.json"
+OUT_CFG = BASE_DIR / "params" / "hardware_config.json"
 
 
 # Optional Linux hints:

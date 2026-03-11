@@ -15,6 +15,11 @@ WEIGHTS_DIR = BASE_DIR / "weights"
 YOLO_PT = str(WEIGHTS_DIR / "yolo_w_kale.pt")
 SNIPER_PT = str(WEIGHTS_DIR / "sniper.pt")   
 
+# White balance slider settings
+WB_MIN = 1000
+WB_MAX = 12000
+WB_STEP = 50
+
 IS_WINDOWS = sys.platform.startswith('win')
 BACKEND = cv2.CAP_MSMF if IS_WINDOWS else cv2.CAP_V4L2
 
@@ -48,10 +53,10 @@ def main():
     cap_l = cv2.VideoCapture(hw['cameras']['left']['index'], BACKEND)
     cap_r = cv2.VideoCapture(hw['cameras']['right']['index'], BACKEND)
 
-    # LOCK RESOLUTION TO 640x480 FOR STABILITY & SPEED
+    # Lock resolution to 1280x720 for full frame view
     for cap in [cap_l, cap_r]:
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')) 
 
     if CAM_CFG_PATH.exists():
@@ -66,8 +71,8 @@ def main():
     win_l, win_r = "LEFT_TUNER", "RIGHT_TUNER"
     cv2.namedWindow(win_l, cv2.WINDOW_NORMAL)
     cv2.namedWindow(win_r, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(win_l, 640, 480)
-    cv2.resizeWindow(win_r, 640, 480)
+    cv2.resizeWindow(win_l, 1280, 720)
+    cv2.resizeWindow(win_r, 1280, 720)
 
     def setup_sliders(win, side):
         c = config[side]
@@ -76,7 +81,9 @@ def main():
         cv2.createTrackbar("Exposure",   win, abs(c.get("exposure", -6)), 13, lambda x: None)
         cv2.createTrackbar("Gain",       win, c.get("gain", 0), 255, lambda x: None)
         cv2.createTrackbar("Saturation", win, c.get("saturation", 64), 255, lambda x: None)
-        cv2.createTrackbar("WB_Temp",    win, int((c.get("white_balance", 4500)-2800)/37), 100, lambda x: None)
+        wb_val = c.get("white_balance", 4500)
+        wb_pos = int(max(0, min((wb_val - WB_MIN) // WB_STEP, (WB_MAX - WB_MIN) // WB_STEP)))
+        cv2.createTrackbar("WB_Temp",    win, wb_pos, (WB_MAX - WB_MIN) // WB_STEP, lambda x: None)
 
     setup_sliders(win_l, "left")
     setup_sliders(win_r, "right")
@@ -90,7 +97,7 @@ def main():
             config[side]["exposure"]   = -cv2.getTrackbarPos("Exposure", win)
             config[side]["gain"]       = cv2.getTrackbarPos("Gain", win)
             config[side]["saturation"] = cv2.getTrackbarPos("Saturation", win)
-            config[side]["white_balance"] = cv2.getTrackbarPos("WB_Temp", win) * 37 + 2800
+            config[side]["white_balance"] = cv2.getTrackbarPos("WB_Temp", win) * WB_STEP + WB_MIN
 
         for side, cap in [("left", cap_l), ("right", cap_r)]:
             if config[side] != last_applied[side]:

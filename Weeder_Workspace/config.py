@@ -71,7 +71,7 @@ RECT_NPZ_PATH  = BASE_DIR / "params/stereo_fisheye_rectify_maps.npz"
 CALIBRATION_EXPECTS_UNFLIPPED = False
 
 # Coarse triangulation tuning
-TRI_SIGN_X = 1.0
+TRI_SIGN_X = -1.0
 TRI_SIGN_Y = -1.0
 
 LASER_OFFSET_X_MM = 33.0
@@ -89,8 +89,8 @@ AFFINE_Y_COEFFS = [10.508343050916622, -0.09675010667374007, 0.9966484990708326]
 # ---------------------------------------------------
 
 # Starting location for weed survey
-SURVEY_POS_X = 150.0
-SURVEY_POS_Y = 150.0
+SURVEY_POS_X = 200.0
+SURVEY_POS_Y = 200.0
 
 
 # ---------------------------------------------------

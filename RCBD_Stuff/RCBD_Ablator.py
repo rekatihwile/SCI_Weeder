@@ -31,8 +31,8 @@ ZOOM_CROP_SIZE = 50     # 100x100 pixel area from original frame
 ZOOM_DISPLAY_SIZE = 600 # Big visual window size on screen
 
 # PD Gains
-Kp_x, Kd_x = 10.0, 1.0 
-Kp_y, Kd_y = 10.0, 1.0
+Kp_x, Kd_x = 5.0, 1.0 
+Kp_y, Kd_y = 5.0, 1.0
 STEP_MM = 0.001
 DEADZONE = 4 
 MAX_JOG = 10.0 
@@ -129,11 +129,25 @@ class RCBD_Ablator:
         try:
             power = int(p) if p.strip() else 100
             duration = float(d) if d.strip() else 0.5
-            self.laser.serial.write(b"\x85") # Hard stop
-            time.sleep(0.1)
-            self.laser.send_raw(f"M3 S{power}")
-            self.laser.send_raw(f"G4 P{duration}")
-            self.laser.send_raw("M5")
+            self.laser.serial.write(b"\x85")
+            time.sleep(0.05)
+            self.laser.serial.reset_input_buffer()
+
+            cmds = [
+                "G1 F10",
+                f"M3 S{power}",
+                "G1 G91 X0 Y0",
+                f"G4 P{duration}",
+                "M5",
+                "G90",
+            ]
+
+            for c in cmds:
+                self.laser.serial.write(f"{c}\n".encode())
+                for _ in range(10):
+                    if b"ok" in self.laser.serial.readline():
+                        break
+
             print("✅ Strike Complete.")
         except: print("❌ Error in firing.")
         

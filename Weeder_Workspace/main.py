@@ -6,7 +6,15 @@ from control.strike.strike_patterns import fire_target
 from hardware.cameras import StereoCameras
 from hardware.gantry import Gantry
 from planning.target_planner import plan_targets
-from ui.terminal import clear_current_target_line, print_workspace_plan, show_current_target
+from ui.terminal import (
+    clear_current_target_line,
+    print_workspace_plan,
+    show_current_target,
+    print_target_result,
+    print_skip_target,
+    print_global_survey_ready,
+    print_global_survey_results,
+)
 from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
@@ -32,6 +40,7 @@ def main():
     matched_targets = []
     target_queue = []
     absolute_targets = []
+    actual_hits = []
 
     try:
         while state != "DONE":
@@ -40,6 +49,7 @@ def main():
                 cameras = StereoCameras()
                 detector = build_detector()
                 coarse_mover = TriangulationCoarseMover()
+                coarse_mover.clear_actual_targets_log()
                 state = "HOME"
 
             elif state == "HOME":
@@ -49,10 +59,26 @@ def main():
 
             elif state == "SURVEY":
                 gantry.move_absolute(SURVEY_POS_X, SURVEY_POS_Y)
-                state = "DETECT"
+                print_global_survey_ready(SURVEY_POS_X, SURVEY_POS_Y)
+                state = "SURVEY_CONFIRM"
+
+            elif state == "SURVEY_CONFIRM":
+                user = input("Enter = survey | q = quit: ").strip().lower()
+
+                if user == "q":
+                    state = "DONE"
+                else:
+                    state = "DETECT"
 
             elif state == "DETECT":
-                left_points, right_points = detector.detect_live(cameras)
+                left_points, right_points = coarse_mover.detect_stable_points(
+                    cameras,
+                    detector,
+                    detector_mode=DETECTOR_MODE,
+                    burst_count=5,
+                    min_hits=3,
+                    cluster_radius_px=12.0,
+                )
                 state = "MATCH"
 
             elif state == "MATCH":
@@ -61,33 +87,65 @@ def main():
                     right_points,
                     verbose=True,
                 )
-                state = "PLAN"
+                print_global_survey_results(len(left_points), len(right_points), len(matched_targets))
+                user = input("Enter = accept global survey | r = rescan | q = quit: ").strip().lower()
+
+                if user == "r":
+                    state = "DETECT"
+                elif user == "q":
+                    state = "DONE"
+                else:
+                    state = "PLAN"
 
             elif state == "PLAN":
-                target_queue = plan_targets(matched_targets)
-                absolute_targets = []
-                for target in target_queue:
-                    solved = coarse_mover.solve_target_from_survey(
-                        target,
-                        survey_x=SURVEY_POS_X,
-                        survey_y=SURVEY_POS_Y,
-                    )
-                    absolute_targets.append(solved)
-                print_workspace_plan(absolute_targets)
+                absolute_targets = coarse_mover.solve_all_from_pose(
+                    matched_targets,
+                    ref_x=SURVEY_POS_X,
+                    ref_y=SURVEY_POS_Y,
+                )
+
+                target_queue = plan_targets(
+                    absolute_targets,
+                    start_xy=gantry.get_estimated_xy(),
+                )
+
+                coarse_mover.save_workspace_targets(
+                    target_queue,
+                    filename="predicted_workspace_targets.json",
+                )
+                print_workspace_plan(target_queue)
                 state = "EXECUTE"
 
             elif state == "EXECUTE":
-                total = len(absolute_targets)
-                for i, solved in enumerate(absolute_targets, start=1):
+                total = len(target_queue)
+
+                for i, solved in enumerate(target_queue, start=1):
+                    if coarse_mover.is_duplicate_of_actual(
+                        solved["target_xy_mm"],
+                        actual_hits,
+                        tol_mm=8.0,
+                    ):
+                        print_skip_target(i, total, solved, "Already covered by a previous PD lock.")
+                        continue
+
                     show_current_target(i, total, solved)
                     coarse_mover.move_to_absolute_target(gantry, solved)
 
-                    aligned = fine_align_target(gantry, cameras, detector)
+                    aligned, actual_entry = fine_align_target(
+                        gantry,
+                        cameras,
+                        detector,
+                        coarse_mover,
+                        solved,
+                        actual_hits,
+                    )
 
                     if aligned:
+                        actual_hits.append(actual_entry)
+                        print
                         fire_target(gantry, solved)
                     else:
-                        print("Skipped firing: fine align failed.")
+                        print_skip_target(i, total, solved, "Fine align failed")
 
                 clear_current_target_line()
                 print("Finished all planned targets.")
