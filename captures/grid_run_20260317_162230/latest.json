@@ -1,0 +1,11 @@
+{
+  "idx": 1,
+  "row": 0,
+  "col": 0,
+  "x_mm": 66.667,
+  "y_mm": 75.0,
+  "timestamp": "2026-03-17T16:22:46",
+  "left_file": "pt_01_r1_c1_left.jpg",
+  "right_file": "pt_01_r1_c1_right.jpg",
+  "combined_file": "pt_01_r1_c1_combined.jpg"
+}

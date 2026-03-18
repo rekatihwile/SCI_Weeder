@@ -1,4 +1,13 @@
-from config import DETECTOR_MODE, GRBL_PORT, SURVEY_POS_X, SURVEY_POS_Y
+from config import (
+    DETECTOR_MODE,
+    GRBL_PORT,
+    SURVEY_POS_X,
+    SURVEY_POS_Y,
+    TRIANGULATION_ONLY_MODE,
+    SHOW_TRIANGULATION_PLOT,
+    SHOW_MATCH_DEBUG_WINDOW,
+    SAVE_MATCH_DEBUG_IMAGE,
+)
 
 from control.coarse_move import TriangulationCoarseMover
 from control.fine_align import fine_align_target
@@ -15,6 +24,8 @@ from ui.terminal import (
     print_global_survey_ready,
     print_global_survey_results,
 )
+from ui.workspace_plot import show_workspace_triangulation_map
+from ui.triangulation_debug import show_match_debug_view
 from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
@@ -113,6 +124,25 @@ def main():
                     target_queue,
                     filename="predicted_workspace_targets.json",
                 )
+                if SHOW_TRIANGULATION_PLOT:
+                    show_workspace_triangulation_map(
+                        target_queue,
+                        survey_xy=(SURVEY_POS_X, SURVEY_POS_Y),
+                        save_path=coarse_mover.planning_dir / "triangulation_overview.png",
+                        show_window=True,
+                    )
+
+                if coarse_mover.last_survey_frameL is not None and coarse_mover.last_survey_frameR is not None:
+                    show_match_debug_view(
+                        coarse_mover.last_survey_frameL,
+                        coarse_mover.last_survey_frameR,
+                        left_points,
+                        right_points,
+                        matched_targets,
+                        absolute_targets,
+                        save_path=(coarse_mover.planning_dir / "triangulation_debug_view.png") if SAVE_MATCH_DEBUG_IMAGE else None,
+                        show_window=SHOW_MATCH_DEBUG_WINDOW,
+                    )
                 print_workspace_plan(target_queue)
                 state = "EXECUTE"
 
@@ -131,6 +161,31 @@ def main():
                     show_current_target(i, total, solved)
                     coarse_mover.move_to_absolute_target(gantry, solved)
 
+                    if TRIANGULATION_ONLY_MODE:
+                        gantry.sync_estimate_to_machine()
+                        final_xy = gantry.get_estimated_xy()
+                        actual_entry = {
+                            "planned_xy_mm": [float(solved["target_xy_mm"][0]), float(solved["target_xy_mm"][1])],
+                            "selected_local_xy_mm": [float(solved["target_xy_mm"][0]), float(solved["target_xy_mm"][1])],
+                            "final_xy_mm": [float(final_xy[0]), float(final_xy[1])],
+                            "left_px": [float(solved["source_target"]["left_px"][0]), float(solved["source_target"]["left_px"][1])],
+                            "right_px": [float(solved["source_target"]["right_px"][0]), float(solved["source_target"]["right_px"][1])],
+                            "score": float(solved["source_target"].get("score", 1.0)),
+                        }
+                        actual_hits.append(actual_entry)
+                        coarse_mover.append_actual_target(
+                            solved,
+                            solved,
+                            final_xy,
+                            filename="actual_pd_targets.json",
+                        )
+                        print_target_result(i, total, solved, actual_entry)
+                        user = input("Triangulation only: Enter = next | q = quit: ").strip().lower()
+                        if user == "q":
+                            state = "DONE"
+                            break
+                        continue
+
                     aligned, actual_entry = fine_align_target(
                         gantry,
                         cameras,
@@ -142,7 +197,7 @@ def main():
 
                     if aligned:
                         actual_hits.append(actual_entry)
-                        print
+                        print_target_result(i, total, solved, actual_entry)
                         fire_target(gantry, solved)
                     else:
                         print_skip_target(i, total, solved, "Fine align failed")

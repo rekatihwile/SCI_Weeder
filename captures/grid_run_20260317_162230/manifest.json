@@ -1,0 +1,68 @@
+{
+  "run_started": "2026-03-17T16:22:30",
+  "grbl_port": "COM6",
+  "bounds_mm": {
+    "x_min": 0.0,
+    "x_max": 400.0,
+    "y_min": 0.0,
+    "y_max": 300.0
+  },
+  "points": [
+    {
+      "idx": 1,
+      "row": 0,
+      "col": 0,
+      "x_mm": 66.667,
+      "y_mm": 75.0
+    },
+    {
+      "idx": 2,
+      "row": 0,
+      "col": 1,
+      "x_mm": 200.0,
+      "y_mm": 75.0
+    },
+    {
+      "idx": 3,
+      "row": 0,
+      "col": 2,
+      "x_mm": 333.333,
+      "y_mm": 75.0
+    },
+    {
+      "idx": 4,
+      "row": 1,
+      "col": 0,
+      "x_mm": 66.667,
+      "y_mm": 225.0
+    },
+    {
+      "idx": 5,
+      "row": 1,
+      "col": 1,
+      "x_mm": 200.0,
+      "y_mm": 225.0
+    },
+    {
+      "idx": 6,
+      "row": 1,
+      "col": 2,
+      "x_mm": 333.333,
+      "y_mm": 225.0
+    }
+  ],
+  "captures": [
+    {
+      "idx": 1,
+      "row": 0,
+      "col": 0,
+      "x_mm": 66.667,
+      "y_mm": 75.0,
+      "timestamp": "2026-03-17T16:22:46",
+      "left_file": "pt_01_r1_c1_left.jpg",
+      "right_file": "pt_01_r1_c1_right.jpg",
+      "combined_file": "pt_01_r1_c1_combined.jpg"
+    }
+  ],
+  "run_finished": "2026-03-17T16:26:55"
+}

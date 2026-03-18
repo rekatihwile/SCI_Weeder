@@ -266,6 +266,39 @@ def _pick_initial_target(gantry, cameras, detector, coarse_mover, planned_target
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
+
+
+def _show_combined_fine_align_window(frameL, frameR, left_pt, right_pt, err_x, err_y, dx, dy, window_name="Fine Align"):
+    dispL = frameL.copy()
+    dispR = frameR.copy()
+
+    xl, yl = int(round(left_pt[0])), int(round(left_pt[1]))
+    xr, yr = int(round(right_pt[0])), int(round(right_pt[1]))
+
+    cv2.circle(dispL, (xl, yl), 5, (0, 0, 255), -1)
+    cv2.circle(dispR, (xr, yr), 5, (0, 0, 255), -1)
+
+    cv2.line(dispL, (W // 2, 0), (W // 2, H), (255, 0, 0), 1)
+    cv2.line(dispL, (0, TARGET_Y_L), (W, TARGET_Y_L), (255, 0, 0), 1)
+    cv2.line(dispR, (W // 2, 0), (W // 2, H), (255, 0, 0), 1)
+    cv2.line(dispR, (0, TARGET_Y_R), (W, TARGET_Y_R), (255, 0, 0), 1)
+
+    cv2.putText(dispL, "LEFT", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(dispR, "RIGHT", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    combined = np.hstack([dispL, dispR])
+    status = f"FINE ALIGN | ex={err_x:.1f}px ey={err_y:.1f}px | dx={dx:.3f} dy={dy:.3f}"
+    cv2.putText(combined, status, (10, H - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, combined.shape[1], combined.shape[0])
+    cv2.moveWindow(window_name, 80, 80)
+    try:
+        cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+    except Exception:
+        pass
+    cv2.imshow(window_name, combined)
+
 def fine_align_target(
     gantry,
     cameras,
@@ -325,6 +358,7 @@ def fine_align_target(
         if stL is None or stR is None or stL[0][0] == 0 or stR[0][0] == 0:
             gantry.stop()
             end_live_fine_align()
+            cv2.destroyWindow("Fine Align")
             print("Fine align lost LK tracking.")
             return False, None
 
@@ -368,6 +402,7 @@ def fine_align_target(
 
             if inside_count >= settle_frames:
                 end_live_fine_align()
+                cv2.destroyWindow("Fine Align")
                 print(f"Fine align locked: ex={err_x:.2f}px ey={err_y:.2f}px")
 
                 gantry.sync_estimate_to_machine()
@@ -405,35 +440,22 @@ def fine_align_target(
                 gantry.jog(dx, dy, FINE_FEED)
 
         if show_debug:
-            dispL = frameL.copy()
-            dispR = frameR.copy()
-
-            cv2.circle(dispL, (int(xl), int(yl)), 5, (0, 0, 255), -1)
-            cv2.circle(dispR, (int(xr), int(yr)), 5, (0, 0, 255), -1)
-
-            cv2.line(dispL, (W // 2, 0), (W // 2, H), (255, 0, 0), 1)
-            cv2.line(dispL, (0, TARGET_Y_L), (W, TARGET_Y_L), (255, 0, 0), 1)
-            cv2.line(dispR, (W // 2, 0), (W // 2, H), (255, 0, 0), 1)
-            cv2.line(dispR, (0, TARGET_Y_R), (W, TARGET_Y_R), (255, 0, 0), 1)
-
-            status = f"FINE ALIGN | ex={err_x:.1f}px ey={err_y:.1f}px | dx={dx:.3f} dy={dy:.3f}"
-            cv2.putText(
-                dispL,
-                status,
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 255),
-                2,
+            _show_combined_fine_align_window(
+                frameL,
+                frameR,
+                (xl, yl),
+                (xr, yr),
+                err_x,
+                err_y,
+                dx,
+                dy,
             )
-
-            cv2.imshow("Fine Align - Left", dispL)
-            cv2.imshow("Fine Align - Right", dispR)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == ord("r"):
                 gantry.stop()
                 end_live_fine_align()
+                cv2.destroyWindow("Fine Align")
                 print("Fine align cancelled.")
                 return False, None
 
@@ -442,5 +464,6 @@ def fine_align_target(
 
     gantry.stop()
     end_live_fine_align()
+    cv2.destroyWindow("Fine Align")
     print("Fine align timeout.")
     return False, None

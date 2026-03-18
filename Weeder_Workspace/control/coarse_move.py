@@ -101,6 +101,9 @@ class TriangulationCoarseMover:
         calib = np.load(CALIB_NPZ_PATH)
         rect = np.load(RECT_NPZ_PATH)
 
+        self.last_survey_frameL = None
+        self.last_survey_frameR = None
+
         self.K1, self.D1 = calib["K1"], calib["D1"]
         self.K2, self.D2 = calib["K2"], calib["D2"]
         self.T = calib["T"].reshape(3)
@@ -190,7 +193,15 @@ class TriangulationCoarseMover:
         cluster_radius_px=12.0,
     ):
         if detector_mode == "manual":
-            return detector.detect_live(cameras)
+            ptsL, ptsR = detector.detect_live(cameras)
+            try:
+                frameL, frameR = cameras.read_pair()
+                self.last_survey_frameL = frameL
+                self.last_survey_frameR = frameR
+            except Exception:
+                self.last_survey_frameL = None
+                self.last_survey_frameR = None
+            return ptsL, ptsR
 
         if detector_mode != "ai":
             raise ValueError(f"Unknown detector mode: {detector_mode}")
@@ -199,11 +210,17 @@ class TriangulationCoarseMover:
 
         left_frames = []
         right_frames = []
+        last_frameL = None
+        last_frameR = None
 
         for _ in range(burst_count):
             frameL, frameR = cameras.read_pair()
+            last_frameL, last_frameR = frameL, frameR
             left_frames.append(detector.cv_left.detect_points(frameL))
             right_frames.append(detector.cv_right.detect_points(frameR))
+
+        self.last_survey_frameL = last_frameL
+        self.last_survey_frameR = last_frameR
 
         stable_left = _cluster_burst_points(
             left_frames,
@@ -220,6 +237,7 @@ class TriangulationCoarseMover:
         print(f"Stable right points: {len(stable_right)}")
 
         return stable_left, stable_right
+
 
     def select_best_local_candidate(
         self,

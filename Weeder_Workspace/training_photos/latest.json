@@ -1,0 +1,12 @@
+{
+  "idx": 60,
+  "row": 2,
+  "col": 3,
+  "x_mm": 350.0,
+  "y_mm": 333.333,
+  "timestamp": "2026-03-17T17:08:10",
+  "left_file": "left\\pt_000060_r3_c4_left.jpg",
+  "right_file": "right\\pt_000060_r3_c4_right.jpg",
+  "combined_file": "combined\\pt_000060_r3_c4_combined.jpg",
+  "cycle_num": 3
+}

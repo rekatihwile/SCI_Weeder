@@ -20,6 +20,21 @@ BASE_DIR = Path(__file__).resolve().parent
 HARDWARE_CONFIG_PATH = BASE_DIR / "params/hardware_config.json"
 CAMERA_CONFIG_PATH   = BASE_DIR / "params/camera_config.json"
 
+# ---------------------------------------------------
+# TRAINING PHOTO COLLECTION
+# ---------------------------------------------------
+
+TRAINING_PHOTOS_DIR = BASE_DIR / "training_photos"
+
+WORKSPACE_X_MIN = 0.0
+WORKSPACE_X_MAX = 400.0
+WORKSPACE_Y_MIN = 0.0
+WORKSPACE_Y_MAX = 400.0
+
+X_SUBSECTIONS = 4
+Y_SUBSECTIONS = 3
+
+PHOTO_SETTLE_SEC = 0.75
 
 # ---------------------------------------------------
 # LOAD HARDWARE CONFIG
@@ -53,7 +68,7 @@ else:
 # CAMERA PARAMETERS OV5640
 # ---------------------------------------------------
 
-FRAME_WIDTH  = 640
+FRAME_WIDTH  = 720
 FRAME_HEIGHT = 480
 
 TARGET_Y_L = FRAME_HEIGHT // 2
@@ -72,7 +87,7 @@ CALIBRATION_EXPECTS_UNFLIPPED = False
 
 # Coarse triangulation tuning
 TRI_SIGN_X = -1.0
-TRI_SIGN_Y = -1.0
+TRI_SIGN_Y = 1.0
 
 LASER_OFFSET_X_MM = 33.0
 LASER_OFFSET_Y_MM = 0.0
@@ -80,7 +95,7 @@ LASER_OFFSET_Y_MM = 0.0
 TRI_X_GAIN = 1.0
 TRI_Y_GAIN = 1.0
 
-USE_AFFINE_CORRECTION = True
+USE_AFFINE_CORRECTION = False
 AFFINE_X_COEFFS = [-1.192043821870919, 1.001531761830695, 0.012082374519007066]
 AFFINE_Y_COEFFS = [10.508343050916622, -0.09675010667374007, 0.9966484990708326]
 
@@ -90,7 +105,7 @@ AFFINE_Y_COEFFS = [10.508343050916622, -0.09675010667374007, 0.9966484990708326]
 
 # Starting location for weed survey
 SURVEY_POS_X = 200.0
-SURVEY_POS_Y = 200.0
+SURVEY_POS_Y = 150.0
 
 
 # ---------------------------------------------------
@@ -108,12 +123,18 @@ COARSE_MOVE_MODE = "triangulation"
 # Fine alignment strategy
 FINE_ALIGN_MODE = "pixel_pd"
 
+# Debug / execution helpers
+TRIANGULATION_ONLY_MODE = False
+SHOW_TRIANGULATION_PLOT = True
+SHOW_MATCH_DEBUG_WINDOW = True
+SAVE_MATCH_DEBUG_IMAGE = True
+
 # Laser strike pattern
 STRIKE_PATTERN = "spiral"
 
 
 # ---------------------------------------------------
 # PLATFORM SETTINGS
-# ---------------------------------------------------
+# --------------------------------------------------
 
 IS_WINDOWS = sys.platform.startswith("win")
