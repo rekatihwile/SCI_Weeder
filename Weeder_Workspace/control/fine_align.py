@@ -248,7 +248,7 @@ def fine_align_target(
     coarse_mover,
     planned_target,
     actual_hits,
-    max_time=6.0,
+    max_time=15.0,
     settle_frames=10,
     show_debug=HAS_DISPLAY,
 ):
