@@ -24,6 +24,34 @@ from config import (
 def _unflip_point_180(u, v, width, height):
     return (width - 1 - u, height - 1 - v)
 
+def _normalize_rectified_calibration_units_to_meters(T, P1, P2):
+    """
+    Old ChArUco calibration stored T in meters (~0.039),
+    new checkerboard calibration stored T in millimeters (~39.3).
+
+    TriangulationCoarseMover assumes triangulated XYZ is in meters.
+    So if the loaded baseline is clearly in mm, convert both:
+      - T
+      - rectified projection matrix translation columns
+    into meters.
+    """
+    T = np.asarray(T, dtype=np.float64).reshape(3)
+    P1 = np.asarray(P1, dtype=np.float64).copy()
+    P2 = np.asarray(P2, dtype=np.float64).copy()
+
+    baseline = float(np.linalg.norm(T))
+
+    # If baseline is > 1.0, it's almost certainly mm, not meters.
+    # Example:
+    #   meters: ~0.039
+    #   millimeters: ~39.3
+    if baseline > 1.0:
+        scale = 1e-3
+        T *= scale
+        P1[:, 3] *= scale
+        P2[:, 3] *= scale
+
+    return T, P1, P2
 
 def _triangulate_point_rectified(uL, vL, uR, vR, K1, D1, K2, D2, R1, P1, R2, P2):
     ptsL = np.array([[[uL, vL]]], dtype=np.float64)
@@ -104,14 +132,27 @@ class TriangulationCoarseMover:
         self.last_survey_frameL = None
         self.last_survey_frameR = None
 
-        self.K1, self.D1 = calib["K1"], calib["D1"]
-        self.K2, self.D2 = calib["K2"], calib["D2"]
-        self.T = calib["T"].reshape(3)
+        self.K1 = np.asarray(calib["K1"], dtype=np.float64)
+        self.D1 = np.asarray(calib["D1"], dtype=np.float64)
+        self.K2 = np.asarray(calib["K2"], dtype=np.float64)
+        self.D2 = np.asarray(calib["D2"], dtype=np.float64)
 
-        self.R1, self.P1 = rect["R1"], rect["P1"]
-        self.R2, self.P2 = rect["R2"], rect["P2"]
+        self.T = np.asarray(calib["T"], dtype=np.float64).reshape(3)
+
+        self.R1 = np.asarray(rect["R1"], dtype=np.float64)
+        self.P1 = np.asarray(rect["P1"], dtype=np.float64)
+        self.R2 = np.asarray(rect["R2"], dtype=np.float64)
+        self.P2 = np.asarray(rect["P2"], dtype=np.float64)
+
+        # Normalize old/new calibration files so triangulation always works in meters.
+        self.T, self.P1, self.P2 = _normalize_rectified_calibration_units_to_meters(
+            self.T, self.P1, self.P2
+        )
 
         self.T_rect = (self.R1 @ self.T.reshape(3, 1)).reshape(3)
+
+        baseline_mm = float(np.linalg.norm(self.T) * 1000.0)
+        print(f"Triangulation baseline in use: {baseline_mm:.3f} mm")
 
         self.planning_dir = Path(__file__).resolve().parent.parent / "planning"
         self.planning_dir.mkdir(parents=True, exist_ok=True)
@@ -184,14 +225,14 @@ class TriangulationCoarseMover:
         return self.solve_all_from_pose(matched_targets, survey_x, survey_y)
 
     def detect_stable_points(
-        self,
-        cameras,
-        detector,
-        detector_mode,
-        burst_count=5,
-        min_hits=3,
-        cluster_radius_px=12.0,
-    ):
+    self,
+    cameras,
+    detector,
+    detector_mode,
+    burst_count=5,
+    min_hits=3,
+    cluster_radius_px=12.0,
+):
         if detector_mode == "manual":
             ptsL, ptsR = detector.detect_live(cameras)
             try:
@@ -216,29 +257,27 @@ class TriangulationCoarseMover:
         for _ in range(burst_count):
             frameL, frameR = cameras.read_pair()
             last_frameL, last_frameR = frameL, frameR
-            left_frames.append(detector.cv_left.detect_points(frameL))
-            right_frames.append(detector.cv_right.detect_points(frameR))
+            left_frames.append(frameL)
+            right_frames.append(frameR)
 
         self.last_survey_frameL = last_frameL
         self.last_survey_frameR = last_frameR
 
-        stable_left = _cluster_burst_points(
+        stable_left = detector.cv_left.return_burst_stable(
             left_frames,
-            radius_px=cluster_radius_px,
-            min_hits=min_hits,
+            min_stable_views=min_hits,
+            group_radius_px=30,
         )
-        stable_right = _cluster_burst_points(
+        stable_right = detector.cv_right.return_burst_stable(
             right_frames,
-            radius_px=cluster_radius_px,
-            min_hits=min_hits,
+            min_stable_views=min_hits,
+            group_radius_px=30,
         )
 
         print(f"Stable left points : {len(stable_left)}")
         print(f"Stable right points: {len(stable_right)}")
 
         return stable_left, stable_right
-
-
     def select_best_local_candidate(
         self,
         solved_local,

@@ -1,0 +1,20 @@
+{
+    "left": {
+        "brightness": 3,
+        "contrast": 22,
+        "exposure": -3,
+        "gain": 181,
+        "saturation": 105,
+        "white_balance": 3725,
+        "sharpness": 119
+    },
+    "right": {
+        "brightness": 3,
+        "contrast": 22,
+        "exposure": -3,
+        "gain": 169,
+        "saturation": 117,
+        "white_balance": 3725,
+        "sharpness": 125
+    }
+}

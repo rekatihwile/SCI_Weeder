@@ -7,6 +7,7 @@ from config import (
     SHOW_TRIANGULATION_PLOT,
     SHOW_MATCH_DEBUG_WINDOW,
     SAVE_MATCH_DEBUG_IMAGE,
+    HAS_DISPLAY,
 )
 
 from control.coarse_move import TriangulationCoarseMover
@@ -30,14 +31,12 @@ from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
 
-
 def build_detector():
     if DETECTOR_MODE == "manual":
         return ManualDetectorLocal(display_scale=2.5)
     if DETECTOR_MODE == "ai":
-        return AIDetector(display_scale=2.0)
+        return AIDetector(display_scale=2.0, conf=0.6, min_stable_views=3)
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
-
 
 def main():
     gantry = None
@@ -50,7 +49,6 @@ def main():
     right_points = []
     matched_targets = []
     target_queue = []
-    absolute_targets = []
     actual_hits = []
 
     try:
@@ -75,18 +73,14 @@ def main():
 
             elif state == "SURVEY_CONFIRM":
                 user = input("Enter = survey | q = quit: ").strip().lower()
-
-                if user == "q":
-                    state = "DONE"
-                else:
-                    state = "DETECT"
+                state = "DONE" if user == "q" else "DETECT"
 
             elif state == "DETECT":
                 left_points, right_points = coarse_mover.detect_stable_points(
                     cameras,
                     detector,
                     detector_mode=DETECTOR_MODE,
-                    burst_count=5,
+                    burst_count=10,
                     min_hits=3,
                     cluster_radius_px=12.0,
                 )
@@ -124,12 +118,13 @@ def main():
                     target_queue,
                     filename="predicted_workspace_targets.json",
                 )
+
                 if SHOW_TRIANGULATION_PLOT:
                     show_workspace_triangulation_map(
                         target_queue,
                         survey_xy=(SURVEY_POS_X, SURVEY_POS_Y),
                         save_path=coarse_mover.planning_dir / "triangulation_overview.png",
-                        show_window=True,
+                        show_window=HAS_DISPLAY,
                     )
 
                 if coarse_mover.last_survey_frameL is not None and coarse_mover.last_survey_frameR is not None:
@@ -143,6 +138,7 @@ def main():
                         save_path=(coarse_mover.planning_dir / "triangulation_debug_view.png") if SAVE_MATCH_DEBUG_IMAGE else None,
                         show_window=SHOW_MATCH_DEBUG_WINDOW,
                     )
+
                 print_workspace_plan(target_queue)
                 state = "EXECUTE"
 
@@ -193,11 +189,15 @@ def main():
                         coarse_mover,
                         solved,
                         actual_hits,
+                        settle_frames=10,
+                        show_debug=HAS_DISPLAY,
                     )
+                    print(f"[DEBUG] fine_align returned aligned={aligned}")
 
                     if aligned:
                         actual_hits.append(actual_entry)
                         print_target_result(i, total, solved, actual_entry)
+                        print("[DEBUG] Entering strike...")
                         fire_target(gantry, solved)
                     else:
                         print_skip_target(i, total, solved, "Fine align failed")

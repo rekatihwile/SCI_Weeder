@@ -1,22 +1,22 @@
 {
     "left": {
-        "brightness": 37,
-        "contrast": 18,
-        "exposure": -3,
-        "gain": 94,
-        "saturation": 177,
-        "hue": 0,
-        "white_balance": 3022,
-        "sharpness": 110
+        "auto_exposure": 0,
+        "auto_wb": 0,
+        "exposure": -2,
+        "gain": 78,
+        "brightness": -39,
+        "contrast": 22,
+        "saturation": 100,
+        "white_balance": 3725
     },
     "right": {
-        "brightness": 35,
-        "contrast": 20,
-        "exposure": -3,
-        "gain": 79,
-        "saturation": 125,
-        "hue": 0,
-        "white_balance": 2800,
-        "sharpness": 111
+        "auto_exposure": 0,
+        "auto_wb": 0,
+        "exposure": -2,
+        "gain": 82,
+        "brightness": -37,
+        "contrast": 22,
+        "saturation": 100,
+        "white_balance": 3725
     }
 }

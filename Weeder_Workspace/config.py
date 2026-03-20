@@ -7,13 +7,10 @@ No hardware logic should live here.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
-
-# ---------------------------------------------------
-# PATHS
-# ---------------------------------------------------
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -27,14 +24,14 @@ CAMERA_CONFIG_PATH   = BASE_DIR / "params/camera_config.json"
 TRAINING_PHOTOS_DIR = BASE_DIR / "training_photos"
 
 WORKSPACE_X_MIN = 0.0
-WORKSPACE_X_MAX = 400.0
+WORKSPACE_X_MAX = 450.0
 WORKSPACE_Y_MIN = 0.0
-WORKSPACE_Y_MAX = 400.0
+WORKSPACE_Y_MAX = 440.0
 
 X_SUBSECTIONS = 4
 Y_SUBSECTIONS = 3
 
-PHOTO_SETTLE_SEC = 0.75
+PHOTO_SETTLE_SEC = 1.5
 
 # ---------------------------------------------------
 # LOAD HARDWARE CONFIG
@@ -52,6 +49,13 @@ GRBL_PORT = _hardware_cfg["serial"]["grbl_port"]
 LEFT_CAMERA_INDEX  = _hardware_cfg["cameras"]["left"]["index"]
 RIGHT_CAMERA_INDEX = _hardware_cfg["cameras"]["right"]["index"]
 
+_runtime_cfg = _hardware_cfg.get("runtime", {})
+_default_has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or sys.platform.startswith("win"))
+HAS_DISPLAY = bool(_runtime_cfg.get("has_display", _default_has_display))
+HEADLESS = bool(_runtime_cfg.get("headless", not HAS_DISPLAY))
+UI_MODE = "headless" if HEADLESS else "window"
+DISPLAY_BACKEND = _runtime_cfg.get("display_backend", os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY") or "")
+AUTO_MODE = False
 
 # ---------------------------------------------------
 # CAMERA SETTINGS
@@ -68,8 +72,8 @@ else:
 # CAMERA PARAMETERS OV5640
 # ---------------------------------------------------
 
-FRAME_WIDTH  = 720
-FRAME_HEIGHT = 480
+FRAME_WIDTH  = 1280
+FRAME_HEIGHT = 720
 
 TARGET_Y_L = FRAME_HEIGHT // 2
 TARGET_Y_R = FRAME_HEIGHT // 2
@@ -78,11 +82,12 @@ TARGET_Y_R = FRAME_HEIGHT // 2
 # CALIBRATION & TRIANGULATION
 # ---------------------------------------------------
 
-CALIB_NPZ_PATH = BASE_DIR / "params/stereo_charuco_fisheye_calib.npz"
-RECT_NPZ_PATH  = BASE_DIR / "params/stereo_fisheye_rectify_maps.npz"
+CALIB_NPZ_PATH = BASE_DIR / "Triangulation/stereo_checkerboard_fisheye_calib.npz"
+RECT_NPZ_PATH  = BASE_DIR / "Triangulation/stereo_checkerboard_fisheye_rectify_maps.npz"
 
 # Runtime frames are rotated 180 deg in cameras.py.
-# Set this True if your calibration files were made from the raw, unrotated camera images.
+# Leave this False because your checkerboard calibration images were captured
+# through the same flipped StereoCameras.read_pair() pipeline.
 CALIBRATION_EXPECTS_UNFLIPPED = False
 
 # Coarse triangulation tuning
@@ -103,35 +108,40 @@ AFFINE_Y_COEFFS = [10.508343050916622, -0.09675010667374007, 0.9966484990708326]
 # MACHINE POSITIONS
 # ---------------------------------------------------
 
-# Starting location for weed survey
 SURVEY_POS_X = 200.0
-SURVEY_POS_Y = 150.0
-
+SURVEY_POS_Y = 200.0
 
 # ---------------------------------------------------
 # CONTROL MODES
 # ---------------------------------------------------
 
-# Which detector to use
 DETECTOR_MODE = "ai"
-# options: "manual", "ai"
-
-# Coarse move strategy
 COARSE_MOVE_MODE = "triangulation"
-# options: "triangulation", "pixel_pd"
-
-# Fine alignment strategy
 FINE_ALIGN_MODE = "pixel_pd"
 
-# Debug / execution helpers
 TRIANGULATION_ONLY_MODE = False
 SHOW_TRIANGULATION_PLOT = True
-SHOW_MATCH_DEBUG_WINDOW = True
+SHOW_MATCH_DEBUG_WINDOW = HAS_DISPLAY
 SAVE_MATCH_DEBUG_IMAGE = True
 
-# Laser strike pattern
-STRIKE_PATTERN = "spiral"
+# ---------------------------------------------------
+# STRIKE SETTINGS
+# ---------------------------------------------------
 
+STRIKE_PATTERN = "pulse"
+
+# Raw GRBL laser/spindle S value.
+# Start low and increase carefully.
+LASER_FIRE_POWER = 10
+
+# Pulse time at the target
+LASER_FIRE_DURATION_SEC = 5
+
+# Small pause after fine align before the pulse
+LASER_ARM_DELAY_SEC = 0.100
+
+# Feed used for the zero-distance trigger move
+LASER_TRIGGER_FEED = 100
 
 # ---------------------------------------------------
 # PLATFORM SETTINGS

@@ -1,45 +1,23 @@
 from pathlib import Path
 
-import cv2
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 
-
-def _to_canvas_points(points_xy, width, height, pad=60):
-    xs = [p[0] for p in points_xy]
-    ys = [p[1] for p in points_xy]
-
-    min_x = min(xs)
-    max_x = max(xs)
-    min_y = min(ys)
-    max_y = max(ys)
-
-    span_x = max(max_x - min_x, 1.0)
-    span_y = max(max_y - min_y, 1.0)
-
-    sx = (width - 2 * pad) / span_x
-    sy = (height - 2 * pad) / span_y
-    s = min(sx, sy)
-
-    mapped = []
-    for x, y in points_xy:
-        cx = int(round(pad + (x - min_x) * s))
-        cy = int(round(height - pad - (y - min_y) * s))
-        mapped.append((cx, cy))
-
-    bounds = {
-        "min_x": min_x,
-        "max_x": max_x,
-        "min_y": min_y,
-        "max_y": max_y,
-    }
-    return mapped, bounds
+from config import WORKSPACE_X_MIN, WORKSPACE_X_MAX, WORKSPACE_Y_MIN, WORKSPACE_Y_MAX, HAS_DISPLAY
 
 
-def _draw_axes(canvas, width, height, pad=60):
-    cv2.line(canvas, (pad, height - pad), (width - pad, height - pad), (120, 120, 120), 1)
-    cv2.line(canvas, (pad, pad), (pad, height - pad), (120, 120, 120), 1)
-    cv2.putText(canvas, "X (mm)", (width - pad - 60, height - pad + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
-    cv2.putText(canvas, "Y (mm)", (15, pad - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
+def _extract_xyz_mm(solved_targets):
+    xyz = []
+    xy = []
+    for t in solved_targets:
+        tx, ty = map(float, t["target_xy_mm"])
+        xy.append((tx, ty))
+
+        x_laser_m = np.asarray(t.get("X_laser_m", [0.0, 0.0, 0.0]), dtype=float).reshape(3)
+        xyz.append((tx, ty, float(x_laser_m[2] * 1000.0)))
+    return xy, xyz
 
 
 def show_workspace_triangulation_map(
@@ -54,87 +32,78 @@ def show_workspace_triangulation_map(
     if not solved_targets:
         return None
 
-    target_points = [tuple(map(float, t["target_xy_mm"])) for t in solved_targets]
-    all_points = list(target_points)
+    target_points, xyz_points = _extract_xyz_mm(solved_targets)
+    xs = [p[0] for p in target_points]
+    ys = [p[1] for p in target_points]
+    zs = [p[2] for p in xyz_points]
 
-    if survey_xy is not None:
-        all_points.append((float(survey_xy[0]), float(survey_xy[1])))
+    fig = plt.figure(figsize=(12, 6.8), constrained_layout=True)
 
-    canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    canvas[:] = (20, 20, 20)
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax1.set_title("Workspace XY plan view")
+    ax1.set_xlim(WORKSPACE_X_MIN, WORKSPACE_X_MAX)
+    ax1.set_ylim(WORKSPACE_Y_MIN, WORKSPACE_Y_MAX)
+    ax1.set_aspect("equal", adjustable="box")
+    ax1.grid(True, alpha=0.35)
+    ax1.set_xlabel("X (mm)")
+    ax1.set_ylabel("Y (mm)")
 
-    _draw_axes(canvas, width, height)
-    canvas_points, bounds = _to_canvas_points(all_points, width, height)
-
-    survey_canvas = None
-    if survey_xy is not None:
-        survey_canvas = canvas_points[-1]
-        target_canvas_points = canvas_points[:-1]
-    else:
-        target_canvas_points = canvas_points
-
-    if survey_canvas is not None:
-        cv2.drawMarker(canvas, survey_canvas, (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
-        cv2.putText(
-            canvas,
-            f"Survey ({survey_xy[0]:.1f}, {survey_xy[1]:.1f}) mm",
-            (survey_canvas[0] + 10, survey_canvas[1] - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 255),
-            1,
-        )
-
-    for i, ((x_mm, y_mm), (cx, cy)) in enumerate(zip(target_points, target_canvas_points), start=1):
-        cv2.circle(canvas, (cx, cy), 6, (0, 200, 0), -1)
-        cv2.circle(canvas, (cx, cy), 12, (0, 120, 0), 1)
-        cv2.putText(
-            canvas,
-            f"{i}: ({x_mm:.1f}, {y_mm:.1f})",
-            (cx + 10, cy - 8),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.45,
-            (220, 220, 220),
-            1,
-        )
-
-    title = f"Triangulated planar targets: {len(target_points)}"
-    cv2.putText(canvas, title, (30, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-    cv2.putText(
-        canvas,
-        f"X range: {bounds['min_x']:.1f} to {bounds['max_x']:.1f} mm | Y range: {bounds['min_y']:.1f} to {bounds['max_y']:.1f} mm",
-        (30, 68),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (180, 180, 180),
-        1,
+    ax1.plot(
+        [WORKSPACE_X_MIN, WORKSPACE_X_MAX, WORKSPACE_X_MAX, WORKSPACE_X_MIN, WORKSPACE_X_MIN],
+        [WORKSPACE_Y_MIN, WORKSPACE_Y_MIN, WORKSPACE_Y_MAX, WORKSPACE_Y_MAX, WORKSPACE_Y_MIN],
+        linewidth=1.5,
     )
-    cv2.putText(
-        canvas,
-        "Press any key to continue",
-        (30, height - 20),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.55,
-        (180, 180, 180),
-        1,
+    ax1.scatter(xs, ys, s=55, marker="o")
+
+    for i, (x, y) in enumerate(target_points, start=1):
+        ax1.text(x + 4.0, y + 4.0, f"{i}", fontsize=9)
+
+    if survey_xy is not None:
+        sx, sy = map(float, survey_xy)
+        ax1.scatter([sx], [sy], s=90, marker="x")
+        ax1.text(sx + 4.0, sy + 4.0, "Survey", fontsize=9)
+
+    ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+    ax2.set_title("Triangulated XYZ view")
+    ax2.set_xlim(WORKSPACE_X_MIN, WORKSPACE_X_MAX)
+    ax2.set_ylim(WORKSPACE_Y_MIN, WORKSPACE_Y_MAX)
+    zmin = min(zs) if zs else -10.0
+    zmax = max(zs) if zs else 10.0
+    if abs(zmax - zmin) < 1e-6:
+        zmin -= 5.0
+        zmax += 5.0
+    ax2.set_zlim(zmin, zmax)
+    ax2.set_xlabel("X (mm)")
+    ax2.set_ylabel("Y (mm)")
+    ax2.set_zlabel("Z (mm)")
+    ax2.scatter(xs, ys, zs, s=55, marker="o")
+
+    for i, (x, y, z) in enumerate(xyz_points, start=1):
+        ax2.text(x, y, z, f"{i}", fontsize=8)
+
+    if survey_xy is not None:
+        sx, sy = map(float, survey_xy)
+        ax2.scatter([sx], [sy], [0.0], s=90, marker="x")
+
+    fig.suptitle(
+        f"Triangulated targets: {len(target_points)} | X range {min(xs):.1f}..{max(xs):.1f} mm | "
+        f"Y range {min(ys):.1f}..{max(ys):.1f} mm | Z range {min(zs):.2f}..{max(zs):.2f} mm"
     )
 
     if save_path is not None:
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(save_path), canvas)
+        fig.savefig(save_path, dpi=180)
         print(f"Saved triangulation overview -> {save_path}")
 
-    if show_window:
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(window_name, width, height)
-        cv2.moveWindow(window_name, 100, 100)
-        try:
-            cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
-        except Exception:
-            pass
-        cv2.imshow(window_name, canvas)
-        cv2.waitKey(0)
-        cv2.destroyWindow(window_name)
+    if show_window and HAS_DISPLAY:
+        manager = getattr(fig.canvas, "manager", None)
+        if manager is not None:
+            try:
+                manager.set_window_title(window_name)
+            except Exception:
+                pass
+        plt.show(block=True)
 
-    return canvas
+    plt.close(fig)
+    return save_path

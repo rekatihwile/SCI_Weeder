@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from config import BASE_DIR
+from config import BASE_DIR, FRAME_WIDTH, FRAME_HEIGHT
 
 
 class _WeedCVCore:
@@ -174,7 +174,7 @@ class AIDetector:
         if not left_points or not right_points:
             return None, None
 
-        target_xy = (320.0, 240.0)
+        target_xy = (FRAME_WIDTH / 2.0, FRAME_HEIGHT / 2.0)
 
         def dist2(p):
             dx = p[0] - target_xy[0]

@@ -165,10 +165,10 @@ def match_points(left_points, right_points, verbose=False):
     matched_targets, unmatched_left, unmatched_right = match_points_constellation(
         left_points,
         right_points,
-        anchor_min_disp=10,
-        anchor_max_disp=220,
-        anchor_max_y_diff=100,
-        match_radius=28.0,
+        anchor_min_disp=5,
+        anchor_max_disp=250,
+        anchor_max_y_diff=150,
+        match_radius=30.0,
         min_score=0.35,
     )
 

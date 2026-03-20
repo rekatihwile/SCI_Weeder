@@ -1,0 +1,285 @@
+{
+  "model": "fisheye_checkerboard",
+  "image_size": [
+    1280,
+    720
+  ],
+  "pattern_size_inner_corners": [
+    6,
+    7
+  ],
+  "square_size_mm": 25.0,
+  "usable_stereo_pairs": 22,
+  "rms_left": 0.2509647131373328,
+  "rms_right": 0.25504357441055836,
+  "rms_stereo": 0.3669886587605621,
+  "baseline_mm": 39.304129923449665,
+  "K1": [
+    [
+      430.7595118362998,
+      0.0,
+      645.7544204792227
+    ],
+    [
+      0.0,
+      430.5276620735585,
+      361.00802391639496
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "D1": [
+    [
+      0.4645603682798838
+    ],
+    [
+      0.6229673160653577
+    ],
+    [
+      -1.3171699370191896
+    ],
+    [
+      0.6637686284411389
+    ]
+  ],
+  "K2": [
+    [
+      429.70063288002916,
+      0.0,
+      634.7974567561815
+    ],
+    [
+      0.0,
+      429.50454272088155,
+      342.28466452564624
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "D2": [
+    [
+      0.49893701888309183
+    ],
+    [
+      0.5975757617874687
+    ],
+    [
+      -1.3204768795188262
+    ],
+    [
+      0.6774384187308579
+    ]
+  ],
+  "R": [
+    [
+      0.9999981168404022,
+      0.0015485248107602518,
+      0.0011697805606030005
+    ],
+    [
+      -0.0015490084404600596,
+      0.999998715148289,
+      0.00041264345700107064
+    ],
+    [
+      -0.0011691400689772967,
+      -0.0004144546798894019,
+      0.9999992306691128
+    ]
+  ],
+  "T": [
+    [
+      -39.29569362325946
+    ],
+    [
+      0.8002598842744374
+    ],
+    [
+      -0.15058493934771774
+    ]
+  ],
+  "used_pairs": [
+    {
+      "index": 0,
+      "left_path": "left_0000.png",
+      "right_path": "right_0000.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 1,
+      "left_path": "left_0001.png",
+      "right_path": "right_0001.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 2,
+      "left_path": "left_0002.png",
+      "right_path": "right_0002.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 3,
+      "left_path": "left_0003.png",
+      "right_path": "right_0003.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 4,
+      "left_path": "left_0004.png",
+      "right_path": "right_0004.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 5,
+      "left_path": "left_0005.png",
+      "right_path": "right_0005.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 6,
+      "left_path": "left_0006.png",
+      "right_path": "right_0006.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 7,
+      "left_path": "left_0007.png",
+      "right_path": "right_0007.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 8,
+      "left_path": "left_0008.png",
+      "right_path": "right_0008.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 9,
+      "left_path": "left_0009.png",
+      "right_path": "right_0009.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 10,
+      "left_path": "left_0010.png",
+      "right_path": "right_0010.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 11,
+      "left_path": "left_0011.png",
+      "right_path": "right_0011.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 12,
+      "left_path": "left_0012.png",
+      "right_path": "right_0012.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 13,
+      "left_path": "left_0013.png",
+      "right_path": "right_0013.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 14,
+      "left_path": "left_0014.png",
+      "right_path": "right_0014.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 15,
+      "left_path": "left_0015.png",
+      "right_path": "right_0015.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 16,
+      "left_path": "left_0016.png",
+      "right_path": "right_0016.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 17,
+      "left_path": "left_0017.png",
+      "right_path": "right_0017.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 18,
+      "left_path": "left_0018.png",
+      "right_path": "right_0018.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 19,
+      "left_path": "left_0019.png",
+      "right_path": "right_0019.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 20,
+      "left_path": "left_0020.png",
+      "right_path": "right_0020.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    },
+    {
+      "index": 21,
+      "left_path": "left_0021.png",
+      "right_path": "right_0021.png",
+      "found_left": true,
+      "found_right": true,
+      "used": true
+    }
+  ]
+}

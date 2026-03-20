@@ -20,7 +20,8 @@ def _rule(char="=", width=None):
 
 
 def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
+    # Disabled for debugging so history is preserved
+    print("\n" + _rule("*") + "\n")
 
 
 def print_header(title):
@@ -189,31 +190,26 @@ def print_live_fine_align(err_x, err_y, dx, dy, planned_xy=None, throttle_s=0.20
     if planned_xy is not None:
         px, py = planned_xy
         line = (
-            f"\rFine Align | coarse=({px:.2f}, {py:.2f}) mm | "
+            f"Fine Align | coarse=({px:.2f}, {py:.2f}) mm | "
             f"err=({err_x:.2f}, {err_y:.2f}) px | "
             f"jog=({dx:.3f}, {dy:.3f}) mm"
         )
     else:
         line = (
-            f"\rFine Align | err=({err_x:.2f}, {err_y:.2f}) px | "
+            f"Fine Align | err=({err_x:.2f}, {err_y:.2f}) px | "
             f"jog=({dx:.3f}, {dy:.3f}) mm"
         )
 
-    width = _term_width()
-    padded = line.ljust(width - 1)
+    # Print out standard lines instead of overwriting
+    print(line)
 
-    sys.stdout.write(padded)
-    sys.stdout.flush()
-
-    _last_fine_line = padded
     _last_fine_time = now
 
 
 def end_live_fine_align():
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    print("--- End Fine Align ---")
 
 
 def clear_current_target_line():
-    sys.stdout.write("\r\033[2K")
-    sys.stdout.flush()
+    # Disabled so it doesn't wipe terminal lines
+    pass

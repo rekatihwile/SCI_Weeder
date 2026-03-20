@@ -16,3 +16,8 @@ torch_jetson.whl
 
 # OS junk
 .DS_Store
+
+# Photos
+training_photos/
+*.jpg
+*.jpeg

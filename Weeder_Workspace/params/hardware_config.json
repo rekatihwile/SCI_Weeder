@@ -4,16 +4,22 @@
     },
     "cameras": {
         "left": {
-            "index": 2,
+            "index": 1,
             "device": null,
             "path": null,
             "node": "LEFT_CAM"
         },
         "right": {
-            "index": 1,
+            "index": 2,
             "device": null,
             "path": null,
             "node": "RIGHT_CAM"
         }
+    },
+    "runtime": {
+        "has_display": true,
+        "headless": false,
+        "ui_mode": "window",
+        "display_backend": "windows"
     }
 }
