@@ -2,13 +2,36 @@ import time
 import cv2
 import numpy as np
 from ui.terminal import print_live_fine_align, end_live_fine_align
-from config import DETECTOR_MODE, FRAME_WIDTH, FRAME_HEIGHT, TARGET_Y_L, TARGET_Y_R, HAS_DISPLAY
+from config import (
+    DETECTOR_MODE,
+    FRAME_WIDTH,
+    FRAME_HEIGHT,
+    TARGET_Y_L,
+    TARGET_Y_R,
+    HAS_DISPLAY,
+    FINE_ALIGN_CROP_SCALE,
+    FINE_ALIGN_LK_WIN_SIZE,
+    FINE_ALIGN_LK_MAX_LEVEL,
+    FINE_ALIGN_KP_X,
+    FINE_ALIGN_KD_X,
+    FINE_ALIGN_KP_Y,
+    FINE_ALIGN_KD_Y,
+    FINE_ALIGN_STEP_MM,
+    FINE_ALIGN_DEADZONE_PX,
+    FINE_ALIGN_MAX_JOG_MM,
+    FINE_ALIGN_FEED,
+    FINE_ALIGN_BURST_COUNT,
+    FINE_ALIGN_MIN_HITS,
+    FINE_ALIGN_CLUSTER_RADIUS_PX,
+    FINE_ALIGN_MAX_TIME_SEC,
+    FINE_ALIGN_SETTLE_FRAMES,
+)
 from vision.matching import match_points
 
 FULL_W = FRAME_WIDTH
 FULL_H = FRAME_HEIGHT
-FINE_W = FRAME_WIDTH // 2
-FINE_H = FRAME_HEIGHT // 2
+FINE_W = int(FRAME_WIDTH * FINE_ALIGN_CROP_SCALE)
+FINE_H = int(FRAME_HEIGHT * FINE_ALIGN_CROP_SCALE)
 CROP_X0 = (FULL_W - FINE_W) // 2
 CROP_Y0 = (FULL_H - FINE_H) // 2
 CROP_X1 = CROP_X0 + FINE_W
@@ -17,30 +40,30 @@ TARGET_X = FINE_W / 2.0
 TARGET_Y = FINE_H / 2.0
 
 LK_PARAMS = dict(
-    winSize=(31, 31),
-    maxLevel=3,
+    winSize=(FINE_ALIGN_LK_WIN_SIZE, FINE_ALIGN_LK_WIN_SIZE),
+    maxLevel=FINE_ALIGN_LK_MAX_LEVEL,
     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
 )
 
-Kp_x = 10.0
-Kd_x = 2.5
-Kp_y = 10.0
-Kd_y = 2.5
+Kp_x = FINE_ALIGN_KP_X
+Kd_x = FINE_ALIGN_KD_X
+Kp_y = FINE_ALIGN_KP_Y
+Kd_y = FINE_ALIGN_KD_Y
 
-STEP_MM = 0.001
-DEADZONE = 4
-MAX_JOG = 10.0
-FINE_FEED = 5000
+STEP_MM = FINE_ALIGN_STEP_MM
+DEADZONE = FINE_ALIGN_DEADZONE_PX
+MAX_JOG = FINE_ALIGN_MAX_JOG_MM
+FINE_FEED = FINE_ALIGN_FEED
 
-BURST_COUNT = 5
-MIN_HITS = 3
-CLUSTER_RADIUS_PX = 12.0
+BURST_COUNT = FINE_ALIGN_BURST_COUNT
+MIN_HITS = FINE_ALIGN_MIN_HITS
+CLUSTER_RADIUS_PX = FINE_ALIGN_CLUSTER_RADIUS_PX
 
 
 def _safe_destroy_fine_align_window():
     if HAS_DISPLAY:
         try:
-            cv2.destroyWindow('Fine Align')
+            cv2.destroyWindow("Fine Align")
         except Exception:
             pass
 
@@ -72,7 +95,7 @@ def _norm_xy(a, b):
     return float(np.hypot(a[0] - b[0], a[1] - b[1]))
 
 
-def _cluster_burst_points(frames_points, radius_px=12.0, min_hits=3):
+def _cluster_burst_points(frames_points, radius_px=CLUSTER_RADIUS_PX, min_hits=MIN_HITS):
     clusters = []
     for frame_idx, pts in enumerate(frames_points):
         for pt in pts:
@@ -133,11 +156,10 @@ def _burst_match_ai_points(cameras, detector):
         xr, yr = t["right_px"]
         y_err = abs(yl - yr)
         disp = abs(xl - xr)
-        
-        # RELAXED BOUNDS: Don't reject points unless they are completely absurd
-        if y_err > 60:  
+
+        if y_err > 60:
             continue
-        if disp < 10 or disp > 500:  
+        if disp < 10 or disp > 500:
             continue
         filtered.append(t)
 
@@ -151,18 +173,18 @@ def _pick_manual_initial_target(cameras, detector):
     frameL, frameR = cameras.read_pair()
     return left_pt, right_pt, frameL, frameR, None
 
+
 def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target, actual_hits):
     matched_targets, frameL, frameR = _burst_match_ai_points(cameras, detector)
     if not matched_targets or frameL is None or frameR is None:
         return None, None, None, None, None
 
-    # Solve ALL matched targets to get their estimated world coordinates first
     gantry.sync_estimate_to_machine()
     current_x, current_y = gantry.get_estimated_xy()
     solved_all = coarse_mover.solve_all_from_pose(matched_targets, ref_x=current_x, ref_y=current_y)
 
     best_solved = None
-    min_err = float('inf')
+    min_err = float("inf")
     best_left = None
     best_right = None
 
@@ -171,23 +193,19 @@ def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target
         left_pt = t_source["left_px"]
         right_pt = t_source["right_px"]
 
-        # 1. Must be inside the center crop
         if not (_point_inside_crop(left_pt) and _point_inside_crop(right_pt)):
             continue
 
-        # 2. Must NOT be a duplicate of an already struck target (15mm tolerance)
         if coarse_mover.is_duplicate_of_actual(t_solved["target_xy_mm"], actual_hits, tol_mm=15.0):
             print(f"[DEBUG] Rejecting candidate at {t_solved['target_xy_mm']} - already struck!")
             continue
 
-        # 3. Calculate how close it is to the center (PD error)
         c_left = _full_to_crop_point(left_pt)
         c_right = _full_to_crop_point(right_pt)
-        
+
         ex, ey = _compute_errors(c_left, c_right)
         image_err = float(np.hypot(ex, ey))
 
-        # 4. Keep the one with the lowest PD error
         if image_err < min_err:
             min_err = image_err
             best_solved = t_solved
@@ -195,21 +213,22 @@ def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target
             best_right = right_pt
 
     if best_solved is None:
-        print('[FINE ALIGN FAIL] AI matched points, but all were outside crop or already struck.')
         return None, None, None, None, None
 
-    print(f'AI fine target selected: L={best_left} R={best_right} | PD_err={min_err:.2f}px')
-
     return best_left, best_right, frameL, frameR, best_solved
+
+
 def _pick_initial_target(gantry, cameras, detector, coarse_mover, planned_target, actual_hits):
-    if DETECTOR_MODE == 'manual':
+    if DETECTOR_MODE == "manual":
         return _pick_manual_initial_target(cameras, detector)
-    if DETECTOR_MODE == 'ai':
+    if DETECTOR_MODE == "ai":
         return _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target, actual_hits)
-    raise ValueError(f'Unknown DETECTOR_MODE: {DETECTOR_MODE}')
+    raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
-def _show_combined_fine_align_window(frameL, frameR, left_pt, right_pt, err_x, err_y, dx, dy, window_name='Fine Align'):
+def _show_combined_fine_align_window(frameL, frameR, left_pt, right_pt, err_x, err_y, dx, dy):
+    window_name = "Fine Align"
+
     dispL = frameL.copy()
     dispR = frameR.copy()
 
@@ -224,11 +243,11 @@ def _show_combined_fine_align_window(frameL, frameR, left_pt, right_pt, err_x, e
     cv2.line(dispR, (int(TARGET_X), 0), (int(TARGET_X), FINE_H), (255, 0, 0), 1)
     cv2.line(dispR, (0, int(TARGET_Y)), (FINE_W, int(TARGET_Y)), (255, 0, 0), 1)
 
-    cv2.putText(dispL, 'LEFT CROP', (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-    cv2.putText(dispR, 'RIGHT CROP', (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(dispL, "LEFT CROP", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+    cv2.putText(dispR, "RIGHT CROP", (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
     combined = np.hstack([dispL, dispR])
-    status = f'FINE ALIGN | ex={err_x:.1f}px ey={err_y:.1f}px | dx={dx:.3f} dy={dy:.3f}'
+    status = f"FINE ALIGN | ex={err_x:.1f}px ey={err_y:.1f}px | dx={dx:.3f} dy={dy:.3f}"
     cv2.putText(combined, status, (10, FINE_H - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -248,8 +267,8 @@ def fine_align_target(
     coarse_mover,
     planned_target,
     actual_hits,
-    max_time=15.0,
-    settle_frames=10,
+    max_time=FINE_ALIGN_MAX_TIME_SEC,
+    settle_frames=FINE_ALIGN_SETTLE_FRAMES,
     show_debug=HAS_DISPLAY,
 ):
     left_pt_full, right_pt_full, old_left_full, old_right_full, selected_target = _pick_initial_target(
@@ -262,12 +281,12 @@ def fine_align_target(
     )
 
     if left_pt_full is None or right_pt_full is None:
-        print('[FINE ALIGN FAIL] No initial stereo target found.')
+        print("[FINE ALIGN FAIL] No initial stereo target found.")
         end_live_fine_align()
         return False, None
 
     if not (_point_inside_crop(left_pt_full) and _point_inside_crop(right_pt_full)):
-        print('[FINE ALIGN FAIL] Initial target is outside the center crop.')
+        print("[FINE ALIGN FAIL] Initial target is outside the center crop.")
         end_live_fine_align()
         return False, None
 
@@ -300,7 +319,7 @@ def fine_align_target(
             gantry.stop()
             end_live_fine_align()
             _safe_destroy_fine_align_window()
-            print('[FINE ALIGN FAIL] Lost LK tracking.')
+            print("[FINE ALIGN FAIL] Lost LK tracking.")
             return False, None
 
         track_pt_L = new_pt_L
@@ -313,7 +332,7 @@ def fine_align_target(
             gantry.stop()
             end_live_fine_align()
             _safe_destroy_fine_align_window()
-            print('[FINE ALIGN FAIL] Tracked point left the center crop.')
+            print("[FINE ALIGN FAIL] Tracked point left the center crop.")
             return False, None
 
         err_x, err_y = _compute_errors((xl, yl), (xr, yr))
@@ -332,7 +351,7 @@ def fine_align_target(
         dx = float(np.clip(dx, -MAX_JOG, MAX_JOG))
         dy = float(np.clip(dy, -MAX_JOG, MAX_JOG))
 
-        print_live_fine_align(err_x, err_y, dx, dy, planned_xy=planned_target['target_xy_mm'], throttle_s=0.25)
+        print_live_fine_align(err_x, err_y, dx, dy, planned_xy=planned_target["target_xy_mm"], throttle_s=0.25)
 
         if abs(err_x) <= DEADZONE and abs(err_y) <= DEADZONE:
             inside_count += 1
@@ -341,25 +360,30 @@ def fine_align_target(
             if inside_count >= settle_frames:
                 end_live_fine_align()
                 _safe_destroy_fine_align_window()
-                print(f'Fine align locked: ex={err_x:.2f}px ey={err_y:.2f}px')
+                print(f"Fine align locked: ex={err_x:.2f}px ey={err_y:.2f}px")
 
                 gantry.sync_estimate_to_machine()
                 final_xy = gantry.get_estimated_xy()
 
-                if DETECTOR_MODE == 'ai' and selected_target is not None:
-                    actual_entry = coarse_mover.append_actual_target(planned_target, selected_target, final_xy, filename='actual_pd_targets.json')
+                if DETECTOR_MODE == "ai" and selected_target is not None:
+                    actual_entry = coarse_mover.append_actual_target(
+                        planned_target,
+                        selected_target,
+                        final_xy,
+                        filename="actual_pd_targets.json",
+                    )
                 else:
-                    px, py = planned_target['target_xy_mm']
+                    px, py = planned_target["target_xy_mm"]
                     fx, fy = final_xy
                     actual_entry = {
-                        'planned_xy_mm': [float(px), float(py)],
-                        'selected_local_xy_mm': [float(px), float(py)],
-                        'final_xy_mm': [float(fx), float(fy)],
-                        'left_px': [float(left_pt_full[0]), float(left_pt_full[1])],
-                        'right_px': [float(right_pt_full[0]), float(right_pt_full[1])],
-                        'score': 1.0,
+                        "planned_xy_mm": [float(px), float(py)],
+                        "selected_local_xy_mm": [float(px), float(py)],
+                        "final_xy_mm": [float(fx), float(fy)],
+                        "left_px": [float(left_pt_full[0]), float(left_pt_full[1])],
+                        "right_px": [float(right_pt_full[0]), float(right_pt_full[1])],
+                        "score": 1.0,
                     }
-                    coarse_mover.append_actual_target(planned_target, planned_target, final_xy, filename='actual_pd_targets.json')
+                    coarse_mover.append_actual_target(planned_target, planned_target, final_xy, filename="actual_pd_targets.json")
 
                 return True, actual_entry
         else:
@@ -372,11 +396,11 @@ def fine_align_target(
         if show_debug:
             _show_combined_fine_align_window(frameL, frameR, (xl, yl), (xr, yr), err_x, err_y, dx, dy)
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('q') or key == ord('r'):
+            if key == ord("q") or key == ord("r"):
                 gantry.stop()
                 end_live_fine_align()
                 _safe_destroy_fine_align_window()
-                print('[FINE ALIGN FAIL] Cancelled by user.')
+                print("[FINE ALIGN FAIL] Cancelled by user.")
                 return False, None
 
         old_gray_L = grayL
@@ -385,5 +409,5 @@ def fine_align_target(
     gantry.stop()
     end_live_fine_align()
     _safe_destroy_fine_align_window()
-    print('[FINE ALIGN FAIL] Timeout.')
+    print("[FINE ALIGN FAIL] Timeout.")
     return False, None

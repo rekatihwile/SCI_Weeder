@@ -8,6 +8,14 @@ from config import (
     SHOW_MATCH_DEBUG_WINDOW,
     SAVE_MATCH_DEBUG_IMAGE,
     HAS_DISPLAY,
+    MANUAL_DISPLAY_SCALE,
+    AI_DISPLAY_SCALE,
+    AI_CONFIDENCE,
+    AI_MIN_STABLE_VIEWS,
+    SURVEY_BURST_COUNT,
+    SURVEY_MIN_HITS,
+    SURVEY_CLUSTER_RADIUS_PX,
+    FINE_ALIGN_SETTLE_FRAMES,
 )
 
 from control.coarse_move import TriangulationCoarseMover
@@ -31,12 +39,18 @@ from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
 
+
 def build_detector():
     if DETECTOR_MODE == "manual":
-        return ManualDetectorLocal(display_scale=2.5)
+        return ManualDetectorLocal(display_scale=MANUAL_DISPLAY_SCALE)
     if DETECTOR_MODE == "ai":
-        return AIDetector(display_scale=2.0, conf=0.6, min_stable_views=3)
+        return AIDetector(
+            display_scale=AI_DISPLAY_SCALE,
+            conf=AI_CONFIDENCE,
+            min_stable_views=AI_MIN_STABLE_VIEWS,
+        )
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
+
 
 def main():
     gantry = None
@@ -80,9 +94,9 @@ def main():
                     cameras,
                     detector,
                     detector_mode=DETECTOR_MODE,
-                    burst_count=10,
-                    min_hits=3,
-                    cluster_radius_px=12.0,
+                    burst_count=SURVEY_BURST_COUNT,
+                    min_hits=SURVEY_MIN_HITS,
+                    cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
                 )
                 state = "MATCH"
 
@@ -189,7 +203,7 @@ def main():
                         coarse_mover,
                         solved,
                         actual_hits,
-                        settle_frames=10,
+                        settle_frames=FINE_ALIGN_SETTLE_FRAMES,
                         show_debug=HAS_DISPLAY,
                     )
                     print(f"[DEBUG] fine_align returned aligned={aligned}")

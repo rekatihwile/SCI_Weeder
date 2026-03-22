@@ -18,11 +18,13 @@ from config import (
     LASER_OFFSET_Y_MM,
     TRI_X_GAIN,
     TRI_Y_GAIN,
+    SURVEY_CLUSTER_RADIUS_PX,
 )
 
 
 def _unflip_point_180(u, v, width, height):
     return (width - 1 - u, height - 1 - v)
+
 
 def _normalize_rectified_calibration_units_to_meters(T, P1, P2):
     """
@@ -41,10 +43,6 @@ def _normalize_rectified_calibration_units_to_meters(T, P1, P2):
 
     baseline = float(np.linalg.norm(T))
 
-    # If baseline is > 1.0, it's almost certainly mm, not meters.
-    # Example:
-    #   meters: ~0.039
-    #   millimeters: ~39.3
     if baseline > 1.0:
         scale = 1e-3
         T *= scale
@@ -52,6 +50,7 @@ def _normalize_rectified_calibration_units_to_meters(T, P1, P2):
         P2[:, 3] *= scale
 
     return T, P1, P2
+
 
 def _triangulate_point_rectified(uL, vL, uR, vR, K1, D1, K2, D2, R1, P1, R2, P2):
     ptsL = np.array([[[uL, vL]]], dtype=np.float64)
@@ -78,7 +77,7 @@ def _dist(a, b):
     return float(np.hypot(a[0] - b[0], a[1] - b[1]))
 
 
-def _cluster_burst_points(frames_points, radius_px=12.0, min_hits=3):
+def _cluster_burst_points(frames_points, radius_px=SURVEY_CLUSTER_RADIUS_PX, min_hits=3):
     clusters = []
 
     for frame_idx, pts in enumerate(frames_points):
@@ -144,7 +143,6 @@ class TriangulationCoarseMover:
         self.R2 = np.asarray(rect["R2"], dtype=np.float64)
         self.P2 = np.asarray(rect["P2"], dtype=np.float64)
 
-        # Normalize old/new calibration files so triangulation always works in meters.
         self.T, self.P1, self.P2 = _normalize_rectified_calibration_units_to_meters(
             self.T, self.P1, self.P2
         )
@@ -225,15 +223,15 @@ class TriangulationCoarseMover:
         return self.solve_all_from_pose(matched_targets, survey_x, survey_y)
 
     def detect_stable_points(
-    self,
-    cameras,
-    detector,
-    detector_mode,
-    burst_count=5,
-    min_hits=3,
-    cluster_radius_px=12.0,
-):
-        if detector_mode == "manual":
+        self,
+        cameras=None,
+        detector=None,
+        detector_mode=None,
+        burst_count=5,
+        min_hits=3,
+        cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
+    ):
+        if detector_mode == "manual" and cameras:
             ptsL, ptsR = detector.detect_live(cameras)
             try:
                 frameL, frameR = cameras.read_pair()
@@ -266,18 +264,19 @@ class TriangulationCoarseMover:
         stable_left = detector.cv_left.return_burst_stable(
             left_frames,
             min_stable_views=min_hits,
-            group_radius_px=30,
+            group_radius_px=cluster_radius_px,
         )
         stable_right = detector.cv_right.return_burst_stable(
             right_frames,
             min_stable_views=min_hits,
-            group_radius_px=30,
+            group_radius_px=cluster_radius_px,
         )
 
         print(f"Stable left points : {len(stable_left)}")
         print(f"Stable right points: {len(stable_right)}")
 
         return stable_left, stable_right
+
     def select_best_local_candidate(
         self,
         solved_local,
@@ -338,68 +337,59 @@ class TriangulationCoarseMover:
             if "source_target" in t:
                 row["left_px"] = list(t["source_target"]["left_px"])
                 row["right_px"] = list(t["source_target"]["right_px"])
-                row["score"] = float(t["source_target"].get("score", 0.0))
+                row["score"] = float(t["source_target"].get("score", 1.0))
+
+            if "delta_xy_mm" in t:
+                row["delta_xy_mm"] = [float(t["delta_xy_mm"][0]), float(t["delta_xy_mm"][1])]
 
             data.append(row)
 
-        with open(save_path, "w") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-        print(f"Saved workspace targets -> {save_path}")
+        return save_path
 
     def clear_actual_targets_log(self, filename="actual_pd_targets.json"):
         save_path = self.planning_dir / filename
-        with open(save_path, "w") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump([], f, indent=2)
 
-    def append_actual_target(
-        self,
-        planned_target,
-        selected_target,
-        final_xy,
-        filename="actual_pd_targets.json",
-    ):
+    def append_actual_target(self, planned_target, selected_target, final_xy, filename="actual_pd_targets.json"):
         save_path = self.planning_dir / filename
 
         if save_path.exists():
-            with open(save_path, "r") as f:
+            with open(save_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             data = []
 
-        planned_x, planned_y = planned_target["target_xy_mm"]
-        selected_x, selected_y = selected_target["target_xy_mm"]
-        final_x, final_y = final_xy
+        px, py = planned_target["target_xy_mm"]
+        sx, sy = selected_target["target_xy_mm"]
+        fx, fy = final_xy
 
         entry = {
-            "planned_xy_mm": [float(planned_x), float(planned_y)],
-            "selected_local_xy_mm": [float(selected_x), float(selected_y)],
-            "final_xy_mm": [float(final_x), float(final_y)],
-            "left_px": list(selected_target["source_target"]["left_px"]),
-            "right_px": list(selected_target["source_target"]["right_px"]),
-            "score": float(selected_target["source_target"].get("score", 0.0)),
+            "planned_xy_mm": [float(px), float(py)],
+            "selected_local_xy_mm": [float(sx), float(sy)],
+            "final_xy_mm": [float(fx), float(fy)],
+            "left_px": [float(selected_target["source_target"]["left_px"][0]), float(selected_target["source_target"]["left_px"][1])],
+            "right_px": [float(selected_target["source_target"]["right_px"][0]), float(selected_target["source_target"]["right_px"][1])],
+            "score": float(selected_target["source_target"].get("score", 1.0)),
         }
 
         data.append(entry)
 
-        with open(save_path, "w") as f:
+        with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-        print(f"Saved actual PD lock -> {save_path}")
         return entry
 
-    def is_duplicate_of_actual(self, xy_mm, actual_hits, tol_mm=8.0):
-        x, y = xy_mm
-
+    def is_duplicate_of_actual(self, xy, actual_hits, tol_mm=8.0):
         for hit in actual_hits:
             hx, hy = hit["final_xy_mm"]
-            if _dist((x, y), (hx, hy)) <= tol_mm:
+            if _dist(xy, (hx, hy)) <= tol_mm:
                 return True
-
         return False
 
-    def move_to_absolute_target(self, gantry, solved_target):
+    def move_to_absolute_target(self, gantry, solved_target, feed=12000):
         tx, ty = solved_target["target_xy_mm"]
-        print(f"Move target (mm): X={tx:.2f}, Y={ty:.2f}")
-        gantry.move_absolute(tx, ty)
-        return solved_target
+        gantry.move_absolute(tx, ty, feed=feed)
