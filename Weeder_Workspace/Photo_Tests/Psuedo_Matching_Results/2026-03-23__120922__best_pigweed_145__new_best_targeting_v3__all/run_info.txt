@@ -1,0 +1,8 @@
+detector_model: D:\Oxnard_Pigsweed_3.18\best_pigweed_145.engine
+qpoint_model: D:\Oxnard_Pigsweed_3.18\new_best_targeting_v3.pth
+run_mode: all
+top_k_to_triangulate: 50
+detector_conf: 0.2
+min_stable_views: 1
+flip_z: True
+capture_box_size_mm: 50.0

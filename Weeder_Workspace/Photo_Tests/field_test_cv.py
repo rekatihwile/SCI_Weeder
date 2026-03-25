@@ -15,16 +15,40 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from config import DEFAULT_MODEL, DEFAULT_QPOINT_MODEL, MODEL_MAP
-from vision.detectors.ai_detector import AIDetector
+
 from vision.matching import match_points
 from control.coarse_move import TriangulationCoarseMover
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from ultralytics import YOLO
+from torchvision import models
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "training_photos"
+# --- NEW MODEL DEFINITION ---
+class MeristemPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = models.mobilenet_v3_small(weights=None).features
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(576, 256, 4, 2, 1),
+            nn.BatchNorm2d(256), nn.ReLU(),
+            nn.ConvTranspose2d(256, 128, 4, 2, 1),
+            nn.BatchNorm2d(128), nn.ReLU(),
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True),
+            nn.Conv2d(64, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+    def forward(self, x): return self.decoder(self.encoder(x))
+
+
+DATA_DIR = Path(r"D:\Oxnard_Pigsweed_3.18")
 LEFT_DIR = DATA_DIR / "left"
 RIGHT_DIR = DATA_DIR / "right"
-MANIFEST_PATH = DATA_DIR / "manifest.json"
+MANIFEST_PATH = Path(r'D:\Oxnard_Pigsweed_3.18\SCI_Weeder\Weeder_Workspace\Photo_Tests\manifest.json')
 
 BASE_RESULTS_DIR = Path(__file__).resolve().parent / "Psuedo_Matching_Results"
 BASE_RESULTS_DIR.mkdir(exist_ok=True)
@@ -38,8 +62,9 @@ BASE_RESULTS_DIR.mkdir(exist_ok=True)
 # "all"    -> all pairs
 RUN_MODE = "all"
 
-MODEL_NAME = MODEL_MAP.get(DEFAULT_MODEL, DEFAULT_MODEL)
-QPOINT_MODEL_NAME = MODEL_MAP.get(DEFAULT_QPOINT_MODEL, DEFAULT_QPOINT_MODEL)
+YOLO_WEIGHTS_PATH = r'D:\Oxnard_Pigsweed_3.18\best_pigweed_145.engine' # Or .pt
+TARGET_WEIGHTS_PATH = r'D:\Oxnard_Pigsweed_3.18\new_best_targeting_v3.pth'
+TRAIN_SIZE = 224
 
 DETECTOR_CONF = 0.20
 MIN_STABLE_VIEWS = 1
@@ -77,8 +102,9 @@ def _run_label():
         mode_text = "all"
 
     timestamp = datetime.now().strftime("%Y-%m-%d__%H%M%S")
-    detector_stem = Path(MODEL_NAME).stem
-    qpoint_stem = Path(QPOINT_MODEL_NAME).stem
+    # Updated to use new path variables
+    detector_stem = Path(YOLO_WEIGHTS_PATH).stem
+    qpoint_stem = Path(TARGET_WEIGHTS_PATH).stem
     return f"{timestamp}__{detector_stem}__{qpoint_stem}__{mode_text}"
 
 
@@ -196,20 +222,13 @@ def _select_range_pairs():
     return pairs
 
 
-def _build_detector():
-    return AIDetector(
-        conf=DETECTOR_CONF,
-        min_stable_views=MIN_STABLE_VIEWS,
-        yolo_path=MODEL_NAME,
-        qpoint_path=QPOINT_MODEL_NAME,
-    )
-
 
 def _save_run_info():
     out_path = RUN_DIR / "run_info.txt"
     with open(out_path, "w") as f:
-        f.write(f"detector_model: {MODEL_NAME}\n")
-        f.write(f"qpoint_model: {QPOINT_MODEL_NAME}\n")
+        # Updated to log new model paths
+        f.write(f"detector_model: {YOLO_WEIGHTS_PATH}\n")
+        f.write(f"qpoint_model: {TARGET_WEIGHTS_PATH}\n")
         f.write(f"run_mode: {RUN_MODE}\n")
         f.write(f"top_k_to_triangulate: {TOP_K_TO_TRIANGULATE}\n")
         f.write(f"detector_conf: {DETECTOR_CONF}\n")
@@ -230,15 +249,99 @@ def _save_run_info():
     return out_path
 
 
-def detect_pairs(pairs):
-    detector = _build_detector()
+def run_global_targeting(left_img, right_img, left_res, right_res, target_model, device):
+    norm_mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(3, 1, 1).half()
+    norm_std = torch.tensor([0.229, 0.224, 0.225], device=device).view(3, 1, 1).half()
+    
+    all_tensors, all_metadata, all_masks = [], [], []
+    
+    for cam_id, (img, res) in enumerate([(left_img, left_res), (right_img, right_res)]):
+        if res.masks is None: continue
+        
+        img_t = torch.from_numpy(img).to(device) 
+        img_t = img_t[:, :, [2, 1, 0]].permute(2, 0, 1).half() / 255.0 
+        img_t = (img_t - norm_mean) / norm_std 
+        
+        boxes = res.boxes.xyxy.int() 
+        masks = res.masks.data.half() 
+        
+        for i in range(len(boxes)):
+            x1, y1, x2, y2 = boxes[i]
+            x1, y1 = max(0, x1.item()), max(0, y1.item())
+            x2, y2 = min(img.shape[1], x2.item()), min(img.shape[0], y2.item())
+            
+            if x2 <= x1 or y2 <= y1: continue
+            
+            crop_img = img_t[:, y1:y2, x1:x2].unsqueeze(0) 
+            crop_mask = masks[i, y1:y2, x1:x2].unsqueeze(0).unsqueeze(0) 
+            
+            ch, cw = y2 - y1, x2 - x1
+            scale = TRAIN_SIZE / max(ch, cw)
+            nw, nh = int(cw * scale), int(ch * scale)
+            dx, dy = (TRAIN_SIZE - nw) // 2, (TRAIN_SIZE - nh) // 2
+            
+            crop_img_res = F.interpolate(crop_img, size=(nh, nw), mode='bilinear', align_corners=False)
+            crop_mask_res = F.interpolate(crop_mask, size=(nh, nw), mode='nearest')
+            
+            pad_left, pad_right = dx, TRAIN_SIZE - nw - dx
+            pad_top, pad_bottom = dy, TRAIN_SIZE - nh - dy
+            
+            final_img = F.pad(crop_img_res, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+            final_mask = F.pad(crop_mask_res, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+            
+            all_tensors.append(final_img.squeeze(0))
+            all_masks.append(final_mask.squeeze(0).squeeze(0)) 
+            all_metadata.append({'cam': cam_id, 'x1': x1, 'y1': y1, 'scale': scale, 'dx': dx, 'dy': dy})
 
+    if not all_tensors: return [], []
+
+    batch_t = torch.stack(all_tensors) 
+    batch_m = torch.stack(all_masks)   
+    
+    with torch.no_grad():
+        heatmaps = target_model(batch_t).squeeze(1) 
+        
+    masked_heatmaps = heatmaps * batch_m 
+    masked_heatmaps_cpu = masked_heatmaps.cpu().float().numpy()
+        
+    l_pts, r_pts = [], []
+    for i, meta in enumerate(all_metadata):
+        masked = masked_heatmaps_cpu[i]
+        M = cv2.moments(masked)
+        if M["m00"] > 0.001:
+            lx, ly = M["m10"] / M["m00"], M["m01"] / M["m00"]
+            conf = np.max(masked)
+        else:
+            _, conf, _, max_loc = cv2.minMaxLoc(masked)
+            lx, ly = float(max_loc[0]), float(max_loc[1])
+            
+        gx = int((lx - meta['dx']) / meta['scale']) + meta['x1']
+        gy = int((ly - meta['dy']) / meta['scale']) + meta['y1']
+        
+        # match_points usually expects tuples of ((x,y), conf)
+        if meta['cam'] == 0: l_pts.append(((gx, gy), conf))
+        else: r_pts.append(((gx, gy), conf))
+            
+    return l_pts, r_pts
+
+def detect_pairs(pairs):
     if MAX_PAIRS is not None:
         pairs = pairs[:MAX_PAIRS]
 
     if not pairs:
         print(f"No image pairs found in {DATA_DIR}")
         return []
+
+    # --- 1. INITIALIZE CUSTOM MODELS ---
+    print(f"Loading YOLO from: {YOLO_WEIGHTS_PATH}")
+    yolo_model = YOLO(YOLO_WEIGHTS_PATH, task='segment')
+    
+    print(f"Loading Target Model from: {TARGET_WEIGHTS_PATH}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    target_model = MeristemPredictor().to(device)
+    target_model.load_state_dict(torch.load(TARGET_WEIGHTS_PATH, map_location=device, weights_only=True))
+    target_model.half().eval()
+    # -----------------------------------
 
     detections = []
     t0 = time.time()
@@ -248,8 +351,20 @@ def detect_pairs(pairs):
         left_frame = _load_frame(left_path)
         right_frame = _load_frame(right_path)
 
-        left_points = detector.cv_left.detect_points(left_frame)
-        right_points = detector.cv_right.detect_points(right_frame)
+        # --- 2. RUN INFERENCE ---
+        # Get YOLO Segmentation results
+        left_res = yolo_model(left_frame, imgsz=1280, conf=DETECTOR_CONF, retina_masks=True, verbose=False)[0]
+        right_res = yolo_model(right_frame, imgsz=1280, conf=DETECTOR_CONF, retina_masks=True, verbose=False)[0]
+
+        # Pass to custom targeting model
+        left_raw, right_raw = run_global_targeting(
+            left_frame, right_frame, left_res, right_res, target_model, device
+        )
+        # ------------------------
+
+        # Strip the confidence values, keeping only the (x, y) tuples
+        left_points = [p[0] for p in left_raw]
+        right_points = [p[0] for p in right_raw]
 
         elapsed = time.time() - t0
         eta = (elapsed / idx) * (total - idx) if idx > 0 else 0.0
@@ -323,8 +438,53 @@ def _save_ranked_summary_csv(ranked):
                 len(d["right_points"]),
                 d["left_path"],
                 d["right_path"],
-                MODEL_NAME,
-                QPOINT_MODEL_NAME,
+                YOLO_WEIGHTS_PATH,     # Updated here
+                TARGET_WEIGHTS_PATH,   # Updated here
+            ])
+
+    return out_path
+
+def _save_stem_csv(solved_targets, ref_xy, entry, rank):
+    if not solved_targets:
+        return None
+
+    out_path = CSV_PER_STEM_DIR / f"rank_{rank:03d}__{entry['stem']}__triangulated.csv"
+
+    with open(out_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "rank", "photo_num", "stem", "detector_model", "qpoint_model",
+            "target_id", "x_base_mm", "y_base_mm", "z_base_mm", "z_plot_mm",
+            "left_u_px", "left_v_px", "right_u_px", "right_v_px",
+            "capture_x_mm", "capture_y_mm", "num_matches", "avg_score"
+        ])
+
+        for i, t in enumerate(solved_targets, start=1):
+            target_xy = t.get("target_xy_mm")
+            X_rect = t.get("X_rect_m")
+            left_px = t.get("left_px")
+            right_px = t.get("right_px")
+
+            if target_xy is None or X_rect is None:
+                continue
+
+            x_mm, y_mm = float(target_xy[0]), float(target_xy[1])
+            z_mm = float(X_rect[2]) * 1000.0
+            z_plot_mm = -z_mm if FLIP_Z else z_mm
+
+            lu = left_px[0] if left_px is not None else ""
+            lv = left_px[1] if left_px is not None else ""
+            ru = right_px[0] if right_px is not None else ""
+            rv = right_px[1] if right_px is not None else ""
+
+            cx = ref_xy[0] if ref_xy is not None else ""
+            cy = ref_xy[1] if ref_xy is not None else ""
+
+            writer.writerow([
+                rank, entry["photo_num"], entry["stem"],
+                YOLO_WEIGHTS_PATH, TARGET_WEIGHTS_PATH,  # Updated here
+                i, x_mm, y_mm, z_mm, z_plot_mm,
+                lu, lv, ru, rv, cx, cy, entry["num_matches"], entry["avg_score"]
             ])
 
     return out_path
@@ -350,9 +510,10 @@ def _render_keypoint_image(entry, rank):
 
     combo = cv2.hconcat([left, right])
 
+    # Updated header
     header = (
-        f"rank={rank} | stem={entry['stem']} | detector={Path(MODEL_NAME).stem} | "
-        f"qpoint={Path(QPOINT_MODEL_NAME).stem} | matches={entry['num_matches']} | avg={entry['avg_score']:.3f}"
+        f"rank={rank} | stem={entry['stem']} | detector={Path(YOLO_WEIGHTS_PATH).stem} | "
+        f"qpoint={Path(TARGET_WEIGHTS_PATH).stem} | matches={entry['num_matches']} | avg={entry['avg_score']:.3f}"
     )
     cv2.putText(combo, header, (18, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
@@ -434,7 +595,9 @@ def _plot_3d(solved_targets, ref_xy, stem, rank):
     ax.set_xlabel("X base (mm)")
     ax.set_ylabel("Y base (mm)")
     ax.set_zlabel("Z (mm)")
-    ax.set_title(f"rank={rank} | {stem} | qpoint={Path(QPOINT_MODEL_NAME).stem}")
+    
+    # Updated title
+    ax.set_title(f"rank={rank} | {stem} | qpoint={Path(TARGET_WEIGHTS_PATH).stem}")
     ax.legend()
     ax.view_init(elev=25, azim=-60)
 
@@ -443,7 +606,6 @@ def _plot_3d(solved_targets, ref_xy, stem, rank):
     fig.savefig(out_path, dpi=200)
     plt.close(fig)
     return out_path
-
 
 def _save_combined_figure(keypoint_img_path, plot_img_path, stem, rank):
     if keypoint_img_path is None or plot_img_path is None:
@@ -466,8 +628,9 @@ def _save_combined_figure(keypoint_img_path, plot_img_path, stem, rank):
     axes[1].set_title("Triangulated 3D plot")
     axes[1].axis("off")
 
+    # Updated suptitle
     fig.suptitle(
-        f"rank={rank} | {stem} | detector={Path(MODEL_NAME).stem} | qpoint={Path(QPOINT_MODEL_NAME).stem}",
+        f"rank={rank} | {stem} | detector={Path(YOLO_WEIGHTS_PATH).stem} | qpoint={Path(TARGET_WEIGHTS_PATH).stem}",
         fontsize=14
     )
 
@@ -478,79 +641,8 @@ def _save_combined_figure(keypoint_img_path, plot_img_path, stem, rank):
     return out_path
 
 
-def _save_stem_csv(solved_targets, ref_xy, entry, rank):
-    if not solved_targets:
-        return None
 
-    out_path = CSV_PER_STEM_DIR / f"rank_{rank:03d}__{entry['stem']}__triangulated.csv"
 
-    with open(out_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "rank",
-            "photo_num",
-            "stem",
-            "detector_model",
-            "qpoint_model",
-            "target_id",
-            "x_base_mm",
-            "y_base_mm",
-            "z_base_mm",
-            "z_plot_mm",
-            "left_u_px",
-            "left_v_px",
-            "right_u_px",
-            "right_v_px",
-            "capture_x_mm",
-            "capture_y_mm",
-            "num_matches",
-            "avg_score",
-        ])
-
-        for i, t in enumerate(solved_targets, start=1):
-            target_xy = t.get("target_xy_mm")
-            X_rect = t.get("X_rect_m")
-            left_px = t.get("left_px")
-            right_px = t.get("right_px")
-
-            if target_xy is None or X_rect is None:
-                continue
-
-            x_mm = float(target_xy[0])
-            y_mm = float(target_xy[1])
-            z_mm = float(X_rect[2]) * 1000.0
-            z_plot_mm = -z_mm if FLIP_Z else z_mm
-
-            lu = left_px[0] if left_px is not None else ""
-            lv = left_px[1] if left_px is not None else ""
-            ru = right_px[0] if right_px is not None else ""
-            rv = right_px[1] if right_px is not None else ""
-
-            cx = ref_xy[0] if ref_xy is not None else ""
-            cy = ref_xy[1] if ref_xy is not None else ""
-
-            writer.writerow([
-                rank,
-                entry["photo_num"],
-                entry["stem"],
-                MODEL_NAME,
-                QPOINT_MODEL_NAME,
-                i,
-                x_mm,
-                y_mm,
-                z_mm,
-                z_plot_mm,
-                lu,
-                lv,
-                ru,
-                rv,
-                cx,
-                cy,
-                entry["num_matches"],
-                entry["avg_score"],
-            ])
-
-    return out_path
 
 
 def _save_all_top_points_csv(all_rows):
@@ -610,8 +702,8 @@ def main():
     ranked = _rank_detections(detections)
 
     print("\n=== Summary ===")
-    print(f"Detector model : {MODEL_NAME}")
-    print(f"Qpoint model   : {QPOINT_MODEL_NAME}")
+    print(f"Detector model : {YOLO_WEIGHTS_PATH}")
+    print(f"Qpoint model   : {TARGET_WEIGHTS_PATH}")
     print(f"Pairs tested   : {len(ranked)}")
 
     if not ranked:
@@ -676,8 +768,8 @@ def main():
                     rank,
                     entry["photo_num"],
                     entry["stem"],
-                    MODEL_NAME,
-                    QPOINT_MODEL_NAME,
+                    YOLO_WEIGHTS_PATH,    # <--- FIXED
+                    TARGET_WEIGHTS_PATH,
                     i,
                     x_mm,
                     y_mm,
