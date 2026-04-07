@@ -23,10 +23,10 @@ def fire_target(gantry, target):
     if STRIKE_PATTERN != "pulse":
         raise ValueError(f"Unsupported STRIKE_PATTERN: {STRIKE_PATTERN}")
 
-    gantry.fire_pulse(
-        power=LASER_FIRE_POWER,
-        duration_s=LASER_FIRE_DURATION_SEC,
-        arm_delay_s=LASER_ARM_DELAY_SEC,
-    )
+    # gantry.fire_pulse(
+    #     power=LASER_FIRE_POWER,
+    #     duration_s=LASER_FIRE_DURATION_SEC,
+    #     arm_delay_s=LASER_ARM_DELAY_SEC,
+    # )
 
     print("Strike complete.")
