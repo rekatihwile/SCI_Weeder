@@ -1,10 +1,9 @@
 import json
 from pathlib import Path
-
+import time   
 import cv2
 import numpy as np
 from control.calibration_correction import AffineXYCorrection
-from config import USE_AFFINE_CORRECTION, AFFINE_X_COEFFS, AFFINE_Y_COEFFS
 
 from config import (
     FRAME_WIDTH,
@@ -27,16 +26,6 @@ def _unflip_point_180(u, v, width, height):
 
 
 def _normalize_rectified_calibration_units_to_meters(T, P1, P2):
-    """
-    Old ChArUco calibration stored T in meters (~0.039),
-    new checkerboard calibration stored T in millimeters (~39.3).
-
-    TriangulationCoarseMover assumes triangulated XYZ is in meters.
-    So if the loaded baseline is clearly in mm, convert both:
-      - T
-      - rectified projection matrix translation columns
-    into meters.
-    """
     T = np.asarray(T, dtype=np.float64).reshape(3)
     P1 = np.asarray(P1, dtype=np.float64).copy()
     P2 = np.asarray(P2, dtype=np.float64).copy()
@@ -121,9 +110,15 @@ def _cluster_burst_points(frames_points, radius_px=SURVEY_CLUSTER_RADIUS_PX, min
 
 class TriangulationCoarseMover:
     def __init__(self):
-        self.xy_correction = None
-        if USE_AFFINE_CORRECTION:
-            self.xy_correction = AffineXYCorrection(AFFINE_X_COEFFS, AFFINE_Y_COEFFS)
+        from control.pixel_error_model import StereoPixelErrorModel
+        from config import USE_PIXEL_ERROR_CORRECTION, PIXEL_ERROR_MODEL_PATH
+        
+        # FIX: Initialize all required attributes
+        self.pixel_err_model = None
+        if USE_PIXEL_ERROR_CORRECTION and PIXEL_ERROR_MODEL_PATH.exists():
+            self.pixel_err_model = StereoPixelErrorModel(PIXEL_ERROR_MODEL_PATH)
+        
+        self.xy_correction = None # Fixed AttributeError
 
         calib = np.load(CALIB_NPZ_PATH)
         rect = np.load(RECT_NPZ_PATH)
@@ -148,10 +143,6 @@ class TriangulationCoarseMover:
         )
 
         self.T_rect = (self.R1 @ self.T.reshape(3, 1)).reshape(3)
-
-        baseline_mm = float(np.linalg.norm(self.T) * 1000.0)
-        print(f"Triangulation baseline in use: {baseline_mm:.3f} mm")
-
         self.planning_dir = Path(__file__).resolve().parent.parent / "planning"
         self.planning_dir.mkdir(parents=True, exist_ok=True)
 
@@ -170,13 +161,7 @@ class TriangulationCoarseMover:
         )
 
         X_mid = X_rect - 0.5 * self.T_rect
-
-        offset_m = np.array([
-            LASER_OFFSET_X_MM / 1000.0,
-            LASER_OFFSET_Y_MM / 1000.0,
-            0.0,
-        ], dtype=float)
-
+        offset_m = np.array([LASER_OFFSET_X_MM / 1000.0, LASER_OFFSET_Y_MM / 1000.0, 0.0], dtype=float)
         X_laser = X_mid - offset_m
 
         dx_mm = TRI_SIGN_X * TRI_X_GAIN * float(X_laser[0] * 1000.0)
@@ -186,210 +171,99 @@ class TriangulationCoarseMover:
 
     def solve_target_from_pose(self, target, ref_x, ref_y):
         X_rect, X_mid, X_laser, dx_mm, dy_mm = self._solve_geometry(target)
+        raw_tx = float(ref_x + dx_mm)
+        raw_ty = float(ref_y + dy_mm)
 
-        tx_raw = float(ref_x + dx_mm)
-        ty_raw = float(ref_y + dy_mm)
+        corr_dx, corr_dy = 0.0, 0.0
+        if self.pixel_err_model:
+            corr_dx, corr_dy = self.pixel_err_model.predict_error(target["left_px"], target["right_px"])
+        
+        tx_final = raw_tx + corr_dx
+        ty_final = raw_ty + corr_dy
 
         if self.xy_correction is not None:
-            tx, ty = self.xy_correction.apply(tx_raw, ty_raw)
-        else:
-            tx, ty = tx_raw, ty_raw
+            tx_final, ty_final = self.xy_correction.apply(tx_final, ty_final)
 
         return {
             "source_target": target,
-            "X_rect_m": X_rect,
-            "X_mid_m": X_mid,
-            "X_laser_m": X_laser,
-            "delta_xy_mm": (dx_mm, dy_mm),
-            "target_xy_mm": (float(tx), float(ty)),
+            "target_xy_mm": (float(tx_final), float(ty_final)),
+            "raw_triangulated_xy_mm": (raw_tx, raw_ty), 
+            "pixel_correction_applied_mm": (corr_dx, corr_dy)
         }
 
     def solve_target_from_survey(self, target, survey_x, survey_y):
         return self.solve_target_from_pose(target, survey_x, survey_y)
 
     def solve_all_from_pose(self, matched_targets, ref_x, ref_y):
-        solved = []
-        for target in matched_targets:
-            solved.append(
-                self.solve_target_from_pose(
-                    target,
-                    ref_x=ref_x,
-                    ref_y=ref_y,
-                )
-            )
-        return solved
+        return [self.solve_target_from_pose(t, ref_x, ref_y) for t in matched_targets]
 
     def solve_all_from_survey(self, matched_targets, survey_x, survey_y):
         return self.solve_all_from_pose(matched_targets, survey_x, survey_y)
 
-    def detect_stable_points(
-        self,
-        cameras=None,
-        detector=None,
-        detector_mode=None,
-        burst_count=5,
-        min_hits=3,
-        cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
-    ):
+    def detect_stable_points(self, cameras=None, detector=None, detector_mode=None, burst_count=5, min_hits=3, cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX):
         if detector_mode == "manual" and cameras:
             ptsL, ptsR = detector.detect_live(cameras)
-            try:
-                frameL, frameR = cameras.read_pair()
-                self.last_survey_frameL = frameL
-                self.last_survey_frameR = frameR
-            except Exception:
-                self.last_survey_frameL = None
-                self.last_survey_frameR = None
+            self.last_survey_frameL = getattr(detector, "last_displayed_left", None)
+            self.last_survey_frameR = getattr(detector, "last_displayed_right", None)
             return ptsL, ptsR
 
         if detector_mode != "ai":
             raise ValueError(f"Unknown detector mode: {detector_mode}")
 
-        print(f"\n=== AI BURST SURVEY ({burst_count} frames) ===")
+        left_frames, right_frames = [], []
+        attempts = 0
+        while len(left_frames) < burst_count and attempts < (burst_count * 3):
+            fL, fR = cameras.read_pair()
+            attempts += 1
+            if fL is None or fR is None:
+                time.sleep(0.05)
+                continue
+            left_frames.append(fL)
+            right_frames.append(fR)
 
-        left_frames = []
-        right_frames = []
-        last_frameL = None
-        last_frameR = None
+        if not left_frames: return [], []
+        self.last_survey_frameL, self.last_survey_frameR = left_frames[-1], right_frames[-1]
 
-        for _ in range(burst_count):
-            frameL, frameR = cameras.read_pair()
-            last_frameL, last_frameR = frameL, frameR
-            left_frames.append(frameL)
-            right_frames.append(frameR)
-
-        self.last_survey_frameL = last_frameL
-        self.last_survey_frameR = last_frameR
-
-        stable_left = detector.cv_left.return_burst_stable(
-            left_frames,
-            min_stable_views=min_hits,
-            group_radius_px=cluster_radius_px,
-        )
-        stable_right = detector.cv_right.return_burst_stable(
-            right_frames,
-            min_stable_views=min_hits,
-            group_radius_px=cluster_radius_px,
-        )
-
-        print(f"Stable left points : {len(stable_left)}")
-        print(f"Stable right points: {len(stable_right)}")
-
+        stable_left = detector.cv_left.return_burst_stable(left_frames, min_stable_views=min_hits, group_radius_px=cluster_radius_px)
+        stable_right = detector.cv_right.return_burst_stable(right_frames, min_stable_views=min_hits, group_radius_px=cluster_radius_px)
         return stable_left, stable_right
 
-    def select_best_local_candidate(
-        self,
-        solved_local,
-        planned_xy,
-        actual_hits,
-        image_error_fn,
-        image_err_w=1.0,
-        world_err_w=10.0,
-        max_local_world_err_mm=25.0,
-        duplicate_tol_mm=20.0,
-        duplicate_penalty=1e6,
-    ):
-        valid = []
-        rejected_far = 0
-
-        for t in solved_local:
-            world_err = _dist(t["target_xy_mm"], planned_xy)
-            if world_err <= max_local_world_err_mm:
-                valid.append(t)
-            else:
-                rejected_far += 1
-
-        pool = valid if valid else solved_local
-
+    def select_best_local_candidate(self, solved_local, planned_xy, actual_hits, image_error_fn, image_err_w=1.0, world_err_w=0.1, max_local_world_err_mm=80.0, duplicate_tol_mm=20.0, duplicate_penalty=1e6):
+        pool = [t for t in solved_local if _dist(t["target_xy_mm"], planned_xy) <= max_local_world_err_mm]
+        if not pool: pool = solved_local
+        
         def cost(t):
-            ex, ey = image_error_fn(
-                t["source_target"]["left_px"],
-                t["source_target"]["right_px"],
-            )
-            image_err = float(np.hypot(ex, ey))
-            world_err = _dist(t["target_xy_mm"], planned_xy)
-
-            penalty = 0.0
-            if self.is_duplicate_of_actual(
-                t["target_xy_mm"],
-                actual_hits,
-                tol_mm=duplicate_tol_mm,
-            ):
-                penalty += duplicate_penalty
-
-            return image_err_w * image_err + world_err_w * world_err + penalty
+            ex, ey = image_error_fn(t["source_target"]["left_px"], t["source_target"]["right_px"])
+            penalty = duplicate_penalty if self.is_duplicate_of_actual(t["target_xy_mm"], actual_hits, tol_mm=duplicate_tol_mm) else 0.0
+            return image_err_w * np.hypot(ex, ey) + world_err_w * _dist(t["target_xy_mm"], planned_xy) + penalty
 
         best = min(pool, key=cost)
-        return best, rejected_far, bool(valid)
-
+        return best, len(solved_local) - len(pool), bool(pool)
+    
     def save_workspace_targets(self, targets, filename="predicted_workspace_targets.json"):
         save_path = self.planning_dir / filename
-
-        data = []
-        for i, t in enumerate(targets, start=1):
-            tx, ty = t["target_xy_mm"]
-
-            row = {
-                "id": i,
-                "target_xy_mm": [float(tx), float(ty)],
-            }
-
-            if "source_target" in t:
-                row["left_px"] = list(t["source_target"]["left_px"])
-                row["right_px"] = list(t["source_target"]["right_px"])
-                row["score"] = float(t["source_target"].get("score", 1.0))
-
-            if "delta_xy_mm" in t:
-                row["delta_xy_mm"] = [float(t["delta_xy_mm"][0]), float(t["delta_xy_mm"][1])]
-
-            data.append(row)
-
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
+        data = [{"id": i, "target_xy_mm": [float(t["target_xy_mm"][0]), float(t["target_xy_mm"][1])]} for i, t in enumerate(targets, 1)]
+        with open(save_path, "w") as f: json.dump(data, f, indent=2)
         return save_path
 
     def clear_actual_targets_log(self, filename="actual_pd_targets.json"):
-        save_path = self.planning_dir / filename
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump([], f, indent=2)
+        with open(self.planning_dir / filename, "w") as f: json.dump([], f)
 
     def append_actual_target(self, planned_target, selected_target, final_xy, filename="actual_pd_targets.json"):
         save_path = self.planning_dir / filename
-
-        if save_path.exists():
-            with open(save_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        else:
-            data = []
-
-        px, py = planned_target["target_xy_mm"]
-        sx, sy = selected_target["target_xy_mm"]
-        fx, fy = final_xy
-
+        data = json.load(open(save_path, "r")) if save_path.exists() else []
         entry = {
-            "planned_xy_mm": [float(px), float(py)],
-            "selected_local_xy_mm": [float(sx), float(sy)],
-            "final_xy_mm": [float(fx), float(fy)],
-            "left_px": [float(selected_target["source_target"]["left_px"][0]), float(selected_target["source_target"]["left_px"][1])],
-            "right_px": [float(selected_target["source_target"]["right_px"][0]), float(selected_target["source_target"]["right_px"][1])],
-            "score": float(selected_target["source_target"].get("score", 1.0)),
+            "planned_xy_mm": [float(planned_target["target_xy_mm"][0]), float(planned_target["target_xy_mm"][1])],
+            "final_xy_mm": [float(final_xy[0]), float(final_xy[1])],
+            "left_px": list(selected_target["source_target"]["left_px"]),
+            "right_px": list(selected_target["source_target"]["right_px"]),
         }
-
         data.append(entry)
-
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-
+        with open(save_path, "w") as f: json.dump(data, f, indent=2)
         return entry
 
     def is_duplicate_of_actual(self, xy, actual_hits, tol_mm=8.0):
-        for hit in actual_hits:
-            hx, hy = hit["final_xy_mm"]
-            if _dist(xy, (hx, hy)) <= tol_mm:
-                return True
-        return False
+        return any(_dist(xy, hit["final_xy_mm"]) <= tol_mm for hit in actual_hits)
 
     def move_to_absolute_target(self, gantry, solved_target, feed=12000):
-        tx, ty = solved_target["target_xy_mm"]
-        gantry.move_absolute(tx, ty, feed=feed)
+        gantry.move_absolute(solved_target["target_xy_mm"][0], solved_target["target_xy_mm"][1], feed=feed)

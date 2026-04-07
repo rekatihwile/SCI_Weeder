@@ -1,8 +1,10 @@
 from pathlib import Path
-
 import cv2
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import models
 from ultralytics import YOLO
 
 from config import (
@@ -15,6 +17,24 @@ from config import (
     AI_MIN_STABLE_VIEWS,
 )
 
+# --- NEW MODEL ARCHITECTURE ---
+class MeristemPredictor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = models.mobilenet_v3_small(weights=None).features
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(576, 256, 4, 2, 1),
+            nn.BatchNorm2d(256), nn.ReLU(),
+            nn.ConvTranspose2d(256, 128, 4, 2, 1),
+            nn.BatchNorm2d(128), nn.ReLU(),
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),
+            nn.ReLU(),
+            nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True),
+            nn.Conv2d(64, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+    def forward(self, x): return self.decoder(self.encoder(x))
+
 
 class _WeedCVCore:
     def __init__(self, yolo_path, qpoint_path=None, conf=AI_CONFIDENCE, iom_thresh=AI_IOM_THRESHOLD):
@@ -22,12 +42,14 @@ class _WeedCVCore:
         self.yolo_path = Path(yolo_path)
         self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else None
 
-        self.yolo = YOLO(str(self.yolo_path))
+        # IMPORTANT: task='segment' must be passed!
+        self.yolo = YOLO(str(self.yolo_path), task='segment')
         self.qpoint_model = None
         self.filtered_boxes = []
 
         self.conf = conf
         self.iom_thresh = iom_thresh
+        self.TRAIN_SIZE = 224
 
         self._load_qpoint_model()
 
@@ -37,9 +59,11 @@ class _WeedCVCore:
             return
 
         try:
-            self.qpoint_model = torch.jit.load(str(self.qpoint_path), map_location=self.device).eval()
-            if self.device == "cuda":
-                self.qpoint_model.cuda()
+            self.qpoint_model = MeristemPredictor().to(self.device)
+            self.qpoint_model.load_state_dict(
+                torch.load(str(self.qpoint_path), map_location=self.device, weights_only=True)
+            )
+            self.qpoint_model.half().eval()
             print(f"[INFO] Using qpoint model: {self.qpoint_path}")
         except Exception as exc:
             print(f"[WARN] Could not load qpoint model ({self.qpoint_path}): {exc}")
@@ -47,95 +71,110 @@ class _WeedCVCore:
             self.qpoint_model = None
 
     def _iom(self, b1, b2):
-        x1 = max(b1[0], b2[0])
-        y1 = max(b1[1], b2[1])
-        x2 = min(b1[2], b2[2])
-        y2 = min(b1[3], b2[3])
-
+        x1, y1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+        x2, y2 = min(b1[2], b2[2]), min(b1[3], b2[3])
         inter = max(0, x2 - x1) * max(0, y2 - y1)
         a1 = max(0, b1[2] - b1[0]) * max(0, b1[3] - b1[1])
         a2 = max(0, b2[2] - b2[0]) * max(0, b2[3] - b2[1])
         amin = min(a1, a2)
+        return inter / float(amin) if amin > 0 else 0.0
 
-        if amin <= 0:
-            return 0.0
-        return inter / float(amin)
-
-    def _get_filtered_boxes(self, frame):
-        results = self.yolo(frame, verbose=False, conf=self.conf)
-        if not results or len(results[0].boxes) == 0:
+    def _get_filtered_results(self, frame):
+        # imgsz=1280 and retina_masks=True guarantees YOLO output matches the high-res frame perfectly
+        results = self.yolo(frame, imgsz=1280, verbose=False, conf=self.conf, retina_masks=True)
+        if not results or len(results[0].boxes) == 0 or results[0].masks is None:
             self.filtered_boxes = []
-            return []
+            return [], []
 
         raw_boxes = results[0].boxes
-        order = sorted(
-            range(len(raw_boxes)),
-            key=lambda i: float(raw_boxes[i].conf[0]),
-            reverse=True,
-        )
-
+        raw_masks = results[0].masks.data.half()
+        
+        order = sorted(range(len(raw_boxes)), key=lambda i: float(raw_boxes[i].conf[0]), reverse=True)
+        
         keep = []
         for i in order:
             bi = raw_boxes[i].xyxy[0].cpu().numpy()
             if all(self._iom(bi, raw_boxes[j].xyxy[0].cpu().numpy()) <= self.iom_thresh for j in keep):
                 keep.append(i)
-
+                
         self.filtered_boxes = [raw_boxes[i] for i in keep]
-        return self.filtered_boxes
-
-    def _prep_crop_input(self, crop):
-        img = cv2.resize(crop, (640, 640), interpolation=cv2.INTER_CUBIC)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32) / 255.0
-        img = np.transpose(img, (2, 0, 1))
-        img = np.expand_dims(img, axis=0)
-        return torch.from_numpy(img).to(self.device)
-
-    def _predict_point_in_crop(self, crop):
-        h, w = crop.shape[:2]
-
-        if self.qpoint_model is None:
-            return 0.5 * w, 0.5 * h
-
-        img_t = self._prep_crop_input(crop)
-
-        with torch.no_grad():
-            out = self.qpoint_model(img_t).detach().cpu().numpy().reshape(-1)
-
-        if out.size < 2:
-            return 0.5 * w, 0.5 * h
-
-        return float(out[0]) * w, float(out[1]) * h
+        filtered_masks = [raw_masks[i] for i in keep]
+        return self.filtered_boxes, filtered_masks
 
     def detect_points(self, frame):
-        boxes = self._get_filtered_boxes(frame)
+        boxes, masks = self._get_filtered_results(frame)
+        if not boxes:
+            return []
+
+        if self.qpoint_model is None:
+            return [(int((b.xyxy[0][0] + b.xyxy[0][2]) / 2), int((b.xyxy[0][1] + b.xyxy[0][3]) / 2)) for b in boxes]
+
+        norm_mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(3, 1, 1).half()
+        norm_std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(3, 1, 1).half()
+        
+        img_t = torch.from_numpy(frame).to(self.device)
+        img_t = img_t[:, :, [2, 1, 0]].permute(2, 0, 1).half() / 255.0 
+        img_t = (img_t - norm_mean) / norm_std 
+        
+        all_tensors, all_masks, all_metadata = [], [], []
+        
+        for i in range(len(boxes)):
+            b = boxes[i].xyxy[0].int()
+            x1, y1 = max(0, b[0].item()), max(0, b[1].item())
+            x2, y2 = min(frame.shape[1], b[2].item()), min(frame.shape[0], b[3].item())
+            
+            if x2 <= x1 or y2 <= y1: continue
+            
+            crop_img = img_t[:, y1:y2, x1:x2].unsqueeze(0) 
+            crop_mask = masks[i][y1:y2, x1:x2].unsqueeze(0).unsqueeze(0) 
+            
+            ch, cw = y2 - y1, x2 - x1
+            scale = self.TRAIN_SIZE / max(ch, cw)
+            nw, nh = int(cw * scale), int(ch * scale)
+            dx, dy = (self.TRAIN_SIZE - nw) // 2, (self.TRAIN_SIZE - nh) // 2
+            
+            crop_img_res = F.interpolate(crop_img, size=(nh, nw), mode='bilinear', align_corners=False)
+            crop_mask_res = F.interpolate(crop_mask, size=(nh, nw), mode='nearest')
+            
+            pad_left, pad_right = dx, self.TRAIN_SIZE - nw - dx
+            pad_top, pad_bottom = dy, self.TRAIN_SIZE - nh - dy
+            
+            final_img = F.pad(crop_img_res, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+            final_mask = F.pad(crop_mask_res, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+            
+            all_tensors.append(final_img.squeeze(0))
+            all_masks.append(final_mask.squeeze(0).squeeze(0)) 
+            all_metadata.append({'x1': x1, 'y1': y1, 'scale': scale, 'dx': dx, 'dy': dy})
+
+        if not all_tensors: return []
+
+        batch_t = torch.stack(all_tensors) 
+        batch_m = torch.stack(all_masks)   
+        
+        with torch.no_grad():
+            heatmaps = self.qpoint_model(batch_t).squeeze(1) 
+            
+        masked_heatmaps = heatmaps * batch_m 
+        masked_heatmaps_cpu = masked_heatmaps.cpu().float().numpy()
+            
         coords = []
-
-        for box in boxes:
-            b = box.xyxy[0].cpu().numpy().astype(int)
-            x1, y1, x2, y2 = b.tolist()
-
-            w = x2 - x1
-            h = y2 - y1
-            px = int(0.2 * w)
-            py = int(0.2 * h)
-
-            cx1 = max(0, x1 - px)
-            cy1 = max(0, y1 - py)
-            cx2 = min(frame.shape[1], x2 + px)
-            cy2 = min(frame.shape[0], y2 + py)
-
-            crop = frame[cy1:cy2, cx1:cx2]
-            if crop.size == 0:
-                continue
-
-            dx, dy = self._predict_point_in_crop(crop)
-            x = int(round(cx1 + dx))
-            y = int(round(cy1 + dy))
-
-            x = max(0, min(frame.shape[1] - 1, x))
-            y = max(0, min(frame.shape[0] - 1, y))
-            coords.append((x, y))
+        for i, meta in enumerate(all_metadata):
+            masked = masked_heatmaps_cpu[i]
+            
+            # Use minMaxLoc to strictly target the hottest plant tissue pixel
+            _, max_conf, _, max_loc = cv2.minMaxLoc(masked)
+            
+            if max_conf < 0.05:
+                lx, ly = float(self.TRAIN_SIZE / 2.0), float(self.TRAIN_SIZE / 2.0)
+            else:
+                lx, ly = float(max_loc[0]), float(max_loc[1])
+                
+            gx = int((lx - meta['dx']) / meta['scale']) + meta['x1']
+            gy = int((ly - meta['dy']) / meta['scale']) + meta['y1']
+            
+            gx = max(0, min(frame.shape[1] - 1, gx))
+            gy = max(0, min(frame.shape[0] - 1, gy))
+            coords.append((gx, gy))
 
         return coords
 
@@ -214,7 +253,8 @@ class AIDetector:
         if not self.yolo_path.is_absolute():
             self.yolo_path = params_dir / self.yolo_path
 
-        self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else params_dir / "sniper.pt"
+        # Updated to default to your new V3 model!
+        self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else params_dir / "new_best_targeting_v3.pth"
         if not self.qpoint_path.is_absolute():
             self.qpoint_path = params_dir / self.qpoint_path
 

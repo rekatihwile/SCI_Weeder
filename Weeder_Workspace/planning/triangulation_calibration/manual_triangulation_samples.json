@@ -1,0 +1,3571 @@
+[
+  {
+    "sample_id": 1,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      370.0,
+      293.0
+    ],
+    "survey_right_px": [
+      285.0,
+      276.0
+    ],
+    "fine_left_px": [
+      658.0,
+      361.0
+    ],
+    "fine_right_px": [
+      579.0,
+      344.0
+    ],
+    "triangulated_xy_mm": [
+      37.056140409554615,
+      240.14893399363777
+    ],
+    "final_xy_mm": [
+      22.987,
+      242.05
+    ],
+    "error_xy_mm": [
+      -14.069140409554617,
+      1.9010660063622424
+    ],
+    "delta_xy_mm_from_survey": [
+      -162.94385959044538,
+      40.14893399363777
+    ],
+    "timestamp_unix": 1775086962.02968
+  },
+  {
+    "sample_id": 2,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      369.0,
+      294.0
+    ],
+    "survey_right_px": [
+      286.0,
+      276.0
+    ],
+    "fine_left_px": [
+      668.0,
+      362.0
+    ],
+    "fine_right_px": [
+      588.0,
+      345.0
+    ],
+    "triangulated_xy_mm": [
+      32.22320215515717,
+      241.0094173670983
+    ],
+    "final_xy_mm": [
+      22.6,
+      242.288
+    ],
+    "error_xy_mm": [
+      -9.623202155157166,
+      1.2785826329017027
+    ],
+    "delta_xy_mm_from_survey": [
+      -167.77679784484283,
+      41.009417367098294
+    ],
+    "timestamp_unix": 1775086992.4620287
+  },
+  {
+    "sample_id": 3,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      369.0,
+      294.0
+    ],
+    "survey_right_px": [
+      286.0,
+      275.0
+    ],
+    "fine_left_px": [
+      667.0,
+      365.0
+    ],
+    "fine_right_px": [
+      587.0,
+      346.0
+    ],
+    "triangulated_xy_mm": [
+      32.26609421862284,
+      241.28091402016105
+    ],
+    "final_xy_mm": [
+      23.487,
+      241.275
+    ],
+    "error_xy_mm": [
+      -8.779094218622841,
+      -0.005914020161043254
+    ],
+    "delta_xy_mm_from_survey": [
+      -167.73390578137716,
+      41.28091402016104
+    ],
+    "timestamp_unix": 1775087033.967972
+  },
+  {
+    "sample_id": 4,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      370.0,
+      293.0
+    ],
+    "survey_right_px": [
+      285.0,
+      276.0
+    ],
+    "fine_left_px": [
+      658.0,
+      362.0
+    ],
+    "fine_right_px": [
+      580.0,
+      345.0
+    ],
+    "triangulated_xy_mm": [
+      37.056140409554615,
+      240.14893399363777
+    ],
+    "final_xy_mm": [
+      24.6,
+      241.575
+    ],
+    "error_xy_mm": [
+      -12.456140409554614,
+      1.4260660063622197
+    ],
+    "delta_xy_mm_from_survey": [
+      -162.94385959044538,
+      40.14893399363777
+    ],
+    "timestamp_unix": 1775087066.6640327
+  },
+  {
+    "sample_id": 5,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      941.0,
+      609.0
+    ],
+    "survey_right_px": [
+      862.0,
+      594.0
+    ],
+    "fine_left_px": [
+      668.0,
+      358.0
+    ],
+    "fine_right_px": [
+      588.0,
+      341.0
+    ],
+    "triangulated_xy_mm": [
+      347.35289770755685,
+      60.859824888215115
+    ],
+    "final_xy_mm": [
+      339.65,
+      65.412
+    ],
+    "error_xy_mm": [
+      -7.702897707556872,
+      4.552175111784891
+    ],
+    "delta_xy_mm_from_survey": [
+      147.35289770755685,
+      -139.14017511178488
+    ],
+    "timestamp_unix": 1775087116.940276
+  },
+  {
+    "sample_id": 6,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      942.0,
+      610.0
+    ],
+    "survey_right_px": [
+      862.0,
+      596.0
+    ],
+    "fine_left_px": [
+      671.0,
+      361.0
+    ],
+    "fine_right_px": [
+      592.0,
+      343.0
+    ],
+    "triangulated_xy_mm": [
+      345.4923994566715,
+      62.13896642128381
+    ],
+    "final_xy_mm": [
+      339.712,
+      64.312
+    ],
+    "error_xy_mm": [
+      -5.780399456671489,
+      2.1730335787161863
+    ],
+    "delta_xy_mm_from_survey": [
+      145.49239945667145,
+      -137.8610335787162
+    ],
+    "timestamp_unix": 1775087146.3128114
+  },
+  {
+    "sample_id": 7,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      942.0,
+      609.0
+    ],
+    "survey_right_px": [
+      861.0,
+      594.0
+    ],
+    "fine_left_px": [
+      675.0,
+      364.0
+    ],
+    "fine_right_px": [
+      595.0,
+      347.0
+    ],
+    "triangulated_xy_mm": [
+      343.47364438554763,
+      64.69222461520175
+    ],
+    "final_xy_mm": [
+      339.913,
+      64.738
+    ],
+    "error_xy_mm": [
+      -3.5606443855476186,
+      0.04577538479824739
+    ],
+    "delta_xy_mm_from_survey": [
+      143.47364438554763,
+      -135.30777538479825
+    ],
+    "timestamp_unix": 1775087173.2436426
+  },
+  {
+    "sample_id": 8,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      607.0,
+      493.0
+    ],
+    "survey_right_px": [
+      528.0,
+      479.0
+    ],
+    "fine_left_px": [
+      667.0,
+      364.0
+    ],
+    "fine_right_px": [
+      589.0,
+      347.0
+    ],
+    "triangulated_xy_mm": [
+      163.74563020994506,
+      123.30155151717254
+    ],
+    "final_xy_mm": [
+      156.35,
+      123.3
+    ],
+    "error_xy_mm": [
+      -7.395630209945068,
+      -0.0015515171725439814
+    ],
+    "delta_xy_mm_from_survey": [
+      -36.25436979005493,
+      -76.69844848282746
+    ],
+    "timestamp_unix": 1775087388.1203554
+  },
+  {
+    "sample_id": 9,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      607.0,
+      495.0
+    ],
+    "survey_right_px": [
+      528.0,
+      478.0
+    ],
+    "fine_left_px": [
+      666.0,
+      363.0
+    ],
+    "fine_right_px": [
+      589.0,
+      347.0
+    ],
+    "triangulated_xy_mm": [
+      163.7162686345132,
+      122.97555226035702
+    ],
+    "final_xy_mm": [
+      155.837,
+      123.062
+    ],
+    "error_xy_mm": [
+      -7.87926863451321,
+      0.0864477396429777
+    ],
+    "delta_xy_mm_from_survey": [
+      -36.283731365486794,
+      -77.02444773964298
+    ],
+    "timestamp_unix": 1775087414.3575368
+  },
+  {
+    "sample_id": 10,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      639.0,
+      497.0
+    ],
+    "survey_right_px": [
+      560.0,
+      480.0
+    ],
+    "fine_left_px": [
+      667.0,
+      365.0
+    ],
+    "fine_right_px": [
+      589.0,
+      347.0
+    ],
+    "triangulated_xy_mm": [
+      182.2919059496662,
+      121.97788788728118
+    ],
+    "final_xy_mm": [
+      174.488,
+      121.975
+    ],
+    "error_xy_mm": [
+      -7.803905949666188,
+      -0.00288788728119016
+    ],
+    "delta_xy_mm_from_survey": [
+      -17.708094050333813,
+      -78.02211211271882
+    ],
+    "timestamp_unix": 1775087444.4665363
+  },
+  {
+    "sample_id": 11,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      603.0,
+      528.0
+    ],
+    "survey_right_px": [
+      523.0,
+      513.0
+    ],
+    "fine_left_px": [
+      666.0,
+      366.0
+    ],
+    "fine_right_px": [
+      588.0,
+      348.0
+    ],
+    "triangulated_xy_mm": [
+      161.37236513253157,
+      104.71467618030756
+    ],
+    "final_xy_mm": [
+      153.375,
+      104.713
+    ],
+    "error_xy_mm": [
+      -7.99736513253157,
+      -0.0016761803075695525
+    ],
+    "delta_xy_mm_from_survey": [
+      -38.62763486746844,
+      -95.28532381969244
+    ],
+    "timestamp_unix": 1775087470.9258704
+  },
+  {
+    "sample_id": 12,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1037.0,
+      193.0
+    ],
+    "survey_right_px": [
+      961.0,
+      173.0
+    ],
+    "fine_left_px": [
+      667.0,
+      359.0
+    ],
+    "fine_right_px": [
+      589.0,
+      342.0
+    ],
+    "triangulated_xy_mm": [
+      402.7994579679086,
+      287.3060414071384
+    ],
+    "final_xy_mm": [
+      394.513,
+      290.225
+    ],
+    "error_xy_mm": [
+      -8.286457967908632,
+      2.9189585928615998
+    ],
+    "delta_xy_mm_from_survey": [
+      202.7994579679086,
+      87.30604140713845
+    ],
+    "timestamp_unix": 1775087514.7008188
+  },
+  {
+    "sample_id": 13,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1037.0,
+      193.0
+    ],
+    "survey_right_px": [
+      961.0,
+      172.0
+    ],
+    "fine_left_px": [
+      667.0,
+      360.0
+    ],
+    "fine_right_px": [
+      590.0,
+      343.0
+    ],
+    "triangulated_xy_mm": [
+      402.9442811121428,
+      287.63559162988474
+    ],
+    "final_xy_mm": [
+      395.1,
+      290.087
+    ],
+    "error_xy_mm": [
+      -7.844281112142767,
+      2.451408370115246
+    ],
+    "delta_xy_mm_from_survey": [
+      202.9442811121428,
+      87.63559162988477
+    ],
+    "timestamp_unix": 1775087542.9397264
+  },
+  {
+    "sample_id": 14,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1004.0,
+      192.0
+    ],
+    "survey_right_px": [
+      925.0,
+      171.0
+    ],
+    "fine_left_px": [
+      666.0,
+      360.0
+    ],
+    "fine_right_px": [
+      589.0,
+      342.0
+    ],
+    "triangulated_xy_mm": [
+      384.31421581619986,
+      288.57359292328266
+    ],
+    "final_xy_mm": [
+      376.362,
+      291.625
+    ],
+    "error_xy_mm": [
+      -7.952215816199839,
+      3.0514070767173394
+    ],
+    "delta_xy_mm_from_survey": [
+      184.3142158161999,
+      88.57359292328265
+    ],
+    "timestamp_unix": 1775087570.7746232
+  },
+  {
+    "sample_id": 15,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1035.0,
+      228.0
+    ],
+    "survey_right_px": [
+      957.0,
+      208.0
+    ],
+    "fine_left_px": [
+      671.0,
+      359.0
+    ],
+    "fine_right_px": [
+      593.0,
+      341.0
+    ],
+    "triangulated_xy_mm": [
+      398.7656167264883,
+      267.7228564285543
+    ],
+    "final_xy_mm": [
+      393.225,
+      270.788
+    ],
+    "error_xy_mm": [
+      -5.540616726488281,
+      3.0651435714457307
+    ],
+    "delta_xy_mm_from_survey": [
+      198.7656167264883,
+      67.7228564285543
+    ],
+    "timestamp_unix": 1775087595.6724792
+  },
+  {
+    "sample_id": 16,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1035.0,
+      229.0
+    ],
+    "survey_right_px": [
+      957.0,
+      208.0
+    ],
+    "fine_left_px": [
+      671.0,
+      359.0
+    ],
+    "fine_right_px": [
+      593.0,
+      340.0
+    ],
+    "triangulated_xy_mm": [
+      398.8574575378218,
+      267.48750725688166
+    ],
+    "final_xy_mm": [
+      393.15,
+      271.025
+    ],
+    "error_xy_mm": [
+      -5.707457537821824,
+      3.537492743118321
+    ],
+    "delta_xy_mm_from_survey": [
+      198.8574575378218,
+      67.48750725688166
+    ],
+    "timestamp_unix": 1775087618.7105083
+  },
+  {
+    "sample_id": 17,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1001.0,
+      193.0
+    ],
+    "survey_right_px": [
+      922.0,
+      173.0
+    ],
+    "raw_triangulated_xy_mm": [
+      383.33031523758916,
+      288.12509759541985
+    ],
+    "final_xy_mm": [
+      375.362,
+      291.587
+    ],
+    "error_xy_mm": [
+      -7.968315237589138,
+      3.461902404580144
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775088501.1546214
+  },
+  {
+    "sample_id": 18,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      999.0,
+      228.0
+    ],
+    "survey_right_px": [
+      918.0,
+      209.0
+    ],
+    "raw_triangulated_xy_mm": [
+      379.3521866278306,
+      268.1294972659681
+    ],
+    "final_xy_mm": [
+      372.875,
+      272.062
+    ],
+    "error_xy_mm": [
+      -6.4771866278305765,
+      3.932502734031914
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775088574.7551546
+  },
+  {
+    "sample_id": 19,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      387.0,
+      639.0
+    ],
+    "survey_right_px": [
+      310.0,
+      623.0
+    ],
+    "raw_triangulated_xy_mm": [
+      36.12342747167361,
+      42.56679582622533
+    ],
+    "final_xy_mm": [
+      23.962,
+      40.287
+    ],
+    "error_xy_mm": [
+      -12.161427471673608,
+      -2.2797958262253317
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775088631.0281804
+  },
+  {
+    "sample_id": 20,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1060.0,
+      259.0
+    ],
+    "survey_right_px": [
+      984.0,
+      239.0
+    ],
+    "raw_triangulated_xy_mm": [
+      412.2805878309779,
+      250.85611914283282
+    ],
+    "final_xy_mm": [
+      408.8,
+      256.712
+    ],
+    "error_xy_mm": [
+      -3.4805878309778677,
+      5.855880857167165
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089209.8151186
+  },
+  {
+    "sample_id": 21,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1059.0,
+      295.0
+    ],
+    "survey_right_px": [
+      983.0,
+      274.0
+    ],
+    "raw_triangulated_xy_mm": [
+      413.3990526253447,
+      232.21180883374265
+    ],
+    "final_xy_mm": [
+      409.175,
+      237.825
+    ],
+    "error_xy_mm": [
+      -4.2240526253447115,
+      5.613191166257337
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089251.0428023
+  },
+  {
+    "sample_id": 22,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1092.0,
+      291.0
+    ],
+    "survey_right_px": [
+      1020.0,
+      271.0
+    ],
+    "raw_triangulated_xy_mm": [
+      431.8563032932349,
+      233.6515726031961
+    ],
+    "final_xy_mm": [
+      428.65,
+      238.188
+    ],
+    "error_xy_mm": [
+      -3.206303293234896,
+      4.5364273968039015
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089283.212122
+  },
+  {
+    "sample_id": 23,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      403.0,
+      615.0
+    ],
+    "survey_right_px": [
+      323.0,
+      598.0
+    ],
+    "raw_triangulated_xy_mm": [
+      48.73643575592072,
+      60.01463076930449
+    ],
+    "final_xy_mm": [
+      34.987,
+      58.312
+    ],
+    "error_xy_mm": [
+      -13.749435755920722,
+      -1.7026307693044913
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089334.6145113
+  },
+  {
+    "sample_id": 24,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      371.0,
+      613.0
+    ],
+    "survey_right_px": [
+      293.0,
+      596.0
+    ],
+    "raw_triangulated_xy_mm": [
+      29.37556825222856,
+      59.94083459713778
+    ],
+    "final_xy_mm": [
+      16.125,
+      57.862
+    ],
+    "error_xy_mm": [
+      -13.250568252228561,
+      -2.078834597137778
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089361.8160625
+  },
+  {
+    "sample_id": 25,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      402.0,
+      615.0
+    ],
+    "survey_right_px": [
+      323.0,
+      599.0
+    ],
+    "raw_triangulated_xy_mm": [
+      46.29777810647178,
+      57.827421826431305
+    ],
+    "final_xy_mm": [
+      34.662,
+      58.062
+    ],
+    "error_xy_mm": [
+      -11.635778106471783,
+      0.2345781735686927
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089421.8389087
+  },
+  {
+    "sample_id": 26,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      986.0,
+      600.0
+    ],
+    "survey_right_px": [
+      911.0,
+      586.0
+    ],
+    "raw_triangulated_xy_mm": [
+      376.6879797736478,
+      61.87962662829071
+    ],
+    "final_xy_mm": [
+      367.65,
+      68.037
+    ],
+    "error_xy_mm": [
+      -9.037979773647805,
+      6.157373371709298
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089467.8485243
+  },
+  {
+    "sample_id": 27,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1019.0,
+      600.0
+    ],
+    "survey_right_px": [
+      945.0,
+      587.0
+    ],
+    "raw_triangulated_xy_mm": [
+      391.1317029549018,
+      64.3879719043305
+    ],
+    "final_xy_mm": [
+      387.138,
+      66.688
+    ],
+    "error_xy_mm": [
+      -3.993702954901835,
+      2.3000280956695036
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089493.3474634
+  },
+  {
+    "sample_id": 28,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      980.0,
+      632.0
+    ],
+    "survey_right_px": [
+      906.0,
+      619.0
+    ],
+    "raw_triangulated_xy_mm": [
+      374.08945386462017,
+      43.03447481899937
+    ],
+    "final_xy_mm": [
+      365.688,
+      48.487
+    ],
+    "error_xy_mm": [
+      -8.40145386462018,
+      5.452525181000631
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089519.583122
+  },
+  {
+    "sample_id": 29,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1012.0,
+      631.0
+    ],
+    "survey_right_px": [
+      940.0,
+      619.0
+    ],
+    "raw_triangulated_xy_mm": [
+      391.7112850351223,
+      43.73419932993221
+    ],
+    "final_xy_mm": [
+      385.6,
+      47.2
+    ],
+    "error_xy_mm": [
+      -6.1112850351222505,
+      3.465800670067793
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089548.347751
+  },
+  {
+    "sample_id": 30,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      439.0,
+      606.0
+    ],
+    "survey_right_px": [
+      360.0,
+      591.0
+    ],
+    "raw_triangulated_xy_mm": [
+      64.96084434588658,
+      59.738270344585345
+    ],
+    "final_xy_mm": [
+      55.0,
+      61.225
+    ],
+    "error_xy_mm": [
+      -9.960844345886585,
+      1.4867296554146563
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089578.2207077
+  },
+  {
+    "sample_id": 31,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      986.0,
+      599.0
+    ],
+    "survey_right_px": [
+      910.0,
+      586.0
+    ],
+    "raw_triangulated_xy_mm": [
+      374.0876343329751,
+      64.05393542327587
+    ],
+    "final_xy_mm": [
+      368.05,
+      67.675
+    ],
+    "error_xy_mm": [
+      -6.037634332975074,
+      3.621064576724123
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089688.282726
+  },
+  {
+    "sample_id": 32,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      306.0,
+      43.0
+    ],
+    "survey_right_px": [
+      234.0,
+      31.0
+    ],
+    "raw_triangulated_xy_mm": [
+      41.04656907210105,
+      341.1598816029236
+    ],
+    "final_xy_mm": [
+      32.975,
+      344.625
+    ],
+    "error_xy_mm": [
+      -8.071569072101049,
+      3.4651183970764237
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089862.2090383
+  },
+  {
+    "sample_id": 33,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      335.0,
+      39.0
+    ],
+    "survey_right_px": [
+      260.0,
+      25.0
+    ],
+    "raw_triangulated_xy_mm": [
+      63.603199927210994,
+      337.80407507219195
+    ],
+    "final_xy_mm": [
+      51.8,
+      343.275
+    ],
+    "error_xy_mm": [
+      -11.803199927210997,
+      5.470924927808028
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089890.4068747
+  },
+  {
+    "sample_id": 34,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      303.0,
+      74.0
+    ],
+    "survey_right_px": [
+      230.0,
+      61.0
+    ],
+    "raw_triangulated_xy_mm": [
+      41.9818126940379,
+      320.42308318135235
+    ],
+    "final_xy_mm": [
+      32.213,
+      324.112
+    ],
+    "error_xy_mm": [
+      -9.768812694037898,
+      3.6889168186476695
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089919.6050978
+  },
+  {
+    "sample_id": 35,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      550.0,
+      403.0
+    ],
+    "survey_right_px": [
+      471.0,
+      385.0
+    ],
+    "raw_triangulated_xy_mm": [
+      180.32619394834654,
+      126.56198165125784
+    ],
+    "final_xy_mm": [
+      171.913,
+      130.038
+    ],
+    "error_xy_mm": [
+      -8.413193948346532,
+      3.4760183487421727
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089969.8818395
+  },
+  {
+    "sample_id": 36,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      581.0,
+      403.0
+    ],
+    "survey_right_px": [
+      503.0,
+      386.0
+    ],
+    "raw_triangulated_xy_mm": [
+      198.72919970587526,
+      125.85238240412521
+    ],
+    "final_xy_mm": [
+      190.738,
+      129.875
+    ],
+    "error_xy_mm": [
+      -7.99119970587526,
+      4.022617595874792
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775089992.6547525
+  },
+  {
+    "sample_id": 37,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      549.0,
+      435.0
+    ],
+    "survey_right_px": [
+      470.0,
+      418.0
+    ],
+    "raw_triangulated_xy_mm": [
+      179.36106584760773,
+      107.40131833661363
+    ],
+    "final_xy_mm": [
+      169.95,
+      109.85
+    ],
+    "error_xy_mm": [
+      -9.411065847607745,
+      2.448681663386367
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090014.7768307
+  },
+  {
+    "sample_id": 38,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      580.0,
+      435.0
+    ],
+    "survey_right_px": [
+      503.0,
+      418.0
+    ],
+    "raw_triangulated_xy_mm": [
+      197.18527315671355,
+      106.28987997402066
+    ],
+    "final_xy_mm": [
+      189.488,
+      110.275
+    ],
+    "error_xy_mm": [
+      -7.69727315671355,
+      3.9851200259793416
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090042.1168516
+  },
+  {
+    "sample_id": 39,
+    "survey_pose_xy_mm": [
+      250.0,
+      150.0
+    ],
+    "survey_left_px": [
+      353.0,
+      522.0
+    ],
+    "survey_right_px": [
+      274.0,
+      506.0
+    ],
+    "raw_triangulated_xy_mm": [
+      68.36419434771446,
+      60.77926809648061
+    ],
+    "final_xy_mm": [
+      55.963,
+      61.662
+    ],
+    "error_xy_mm": [
+      -12.401194347714458,
+      0.8827319035193923
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090069.554598
+  },
+  {
+    "sample_id": 40,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      227.0,
+      46.0
+    ],
+    "survey_right_px": [
+      161.0,
+      37.0
+    ],
+    "raw_triangulated_xy_mm": [
+      30.12415107992871,
+      300.8082910749618
+    ],
+    "final_xy_mm": [
+      24.725,
+      302.1
+    ],
+    "error_xy_mm": [
+      -5.399151079928707,
+      1.2917089250382219
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090281.3618448
+  },
+  {
+    "sample_id": 41,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      232.0,
+      16.0
+    ],
+    "survey_right_px": [
+      167.0,
+      8.0
+    ],
+    "raw_triangulated_xy_mm": [
+      24.659567519910183,
+      326.8054301611121
+    ],
+    "final_xy_mm": [
+      25.612,
+      320.65
+    ],
+    "error_xy_mm": [
+      0.952432480089815,
+      -6.155430161112122
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090317.2035525
+  },
+  {
+    "sample_id": 42,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      256.0,
+      14.0
+    ],
+    "survey_right_px": [
+      189.0,
+      5.0
+    ],
+    "raw_triangulated_xy_mm": [
+      47.48869542947972,
+      321.4405519073099
+    ],
+    "final_xy_mm": [
+      45.588,
+      318.763
+    ],
+    "error_xy_mm": [
+      -1.9006954294797183,
+      -2.677551907309919
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090358.3658335
+  },
+  {
+    "sample_id": 43,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      251.0,
+      45.0
+    ],
+    "survey_right_px": [
+      185.0,
+      35.0
+    ],
+    "raw_triangulated_xy_mm": [
+      41.76622750793865,
+      304.1560771454724
+    ],
+    "final_xy_mm": [
+      44.562,
+      299.587
+    ],
+    "error_xy_mm": [
+      2.795772492061346,
+      -4.56907714547242
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090398.0050972
+  },
+  {
+    "sample_id": 44,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      267.0,
+      440.0
+    ],
+    "survey_right_px": [
+      194.0,
+      421.0
+    ],
+    "raw_triangulated_xy_mm": [
+      65.09897373713557,
+      58.38448483271485
+    ],
+    "final_xy_mm": [
+      55.138,
+      61.287
+    ],
+    "error_xy_mm": [
+      -9.960973737135568,
+      2.902515167285152
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090424.2703729
+  },
+  {
+    "sample_id": 45,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      232.0,
+      17.0
+    ],
+    "survey_right_px": [
+      167.0,
+      8.0
+    ],
+    "raw_triangulated_xy_mm": [
+      24.96687469848223,
+      326.2264860854864
+    ],
+    "final_xy_mm": [
+      25.788,
+      320.625
+    ],
+    "error_xy_mm": [
+      0.8211253015177711,
+      -5.6014860854863855
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090510.6578386
+  },
+  {
+    "sample_id": 46,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      232.0,
+      16.0
+    ],
+    "survey_right_px": [
+      167.0,
+      7.0
+    ],
+    "raw_triangulated_xy_mm": [
+      24.861414597326302,
+      326.9723323966456
+    ],
+    "final_xy_mm": [
+      25.913,
+      320.725
+    ],
+    "error_xy_mm": [
+      1.0515854026736982,
+      -6.247332396645561
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090548.3618457
+  },
+  {
+    "sample_id": 47,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      251.0,
+      45.0
+    ],
+    "survey_right_px": [
+      185.0,
+      34.0
+    ],
+    "raw_triangulated_xy_mm": [
+      42.183363519712145,
+      304.1570941445787
+    ],
+    "final_xy_mm": [
+      44.85,
+      299.712
+    ],
+    "error_xy_mm": [
+      2.666636480287856,
+      -4.445094144578718
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090585.8343537
+  },
+  {
+    "sample_id": 48,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      226.0,
+      47.0
+    ],
+    "survey_right_px": [
+      161.0,
+      36.0
+    ],
+    "raw_triangulated_xy_mm": [
+      25.25870414559563,
+      304.1243518709796
+    ],
+    "final_xy_mm": [
+      24.188,
+      302.425
+    ],
+    "error_xy_mm": [
+      -1.0707041455956308,
+      -1.6993518709795694
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090612.3300848
+  },
+  {
+    "sample_id": 49,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      269.0,
+      440.0
+    ],
+    "survey_right_px": [
+      194.0,
+      421.0
+    ],
+    "raw_triangulated_xy_mm": [
+      73.09978686923282,
+      59.65770838943856
+    ],
+    "final_xy_mm": [
+      55.525,
+      61.388
+    ],
+    "error_xy_mm": [
+      -17.574786869232817,
+      1.7302916105614372
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090638.6717207
+  },
+  {
+    "sample_id": 50,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      232.0,
+      17.0
+    ],
+    "survey_right_px": [
+      167.0,
+      8.0
+    ],
+    "raw_triangulated_xy_mm": [
+      24.96687469848223,
+      326.2264860854864
+    ],
+    "final_xy_mm": [
+      26.725,
+      320.3
+    ],
+    "error_xy_mm": [
+      1.7581253015177722,
+      -5.926486085486374
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090722.7418272
+  },
+  {
+    "sample_id": 51,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      215.0,
+      217.0
+    ],
+    "survey_right_px": [
+      148.0,
+      203.0
+    ],
+    "raw_triangulated_xy_mm": [
+      30.7421754239017,
+      191.39747396846496
+    ],
+    "final_xy_mm": [
+      24.7,
+      193.288
+    ],
+    "error_xy_mm": [
+      -6.0421754239017,
+      1.890526031535046
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090784.6966562
+  },
+  {
+    "sample_id": 52,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      242.0,
+      215.0
+    ],
+    "survey_right_px": [
+      172.0,
+      201.0
+    ],
+    "raw_triangulated_xy_mm": [
+      51.33784315872413,
+      190.50005577124315
+    ],
+    "final_xy_mm": [
+      42.713,
+      194.413
+    ],
+    "error_xy_mm": [
+      -8.624843158724126,
+      3.9129442287568565
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090816.568281
+  },
+  {
+    "sample_id": 53,
+    "survey_pose_xy_mm": [
+      300.0,
+      100.0
+    ],
+    "survey_left_px": [
+      248.0,
+      437.0
+    ],
+    "survey_right_px": [
+      175.0,
+      421.0
+    ],
+    "raw_triangulated_xy_mm": [
+      61.28850637034287,
+      60.67144224966732
+    ],
+    "final_xy_mm": [
+      43.775,
+      62.487
+    ],
+    "error_xy_mm": [
+      -17.513506370342874,
+      1.8155577503326796
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775090866.5719075
+  },
+  {
+    "sample_id": 54,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1166.0,
+      623.0
+    ],
+    "survey_right_px": [
+      1112.0,
+      617.0
+    ],
+    "raw_triangulated_xy_mm": [
+      334.8709413165813,
+      126.69050231367981
+    ],
+    "final_xy_mm": [
+      318.562,
+      136.925
+    ],
+    "error_xy_mm": [
+      -16.308941316581297,
+      10.234497686320196
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091058.2630901
+  },
+  {
+    "sample_id": 55,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1187.0,
+      619.0
+    ],
+    "survey_right_px": [
+      1136.0,
+      613.0
+    ],
+    "raw_triangulated_xy_mm": [
+      363.10681209742165,
+      121.37040841898585
+    ],
+    "final_xy_mm": [
+      337.9,
+      137.1
+    ],
+    "error_xy_mm": [
+      -25.206812097421675,
+      15.729591581014148
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091093.5720754
+  },
+  {
+    "sample_id": 56,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1181.0,
+      646.0
+    ],
+    "survey_right_px": [
+      1131.0,
+      642.0
+    ],
+    "raw_triangulated_xy_mm": [
+      371.5567733949189,
+      95.88463249871856
+    ],
+    "final_xy_mm": [
+      338.112,
+      118.475
+    ],
+    "error_xy_mm": [
+      -33.444773394918855,
+      22.590367501281435
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091139.871081
+  },
+  {
+    "sample_id": 57,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1161.0,
+      650.0
+    ],
+    "survey_right_px": [
+      1107.0,
+      645.0
+    ],
+    "raw_triangulated_xy_mm": [
+      334.90342046259576,
+      107.42863816226011
+    ],
+    "final_xy_mm": [
+      318.1,
+      117.975
+    ],
+    "error_xy_mm": [
+      -16.80342046259574,
+      10.54636183773988
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091176.8062687
+  },
+  {
+    "sample_id": 58,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1166.0,
+      623.0
+    ],
+    "survey_right_px": [
+      1112.0,
+      617.0
+    ],
+    "raw_triangulated_xy_mm": [
+      334.8709413165813,
+      126.69050231367981
+    ],
+    "final_xy_mm": [
+      318.5,
+      138.062
+    ],
+    "error_xy_mm": [
+      -16.37094131658131,
+      11.371497686320197
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091233.8546226
+  },
+  {
+    "sample_id": 59,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1183.0,
+      645.0
+    ],
+    "survey_right_px": [
+      1131.0,
+      642.0
+    ],
+    "raw_triangulated_xy_mm": [
+      357.54558611946396,
+      104.8838239647819
+    ],
+    "final_xy_mm": [
+      338.4,
+      117.287
+    ],
+    "error_xy_mm": [
+      -19.145586119463985,
+      12.40317603521811
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091268.7741327
+  },
+  {
+    "sample_id": 60,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1200.0,
+      636.0
+    ],
+    "survey_right_px": [
+      1151.0,
+      631.0
+    ],
+    "raw_triangulated_xy_mm": [
+      387.04301545202554,
+      101.49611508752147
+    ],
+    "final_xy_mm": [
+      352.237,
+      122.812
+    ],
+    "error_xy_mm": [
+      -34.80601545202552,
+      21.315884912478523
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091335.810132
+  },
+  {
+    "sample_id": 61,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1218.0,
+      632.0
+    ],
+    "survey_right_px": [
+      1171.0,
+      627.0
+    ],
+    "raw_triangulated_xy_mm": [
+      413.6072775629824,
+      96.79679282397515
+    ],
+    "final_xy_mm": [
+      370.587,
+      121.425
+    ],
+    "error_xy_mm": [
+      -43.020277562982415,
+      24.628207176024844
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091372.8002806
+  },
+  {
+    "sample_id": 62,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1213.0,
+      657.0
+    ],
+    "survey_right_px": [
+      1167.0,
+      656.0
+    ],
+    "raw_triangulated_xy_mm": [
+      423.52276315260315,
+      70.05704263155565
+    ],
+    "final_xy_mm": [
+      370.237,
+      102.037
+    ],
+    "error_xy_mm": [
+      -53.285763152603124,
+      31.97995736844436
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091410.5678449
+  },
+  {
+    "sample_id": 63,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1201.0,
+      577.0
+    ],
+    "survey_right_px": [
+      1152.0,
+      571.0
+    ],
+    "raw_triangulated_xy_mm": [
+      380.60616885694895,
+      145.36394282715818
+    ],
+    "final_xy_mm": [
+      344.7,
+      163.913
+    ],
+    "error_xy_mm": [
+      -35.906168856948966,
+      18.549057172841827
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091483.3491855
+  },
+  {
+    "sample_id": 64,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1221.0,
+      574.0
+    ],
+    "survey_right_px": [
+      1174.0,
+      568.0
+    ],
+    "raw_triangulated_xy_mm": [
+      406.1289367433446,
+      142.27339264862502
+    ],
+    "final_xy_mm": [
+      364.575,
+      162.812
+    ],
+    "error_xy_mm": [
+      -41.55393674334459,
+      20.538607351374992
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091515.6460478
+  },
+  {
+    "sample_id": 65,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1159.0,
+      653.0
+    ],
+    "survey_right_px": [
+      1105.0,
+      650.0
+    ],
+    "raw_triangulated_xy_mm": [
+      335.0283387550525,
+      104.02546322745718
+    ],
+    "final_xy_mm": [
+      317.7,
+      115.613
+    ],
+    "error_xy_mm": [
+      -17.328338755052528,
+      11.587536772542819
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091577.4875822
+  },
+  {
+    "sample_id": 66,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1191.0,
+      482.0
+    ],
+    "survey_right_px": [
+      1137.0,
+      469.0
+    ],
+    "raw_triangulated_xy_mm": [
+      338.27492012382965,
+      220.01055663577785
+    ],
+    "final_xy_mm": [
+      326.038,
+      226.863
+    ],
+    "error_xy_mm": [
+      -12.236920123829634,
+      6.852443364222154
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091610.62608
+  },
+  {
+    "sample_id": 67,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1212.0,
+      481.0
+    ],
+    "survey_right_px": [
+      1161.0,
+      470.0
+    ],
+    "raw_triangulated_xy_mm": [
+      363.2618761170211,
+      216.8940959682641
+    ],
+    "final_xy_mm": [
+      345.513,
+      225.363
+    ],
+    "error_xy_mm": [
+      -17.748876117021098,
+      8.468904031735889
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091645.224487
+  },
+  {
+    "sample_id": 68,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1208.0,
+      513.0
+    ],
+    "survey_right_px": [
+      1157.0,
+      503.0
+    ],
+    "raw_triangulated_xy_mm": [
+      363.13319077035663,
+      196.01975321898644
+    ],
+    "final_xy_mm": [
+      344.7,
+      206.238
+    ],
+    "error_xy_mm": [
+      -18.433190770356646,
+      10.218246781013562
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091674.166189
+  },
+  {
+    "sample_id": 69,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1179.0,
+      569.0
+    ],
+    "survey_right_px": [
+      1127.0,
+      560.0
+    ],
+    "raw_triangulated_xy_mm": [
+      349.63855387874264,
+      158.75650689426269
+    ],
+    "final_xy_mm": [
+      324.712,
+      173.4
+    ],
+    "error_xy_mm": [
+      -24.926553878742652,
+      14.64349310573732
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091732.829057
+  },
+  {
+    "sample_id": 70,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1209.0,
+      565.0
+    ],
+    "survey_right_px": [
+      1159.0,
+      557.0
+    ],
+    "raw_triangulated_xy_mm": [
+      374.2962489938467,
+      158.55813838830892
+    ],
+    "final_xy_mm": [
+      352.125,
+      171.413
+    ],
+    "error_xy_mm": [
+      -22.17124899384669,
+      12.854861611691092
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091763.2969115
+  },
+  {
+    "sample_id": 71,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1209.0,
+      565.0
+    ],
+    "survey_right_px": [
+      1160.0,
+      557.0
+    ],
+    "raw_triangulated_xy_mm": [
+      382.30011932310447,
+      155.42558566565023
+    ],
+    "final_xy_mm": [
+      351.513,
+      170.775
+    ],
+    "error_xy_mm": [
+      -30.78711932310449,
+      15.349414334349774
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775091795.3017771
+  },
+  {
+    "sample_id": 72,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1180.0,
+      568.0
+    ],
+    "survey_right_px": [
+      1126.0,
+      560.0
+    ],
+    "raw_triangulated_xy_mm": [
+      336.7783346135722,
+      164.69871014661013
+    ],
+    "final_xy_mm": [
+      324.663,
+      173.0
+    ],
+    "error_xy_mm": [
+      -12.115334613572202,
+      8.301289853389875
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092013.0990787
+  },
+  {
+    "sample_id": 73,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1180.0,
+      568.0
+    ],
+    "survey_right_px": [
+      1127.0,
+      560.0
+    ],
+    "raw_triangulated_xy_mm": [
+      343.40286913276685,
+      161.93446698705134
+    ],
+    "final_xy_mm": [
+      324.688,
+      173.0
+    ],
+    "error_xy_mm": [
+      -18.714869132766864,
+      11.065533012948663
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092045.3351524
+  },
+  {
+    "sample_id": 74,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1180.0,
+      567.0
+    ],
+    "survey_right_px": [
+      1127.0,
+      560.0
+    ],
+    "raw_triangulated_xy_mm": [
+      343.6679307943162,
+      162.13739757692477
+    ],
+    "final_xy_mm": [
+      324.562,
+      172.5
+    ],
+    "error_xy_mm": [
+      -19.10593079431618,
+      10.36260242307523
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092074.8940423
+  },
+  {
+    "sample_id": 75,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1199.0,
+      546.0
+    ],
+    "survey_right_px": [
+      1148.0,
+      537.0
+    ],
+    "raw_triangulated_xy_mm": [
+      361.8638700562776,
+      173.47314913984886
+    ],
+    "final_xy_mm": [
+      339.487,
+      185.738
+    ],
+    "error_xy_mm": [
+      -22.376870056277596,
+      12.264850860151142
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092108.159297
+  },
+  {
+    "sample_id": 76,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1238.0,
+      334.0
+    ],
+    "survey_right_px": [
+      1190.0,
+      316.0
+    ],
+    "raw_triangulated_xy_mm": [
+      393.9697545471531,
+      309.82105256740647
+    ],
+    "final_xy_mm": [
+      363.775,
+      315.062
+    ],
+    "error_xy_mm": [
+      -30.19475454715314,
+      5.2409474325935435
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092150.6706312
+  },
+  {
+    "sample_id": 77,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1238.0,
+      334.0
+    ],
+    "survey_right_px": [
+      1190.0,
+      316.0
+    ],
+    "raw_triangulated_xy_mm": [
+      393.9697545471531,
+      309.82105256740647
+    ],
+    "final_xy_mm": [
+      363.562,
+      314.763
+    ],
+    "error_xy_mm": [
+      -30.407754547153104,
+      4.941947432593508
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092184.3020759
+  },
+  {
+    "sample_id": 78,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1254.0,
+      317.0
+    ],
+    "survey_right_px": [
+      1209.0,
+      296.0
+    ],
+    "raw_triangulated_xy_mm": [
+      430.12510775423385,
+      322.7923637778116
+    ],
+    "final_xy_mm": [
+      379.175,
+      326.6
+    ],
+    "error_xy_mm": [
+      -50.95010775423384,
+      3.807636222188421
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092258.9785655
+  },
+  {
+    "sample_id": 79,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1254.0,
+      317.0
+    ],
+    "survey_right_px": [
+      1209.0,
+      297.0
+    ],
+    "raw_triangulated_xy_mm": [
+      429.82153041009207,
+      322.44240600660515
+    ],
+    "final_xy_mm": [
+      378.688,
+      326.938
+    ],
+    "error_xy_mm": [
+      -51.13353041009208,
+      4.495593993394834
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092290.8417764
+  },
+  {
+    "sample_id": 80,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1253.0,
+      317.0
+    ],
+    "survey_right_px": [
+      1208.0,
+      297.0
+    ],
+    "raw_triangulated_xy_mm": [
+      429.3233892748289,
+      322.46586251672414
+    ],
+    "final_xy_mm": [
+      378.538,
+      326.85
+    ],
+    "error_xy_mm": [
+      -50.7853892748289,
+      4.384137483275879
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092346.8192124
+  },
+  {
+    "sample_id": 81,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1262.0,
+      340.0
+    ],
+    "survey_right_px": [
+      1219.0,
+      323.0
+    ],
+    "raw_triangulated_xy_mm": [
+      452.86313836123435,
+      305.923643578272
+    ],
+    "final_xy_mm": [
+      389.725,
+      310.475
+    ],
+    "error_xy_mm": [
+      -63.138138361234326,
+      4.5513564217280305
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092405.0182886
+  },
+  {
+    "sample_id": 82,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1152.0,
+      595.0
+    ],
+    "survey_right_px": [
+      1095.0,
+      587.0
+    ],
+    "raw_triangulated_xy_mm": [
+      311.92841002242096,
+      152.04132524304435
+    ],
+    "final_xy_mm": [
+      305.125,
+      157.325
+    ],
+    "error_xy_mm": [
+      -6.803410022420962,
+      5.283674756955634
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092446.9579444
+  },
+  {
+    "sample_id": 83,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1170.0,
+      619.0
+    ],
+    "survey_right_px": [
+      1117.0,
+      613.0
+    ],
+    "raw_triangulated_xy_mm": [
+      342.65776143805766,
+      126.41484875370648
+    ],
+    "final_xy_mm": [
+      323.788,
+      138.475
+    ],
+    "error_xy_mm": [
+      -18.86976143805765,
+      12.060151246293515
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092478.6171725
+  },
+  {
+    "sample_id": 84,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      703.0,
+      632.0
+    ],
+    "survey_right_px": [
+      625.0,
+      616.0
+    ],
+    "raw_triangulated_xy_mm": [
+      37.82345298358207,
+      142.57938493329345
+    ],
+    "final_xy_mm": [
+      29.038,
+      146.413
+    ],
+    "error_xy_mm": [
+      -8.785452983582072,
+      3.8336150667065567
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092517.3385053
+  },
+  {
+    "sample_id": 85,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      734.0,
+      666.0
+    ],
+    "survey_right_px": [
+      656.0,
+      650.0
+    ],
+    "raw_triangulated_xy_mm": [
+      55.22807337915883,
+      123.23150535874049
+    ],
+    "final_xy_mm": [
+      47.862,
+      127.425
+    ],
+    "error_xy_mm": [
+      -7.366073379158827,
+      4.193494641259505
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092545.2896461
+  },
+  {
+    "sample_id": 86,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1248.0,
+      608.0
+    ],
+    "survey_right_px": [
+      1206.0,
+      604.0
+    ],
+    "raw_triangulated_xy_mm": [
+      479.34254378467386,
+      93.46438689968016
+    ],
+    "final_xy_mm": [
+      403.375,
+      132.2
+    ],
+    "error_xy_mm": [
+      -75.96754378467386,
+      38.735613100319824
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092626.9267583
+  },
+  {
+    "sample_id": 87,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1223.0,
+      655.0
+    ],
+    "survey_right_px": [
+      1179.0,
+      653.0
+    ],
+    "raw_triangulated_xy_mm": [
+      449.7058931628157,
+      61.48255094538183
+    ],
+    "final_xy_mm": [
+      385.575,
+      99.0
+    ],
+    "error_xy_mm": [
+      -64.13089316281571,
+      37.51744905461817
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092667.0613875
+  },
+  {
+    "sample_id": 88,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1193.0,
+      646.0
+    ],
+    "survey_right_px": [
+      1143.0,
+      644.0
+    ],
+    "raw_triangulated_xy_mm": [
+      377.17392913904143,
+      96.48377687157213
+    ],
+    "final_xy_mm": [
+      346.087,
+      116.062
+    ],
+    "error_xy_mm": [
+      -31.086929139041445,
+      19.578223128427865
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092699.833573
+  },
+  {
+    "sample_id": 89,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1082.0,
+      646.0
+    ],
+    "survey_right_px": [
+      1018.0,
+      639.0
+    ],
+    "raw_triangulated_xy_mm": [
+      259.77451182733614,
+      128.06628201435362
+    ],
+    "final_xy_mm": [
+      258.962,
+      129.025
+    ],
+    "error_xy_mm": [
+      -0.8125118273361522,
+      0.9587179856463877
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092739.9024878
+  },
+  {
+    "sample_id": 90,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1064.0,
+      602.0
+    ],
+    "survey_right_px": [
+      998.0,
+      593.0
+    ],
+    "raw_triangulated_xy_mm": [
+      251.04195831457565,
+      153.05374206382024
+    ],
+    "final_xy_mm": [
+      243.3,
+      158.425
+    ],
+    "error_xy_mm": [
+      -7.7419583145756405,
+      5.371257936179774
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092770.705433
+  },
+  {
+    "sample_id": 91,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      692.0,
+      609.0
+    ],
+    "survey_right_px": [
+      614.0,
+      592.0
+    ],
+    "raw_triangulated_xy_mm": [
+      31.745581602091633,
+      156.05050324493075
+    ],
+    "final_xy_mm": [
+      23.337,
+      158.837
+    ],
+    "error_xy_mm": [
+      -8.408581602091633,
+      2.786496755069237
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092814.0394642
+  },
+  {
+    "sample_id": 92,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1044.0,
+      605.0
+    ],
+    "survey_right_px": [
+      976.0,
+      595.0
+    ],
+    "raw_triangulated_xy_mm": [
+      417.85925643385355,
+      52.51713365845208
+    ],
+    "final_xy_mm": [
+      411.413,
+      57.188
+    ],
+    "error_xy_mm": [
+      -6.446256433853534,
+      4.670866341547921
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775092936.7003076
+  },
+  {
+    "sample_id": 93,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      229.0,
+      653.0
+    ],
+    "survey_right_px": [
+      165.0,
+      632.0
+    ],
+    "raw_triangulated_xy_mm": [
+      71.83842740926065,
+      170.75427369950137
+    ],
+    "final_xy_mm": [
+      64.65,
+      173.325
+    ],
+    "error_xy_mm": [
+      -7.18842740926064,
+      2.5707263004986203
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093279.0583951
+  },
+  {
+    "sample_id": 94,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      252.0,
+      659.0
+    ],
+    "survey_right_px": [
+      186.0,
+      637.0
+    ],
+    "raw_triangulated_xy_mm": [
+      90.94574816402923,
+      170.49588785232643
+    ],
+    "final_xy_mm": [
+      83.975,
+      173.925
+    ],
+    "error_xy_mm": [
+      -6.9707481640292315,
+      3.429112147673578
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093306.887516
+  },
+  {
+    "sample_id": 95,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      234.0,
+      681.0
+    ],
+    "survey_right_px": [
+      170.0,
+      658.0
+    ],
+    "raw_triangulated_xy_mm": [
+      71.19149088521118,
+      151.09984844254618
+    ],
+    "final_xy_mm": [
+      63.975,
+      153.587
+    ],
+    "error_xy_mm": [
+      -7.216490885211179,
+      2.4871515574538137
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093336.9269123
+  },
+  {
+    "sample_id": 96,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      229.0,
+      653.0
+    ],
+    "survey_right_px": [
+      165.0,
+      632.0
+    ],
+    "raw_triangulated_xy_mm": [
+      71.83842740926065,
+      170.75427369950137
+    ],
+    "final_xy_mm": [
+      64.8,
+      173.938
+    ],
+    "error_xy_mm": [
+      -7.038427409260649,
+      3.18372630049862
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093389.4721856
+  },
+  {
+    "sample_id": 97,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      252.0,
+      658.0
+    ],
+    "survey_right_px": [
+      185.0,
+      637.0
+    ],
+    "raw_triangulated_xy_mm": [
+      96.49828776500027,
+      174.77096361680634
+    ],
+    "final_xy_mm": [
+      83.625,
+      175.55
+    ],
+    "error_xy_mm": [
+      -12.87328776500027,
+      0.7790363831936702
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093416.6105692
+  },
+  {
+    "sample_id": 98,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      230.0,
+      653.0
+    ],
+    "survey_right_px": [
+      165.0,
+      632.0
+    ],
+    "raw_triangulated_xy_mm": [
+      77.67161478318712,
+      174.23292052015714
+    ],
+    "final_xy_mm": [
+      64.688,
+      175.663
+    ],
+    "error_xy_mm": [
+      -12.983614783187122,
+      1.430079479842874
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093494.04187
+  },
+  {
+    "sample_id": 99,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      257.0,
+      686.0
+    ],
+    "survey_right_px": [
+      190.0,
+      663.0
+    ],
+    "raw_triangulated_xy_mm": [
+      96.89669883290688,
+      156.52016072455
+    ],
+    "final_xy_mm": [
+      82.925,
+      157.175
+    ],
+    "error_xy_mm": [
+      -13.971698832906881,
+      0.6548392754500014
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093521.4753592
+  },
+  {
+    "sample_id": 100,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      257.0,
+      541.0
+    ],
+    "survey_right_px": [
+      186.0,
+      521.0
+    ],
+    "raw_triangulated_xy_mm": [
+      110.14933812264363,
+      249.9695899801725
+    ],
+    "final_xy_mm": [
+      95.35,
+      249.9
+    ],
+    "error_xy_mm": [
+      -14.799338122643633,
+      -0.06958998017248064
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093568.172166
+  },
+  {
+    "sample_id": 101,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      285.0,
+      574.0
+    ],
+    "survey_right_px": [
+      212.0,
+      555.0
+    ],
+    "raw_triangulated_xy_mm": [
+      128.5560285310545,
+      231.6153063956341
+    ],
+    "final_xy_mm": [
+      113.975,
+      232.05
+    ],
+    "error_xy_mm": [
+      -14.5810285310545,
+      0.4346936043659184
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093595.8418605
+  },
+  {
+    "sample_id": 102,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      445.0,
+      606.0
+    ],
+    "survey_right_px": [
+      367.0,
+      591.0
+    ],
+    "raw_triangulated_xy_mm": [
+      216.4183233093871,
+      207.30385836516038
+    ],
+    "final_xy_mm": [
+      207.337,
+      209.7
+    ],
+    "error_xy_mm": [
+      -9.081323309387102,
+      2.3961416348396085
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093637.5776954
+  },
+  {
+    "sample_id": 103,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      213.0,
+      663.0
+    ],
+    "survey_right_px": [
+      150.0,
+      640.0
+    ],
+    "raw_triangulated_xy_mm": [
+      56.288226015471366,
+      161.7244238363094
+    ],
+    "final_xy_mm": [
+      48.5,
+      163.962
+    ],
+    "error_xy_mm": [
+      -7.788226015471366,
+      2.2375761636905906
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093684.3858063
+  },
+  {
+    "sample_id": 104,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      213.0,
+      663.0
+    ],
+    "survey_right_px": [
+      151.0,
+      641.0
+    ],
+    "raw_triangulated_xy_mm": [
+      51.01888852759441,
+      157.87196144096464
+    ],
+    "final_xy_mm": [
+      48.6,
+      163.688
+    ],
+    "error_xy_mm": [
+      -2.4188885275944116,
+      5.8160385590353485
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093713.1154857
+  },
+  {
+    "sample_id": 105,
+    "survey_pose_xy_mm": [
+      350.0,
+      350.0
+    ],
+    "survey_left_px": [
+      547.0,
+      660.0
+    ],
+    "survey_right_px": [
+      467.0,
+      644.0
+    ],
+    "raw_triangulated_xy_mm": [
+      278.1434563069275,
+      180.76529757510667
+    ],
+    "final_xy_mm": [
+      270.775,
+      183.6
+    ],
+    "error_xy_mm": [
+      -7.368456306927499,
+      2.8347024248933224
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093750.8892415
+  },
+  {
+    "sample_id": 106,
+    "survey_pose_xy_mm": [
+      150.0,
+      50.0
+    ],
+    "survey_left_px": [
+      877.0,
+      255.0
+    ],
+    "survey_right_px": [
+      795.0,
+      239.0
+    ],
+    "raw_triangulated_xy_mm": [
+      269.37247816190074,
+      107.29314278372685
+    ],
+    "final_xy_mm": [
+      261.85,
+      109.65
+    ],
+    "error_xy_mm": [
+      -7.522478161900722,
+      2.3568572162731556
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775093996.0386279
+  },
+  {
+    "sample_id": 107,
+    "survey_pose_xy_mm": [
+      150.0,
+      50.0
+    ],
+    "survey_left_px": [
+      939.0,
+      92.0
+    ],
+    "survey_right_px": [
+      865.0,
+      71.0
+    ],
+    "raw_triangulated_xy_mm": [
+      314.756888182472,
+      206.29589757977237
+    ],
+    "final_xy_mm": [
+      309.7,
+      215.413
+    ],
+    "error_xy_mm": [
+      -5.056888182471994,
+      9.117102420227639
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094070.8478308
+  },
+  {
+    "sample_id": 108,
+    "survey_pose_xy_mm": [
+      150.0,
+      50.0
+    ],
+    "survey_left_px": [
+      936.0,
+      61.0
+    ],
+    "survey_right_px": [
+      865.0,
+      37.0
+    ],
+    "raw_triangulated_xy_mm": [
+      320.1754964648476,
+      232.03524481643822
+    ],
+    "final_xy_mm": [
+      309.325,
+      234.95
+    ],
+    "error_xy_mm": [
+      -10.850496464847595,
+      2.914755183561766
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094101.6354673
+  },
+  {
+    "sample_id": 109,
+    "survey_pose_xy_mm": [
+      150.0,
+      50.0
+    ],
+    "survey_left_px": [
+      576.0,
+      104.0
+    ],
+    "survey_right_px": [
+      497.0,
+      85.0
+    ],
+    "raw_triangulated_xy_mm": [
+      99.68631145892309,
+      201.3973841421811
+    ],
+    "final_xy_mm": [
+      90.625,
+      203.55
+    ],
+    "error_xy_mm": [
+      -9.061311458923086,
+      2.1526158578189154
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094221.2027628
+  },
+  {
+    "sample_id": 110,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1110.0,
+      632.0
+    ],
+    "survey_right_px": [
+      1055.0,
+      624.0
+    ],
+    "raw_triangulated_xy_mm": [
+      312.568823386945,
+      113.934573271147
+    ],
+    "final_xy_mm": [
+      307.938,
+      118.45
+    ],
+    "error_xy_mm": [
+      -4.630823386944996,
+      4.515426728853001
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094430.9970906
+  },
+  {
+    "sample_id": 111,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1109.0,
+      632.0
+    ],
+    "survey_right_px": [
+      1055.0,
+      625.0
+    ],
+    "raw_triangulated_xy_mm": [
+      318.90195956926146,
+      109.26394222527188
+    ],
+    "final_xy_mm": [
+      307.225,
+      118.688
+    ],
+    "error_xy_mm": [
+      -11.676959569261442,
+      9.424057774728126
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094464.1304746
+  },
+  {
+    "sample_id": 112,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1109.0,
+      631.0
+    ],
+    "survey_right_px": [
+      1054.0,
+      623.0
+    ],
+    "raw_triangulated_xy_mm": [
+      312.4042488401406,
+      114.29149693960807
+    ],
+    "final_xy_mm": [
+      307.075,
+      118.375
+    ],
+    "error_xy_mm": [
+      -5.329248840140622,
+      4.083503060391934
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094496.8343768
+  },
+  {
+    "sample_id": 113,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1132.0,
+      628.0
+    ],
+    "survey_right_px": [
+      1079.0,
+      621.0
+    ],
+    "raw_triangulated_xy_mm": [
+      331.31949806388127,
+      113.66407095313585
+    ],
+    "final_xy_mm": [
+      326.95,
+      117.125
+    ],
+    "error_xy_mm": [
+      -4.369498063881281,
+      3.460929046864152
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094547.0975595
+  },
+  {
+    "sample_id": 114,
+    "survey_pose_xy_mm": [
+      20.0,
+      300.0
+    ],
+    "survey_left_px": [
+      1123.0,
+      590.0
+    ],
+    "survey_right_px": [
+      1051.0,
+      583.0
+    ],
+    "raw_triangulated_xy_mm": [
+      241.7333305047185,
+      181.86295332617127
+    ],
+    "final_xy_mm": [
+      237.15,
+      185.425
+    ],
+    "error_xy_mm": [
+      -4.583330504718504,
+      3.562046673828746
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775094605.3360791
+  },
+  {
+    "sample_id": 115,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      435.0,
+      113.0
+    ],
+    "survey_right_px": [
+      342.0,
+      95.0
+    ],
+    "raw_triangulated_xy_mm": [
+      87.28723804495843,
+      320.86333466114104
+    ],
+    "final_xy_mm": [
+      82.312,
+      322.763
+    ],
+    "error_xy_mm": [
+      -4.975238044958431,
+      1.899665338858938
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775526996.1744502
+  },
+  {
+    "sample_id": 116,
+    "survey_pose_xy_mm": [
+      200.0,
+      200.0
+    ],
+    "survey_left_px": [
+      1096.0,
+      165.0
+    ],
+    "survey_right_px": [
+      1016.0,
+      139.0
+    ],
+    "raw_triangulated_xy_mm": [
+      401.53497593439613,
+      290.46916266930054
+    ],
+    "final_xy_mm": [
+      394.925,
+      293.1
+    ],
+    "error_xy_mm": [
+      -6.609975934396118,
+      2.630837330699478
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775527058.039324
+  },
+  {
+    "sample_id": 117,
+    "survey_pose_xy_mm": [
+      350.0,
+      50.0
+    ],
+    "survey_left_px": [
+      170.0,
+      85.0
+    ],
+    "survey_right_px": [
+      100.0,
+      77.0
+    ],
+    "raw_triangulated_xy_mm": [
+      91.18472455756802,
+      196.51174196259143
+    ],
+    "final_xy_mm": [
+      84.188,
+      200.962
+    ],
+    "error_xy_mm": [
+      -6.996724557568015,
+      4.45025803740856
+    ],
+    "correction_active": true,
+    "timestamp_unix": 1775527176.2802541
+  }
+]

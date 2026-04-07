@@ -9,7 +9,7 @@ from pathlib import Path
 # ============================================================
 PATTERN_SIZE = (6, 7)      # inner corners
 SQUARE_SIZE_MM = 25.0
-MAX_VIEWS = 30             # keep dataset stable
+MAX_VIEWS = 18             # reduced for stability
 MIN_VIEWS = 8
 SAVE_DEBUG = False
 
@@ -241,30 +241,72 @@ def thin_dataset(objpoints, imgpointsL, imgpointsR, per_pair, max_views):
 
 
 # ============================================================
+# CALIBRATION HELPERS
+# ============================================================
+def view_spread_score(corners):
+    pts = np.asarray(corners, dtype=np.float64).reshape(-1, 2)
+    xspan = pts[:, 0].max() - pts[:, 0].min()
+    yspan = pts[:, 1].max() - pts[:, 1].min()
+    return float(xspan * yspan)
+
+
+def reorder_views_by_quality(objpoints, imgpoints):
+    order = np.argsort([view_spread_score(p) for p in imgpoints])[::-1]
+    obj_sorted = [objpoints[i] for i in order]
+    img_sorted = [imgpoints[i] for i in order]
+    return obj_sorted, img_sorted, order.tolist()
+
+
+# ============================================================
 # CALIBRATION
 # ============================================================
-def calibrate_single_fisheye(objpoints, imgpoints, img_size):
-    K = np.eye(3, dtype=np.float64)
-    D = np.zeros((4, 1), dtype=np.float64)
+def calibrate_single_fisheye(objpoints, imgpoints, img_size, camera_name="camera"):
+    objpoints = [np.asarray(o, dtype=np.float64).reshape(-1, 1, 3) for o in objpoints]
+    imgpoints = [np.asarray(p, dtype=np.float64).reshape(-1, 1, 2) for p in imgpoints]
 
-    flags = (
-        cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC
-        | cv2.fisheye.CALIB_CHECK_COND
-        | cv2.fisheye.CALIB_FIX_SKEW
-    )
+    objpoints, imgpoints, order = reorder_views_by_quality(objpoints, imgpoints)
 
-    rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(
-        objectPoints=objpoints,
-        imagePoints=imgpoints,
-        image_size=img_size,
-        K=K,
-        D=D,
-        rvecs=None,
-        tvecs=None,
-        flags=flags,
-        criteria=CALIB_CRITERIA,
+    total_views = len(objpoints)
+    min_keep = max(MIN_VIEWS, 8)
+
+    last_error = None
+
+    for keep in range(total_views, min_keep - 1, -1):
+        try:
+            K = np.eye(3, dtype=np.float64)
+            D = np.zeros((4, 1), dtype=np.float64)
+
+            flags = (
+                cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC
+                | cv2.fisheye.CALIB_FIX_SKEW
+            )
+
+            rms, K, D, rvecs, tvecs = cv2.fisheye.calibrate(
+                objectPoints=objpoints[:keep],
+                imagePoints=imgpoints[:keep],
+                image_size=img_size,
+                K=K,
+                D=D,
+                rvecs=None,
+                tvecs=None,
+                flags=flags,
+                criteria=CALIB_CRITERIA,
+            )
+
+            kept_original_indices = order[:keep]
+            print(f"{camera_name}: single-camera fisheye succeeded with {keep}/{total_views} ranked views")
+            print(f"{camera_name}: kept ranked original indices: {kept_original_indices}")
+
+            return rms, K, D, rvecs, tvecs, kept_original_indices
+
+        except cv2.error as e:
+            last_error = e
+            print(f"{camera_name}: failed with {keep}/{total_views} views")
+            print(e)
+
+    raise RuntimeError(
+        f"{camera_name}: single-camera fisheye calibration failed for all subsets.\nLast OpenCV error:\n{last_error}"
     )
-    return rms, K, D, rvecs, tvecs
 
 
 def sanitize_stereo_inputs(objpoints, imgpointsL, imgpointsR, pattern_size):
@@ -291,6 +333,34 @@ def sanitize_stereo_inputs(objpoints, imgpointsL, imgpointsR, pattern_size):
         right_clean.append(rpt.copy())
 
     return obj_clean, left_clean, right_clean
+
+
+def intersect_preserve_order(primary, allowed):
+    allowed_set = set(allowed)
+    return [x for x in primary if x in allowed_set]
+
+
+def select_stereo_subset_from_single_camera_keeps(
+    objpoints, imgpointsL, imgpointsR, kept_left_indices, kept_right_indices, per_pair_used
+):
+    usable_indices = intersect_preserve_order(kept_left_indices, kept_right_indices)
+
+    if len(usable_indices) < MIN_VIEWS:
+        raise RuntimeError(
+            f"Not enough overlap between left/right successful subsets for stereo. "
+            f"Left kept {len(kept_left_indices)}, right kept {len(kept_right_indices)}, "
+            f"overlap {len(usable_indices)}."
+        )
+
+    obj_sel = [objpoints[i] for i in usable_indices]
+    left_sel = [imgpointsL[i] for i in usable_indices]
+    right_sel = [imgpointsR[i] for i in usable_indices]
+    pair_sel = [per_pair_used[i] for i in usable_indices]
+
+    print(f"\nStereo will use {len(usable_indices)} overlapping views")
+    print(f"Stereo overlapping indices (within filtered usable set): {usable_indices}")
+
+    return obj_sel, left_sel, right_sel, pair_sel, usable_indices
 
 
 def calibrate_stereo_fisheye(objpoints, imgpointsL, imgpointsR, K1, D1, K2, D2, img_size, pattern_size):
@@ -362,13 +432,28 @@ def main():
         objpoints, imgpointsL, imgpointsR, per_pair, MAX_VIEWS
     )
 
-    rmsL, K1, D1, _, _ = calibrate_single_fisheye(objpoints, imgpointsL, img_size)
-    rmsR, K2, D2, _, _ = calibrate_single_fisheye(objpoints, imgpointsR, img_size)
+    rmsL, K1, D1, _, _, kept_left_indices = calibrate_single_fisheye(
+        objpoints, imgpointsL, img_size, camera_name="Left"
+    )
+    rmsR, K2, D2, _, _, kept_right_indices = calibrate_single_fisheye(
+        objpoints, imgpointsR, img_size, camera_name="Right"
+    )
+
+    stereo_objpoints, stereo_imgpointsL, stereo_imgpointsR, stereo_pairs_used, stereo_keep_indices = (
+        select_stereo_subset_from_single_camera_keeps(
+            objpoints,
+            imgpointsL,
+            imgpointsR,
+            kept_left_indices,
+            kept_right_indices,
+            per_pair_used,
+        )
+    )
 
     rmsStereo, K1o, D1o, K2o, D2o, R, T = calibrate_stereo_fisheye(
-        objpoints,
-        imgpointsL,
-        imgpointsR,
+        stereo_objpoints,
+        stereo_imgpointsL,
+        stereo_imgpointsR,
         K1,
         D1,
         K2,
@@ -383,7 +468,10 @@ def main():
     print(f"Image size: {img_size[0]} x {img_size[1]}")
     print(f"Pattern used (inner corners): {PATTERN_SIZE[0]} x {PATTERN_SIZE[1]}")
     print(f"Square size: {SQUARE_SIZE_MM:.3f} mm")
-    print(f"Usable stereo pairs: {len(objpoints)}")
+    print(f"Usable stereo pairs after detection: {len(objpoints)}")
+    print(f"Left calibration views used: {len(kept_left_indices)}")
+    print(f"Right calibration views used: {len(kept_right_indices)}")
+    print(f"Stereo calibration overlapping views used: {len(stereo_objpoints)}")
     print(f"Left fisheye RMS:   {rmsL:.6f}")
     print(f"Right fisheye RMS:  {rmsR:.6f}")
     print(f"Stereo fisheye RMS: {rmsStereo:.6f}")
@@ -451,7 +539,13 @@ def main():
         "image_size": list(img_size),
         "pattern_size_inner_corners": list(PATTERN_SIZE),
         "square_size_mm": SQUARE_SIZE_MM,
-        "usable_stereo_pairs": len(objpoints),
+        "usable_stereo_pairs_after_detection": len(objpoints),
+        "left_calibration_views_used": len(kept_left_indices),
+        "right_calibration_views_used": len(kept_right_indices),
+        "stereo_calibration_views_used": len(stereo_objpoints),
+        "left_kept_indices_within_filtered_set": kept_left_indices,
+        "right_kept_indices_within_filtered_set": kept_right_indices,
+        "stereo_kept_indices_within_filtered_set": stereo_keep_indices,
         "rms_left": float(rmsL),
         "rms_right": float(rmsR),
         "rms_stereo": float(rmsStereo),
@@ -462,7 +556,7 @@ def main():
         "D2": np_to_list(D2o),
         "R": np_to_list(R),
         "T": np_to_list(T),
-        "used_pairs": per_pair_used,
+        "used_pairs_for_stereo": stereo_pairs_used,
     }
 
     with open(JSON_FILE, "w", encoding="utf-8") as f:

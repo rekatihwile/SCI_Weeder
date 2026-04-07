@@ -19,7 +19,21 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 WARMUP_FRAMES = 10
 DISPLAY_SCALE = 0.6  # adjust (0.5–0.8 usually good)
 
+def get_start_index(save_dir: Path):
+    existing = list(save_dir.glob("left_*.png"))
+    
+    if not existing:
+        return 0
 
+    indices = []
+    for f in existing:
+        try:
+            idx = int(f.stem.split("_")[1])
+            indices.append(idx)
+        except:
+            continue
+
+    return max(indices) + 1 if indices else 0
 def main():
     cams = StereoCameras()
     cams.open()
@@ -30,7 +44,7 @@ def main():
     print("\nPress SPACE to capture pair")
     print("Press Q to quit\n")
 
-    idx = 0
+    idx = get_start_index(SAVE_DIR)
 
     while True:
         left, right = cams.read_pair()

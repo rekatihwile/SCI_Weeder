@@ -13,7 +13,7 @@ import cv2
 
 
 THIS_DIR = Path(__file__).resolve().parent
-WORKSPACE_ROOT = THIS_DIR
+WORKSPACE_ROOT = THIS_DIR.parent
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
 

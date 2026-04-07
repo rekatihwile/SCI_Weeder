@@ -1,18 +1,18 @@
 {
     "serial": {
-        "grbl_port": "COM6"
+        "grbl_port": "/dev/ttyUSB0"
     },
     "cameras": {
         "left": {
-            "index": 1,
-            "device": null,
-            "path": null,
+            "index": 0,
+            "device": "/dev/video0",
+            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.3:1.0-video-index0",
             "node": "LEFT_CAM"
         },
         "right": {
             "index": 2,
-            "device": null,
-            "path": null,
+            "device": "/dev/video2",
+            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.4:1.0-video-index0",
             "node": "RIGHT_CAM"
         }
     },
@@ -20,6 +20,6 @@
         "has_display": true,
         "headless": false,
         "ui_mode": "window",
-        "display_backend": "windows"
+        "display_backend": ":1"
     }
 }

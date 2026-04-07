@@ -6,8 +6,6 @@ from config import (
     DETECTOR_MODE,
     FRAME_WIDTH,
     FRAME_HEIGHT,
-    TARGET_Y_L,
-    TARGET_Y_R,
     HAS_DISPLAY,
     FINE_ALIGN_CROP_SCALE,
     FINE_ALIGN_LK_WIN_SIZE,
@@ -95,58 +93,28 @@ def _norm_xy(a, b):
     return float(np.hypot(a[0] - b[0], a[1] - b[1]))
 
 
-def _cluster_burst_points(frames_points, radius_px=CLUSTER_RADIUS_PX, min_hits=MIN_HITS):
-    clusters = []
-    for frame_idx, pts in enumerate(frames_points):
-        for pt in pts:
-            p = (float(pt[0]), float(pt[1]))
-            best_i = None
-            best_d = radius_px
-            for i, c in enumerate(clusters):
-                if frame_idx in c["frames"]:
-                    continue
-                cx = c["sum_x"] / c["count"]
-                cy = c["sum_y"] / c["count"]
-                d = _norm_xy(p, (cx, cy))
-                if d <= best_d:
-                    best_d = d
-                    best_i = i
-            if best_i is None:
-                clusters.append({"sum_x": p[0], "sum_y": p[1], "count": 1, "frames": {frame_idx}})
-            else:
-                c = clusters[best_i]
-                c["sum_x"] += p[0]
-                c["sum_y"] += p[1]
-                c["count"] += 1
-                c["frames"].add(frame_idx)
-
-    stable = []
-    for c in clusters:
-        if len(c["frames"]) >= min_hits:
-            cx = c["sum_x"] / c["count"]
-            cy = c["sum_y"] / c["count"]
-            stable.append((int(round(cx)), int(round(cy))))
-    return stable
-
-
 def _burst_match_ai_points(cameras, detector):
     left_frames = []
     right_frames = []
-    last_frameL = None
-    last_frameR = None
 
     for _ in range(BURST_COUNT):
         frameL, frameR = cameras.read_pair()
-        last_frameL = frameL
-        last_frameR = frameR
-        left_frames.append(detector.cv_left.detect_points(frameL))
-        right_frames.append(detector.cv_right.detect_points(frameR))
+        left_frames.append(frameL)
+        right_frames.append(frameR)
 
-    stable_left = _cluster_burst_points(left_frames, radius_px=CLUSTER_RADIUS_PX, min_hits=MIN_HITS)
-    stable_right = _cluster_burst_points(right_frames, radius_px=CLUSTER_RADIUS_PX, min_hits=MIN_HITS)
+    stable_left = detector.cv_left.return_burst_stable(
+        left_frames,
+        min_stable_views=MIN_HITS,
+        group_radius_px=CLUSTER_RADIUS_PX,
+    )
+    stable_right = detector.cv_right.return_burst_stable(
+        right_frames,
+        min_stable_views=MIN_HITS,
+        group_radius_px=CLUSTER_RADIUS_PX,
+    )
 
     if not stable_left or not stable_right:
-        return [], last_frameL, last_frameR
+        return []
 
     matched_targets, _, _ = match_points(stable_left, stable_right, verbose=False)
 
@@ -163,25 +131,37 @@ def _burst_match_ai_points(cameras, detector):
             continue
         filtered.append(t)
 
-    return filtered, last_frameL, last_frameR
+    return filtered
 
 
 def _pick_manual_initial_target(cameras, detector):
     left_pt, right_pt = detector.refine_live(cameras)
     if left_pt is None or right_pt is None:
         return None, None, None, None, None
-    frameL, frameR = cameras.read_pair()
-    return left_pt, right_pt, frameL, frameR, None
+
+    frameL = getattr(detector, "last_displayed_left", None)
+    frameR = getattr(detector, "last_displayed_right", None)
+
+    if frameL is None or frameR is None:
+        frameL, frameR = cameras.read_pair()
+
+    if frameL is None or frameR is None:
+        print("[FINE ALIGN] Failed to acquire frozen manual frames.")
+        return None, None, None, None, None
+
+    return left_pt, right_pt, frameL.copy(), frameR.copy(), None
 
 
 def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target, actual_hits):
-    matched_targets, frameL, frameR = _burst_match_ai_points(cameras, detector)
-    if not matched_targets or frameL is None or frameR is None:
-        return None, None, None, None, None
+    matched_targets = _burst_match_ai_points(cameras, detector)
 
     gantry.sync_estimate_to_machine()
     current_x, current_y = gantry.get_estimated_xy()
-    solved_all = coarse_mover.solve_all_from_pose(matched_targets, ref_x=current_x, ref_y=current_y)
+
+    solved_all = (
+        coarse_mover.solve_all_from_pose(matched_targets, ref_x=current_x, ref_y=current_y)
+        if matched_targets else []
+    )
 
     best_solved = None
     min_err = float("inf")
@@ -196,15 +176,18 @@ def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target
         if not (_point_inside_crop(left_pt) and _point_inside_crop(right_pt)):
             continue
 
-        if coarse_mover.is_duplicate_of_actual(t_solved["target_xy_mm"], actual_hits, tol_mm=15.0):
-            print(f"[DEBUG] Rejecting candidate at {t_solved['target_xy_mm']} - already struck!")
+        if coarse_mover.is_duplicate_of_actual(
+            t_solved["target_xy_mm"],
+            actual_hits,
+            tol_mm=15.0,
+        ):
             continue
 
-        c_left = _full_to_crop_point(left_pt)
-        c_right = _full_to_crop_point(right_pt)
-
-        ex, ey = _compute_errors(c_left, c_right)
-        image_err = float(np.hypot(ex, ey))
+        xl, yl = left_pt
+        xr, yr = right_pt
+        err_x = (xl + xr) - (2.0 * (FULL_W / 2.0))
+        err_y = (FULL_H / 2.0 - 5) - ((yl + yr) / 2.0)
+        image_err = float(np.hypot(err_x, err_y))
 
         if image_err < min_err:
             min_err = image_err
@@ -212,10 +195,56 @@ def _pick_best_ai_target(gantry, cameras, detector, coarse_mover, planned_target
             best_left = left_pt
             best_right = right_pt
 
-    if best_solved is None:
+    time.sleep(0.15)
+
+    frameL, frameR = cameras.read_pair()
+    if frameL is None or frameR is None:
         return None, None, None, None, None
 
-    return best_left, best_right, frameL, frameR, best_solved
+    fresh_left_pts = detector.cv_left.detect_points(frameL)
+    fresh_right_pts = detector.cv_right.detect_points(frameR)
+
+    final_left = best_left
+    final_right = best_right
+    fail_reason = None
+
+    print(f"\n[DEBUG] Ghost Protocol Verification:")
+
+    if fresh_left_pts and best_left:
+        dists = [np.hypot(p[0] - best_left[0], p[1] - best_left[1]) for p in fresh_left_pts]
+        min_dist = min(dists)
+        closest_l = fresh_left_pts[np.argmin(dists)]
+
+        if min_dist < 80:
+            final_left = closest_l
+            print(f"  [SUCCESS] Left snapped to fresh YOLO point ({min_dist:.1f}px).")
+        else:
+            final_left = best_left
+            print("  [WARNING] Left YOLO missed. Trusting burst point.")
+    else:
+        final_left = best_left
+        print("  [WARNING] Left YOLO empty. Trusting burst point.")
+
+    if fresh_right_pts and best_right:
+        dists = [np.hypot(p[0] - best_right[0], p[1] - best_right[1]) for p in fresh_right_pts]
+        min_dist = min(dists)
+        closest_r = fresh_right_pts[np.argmin(dists)]
+
+        if min_dist < 80:
+            final_right = closest_r
+            print(f"  [SUCCESS] Right snapped to fresh YOLO point ({min_dist:.1f}px).")
+        else:
+            final_right = best_right
+            print("  [WARNING] Right YOLO missed. Trusting burst point.")
+    else:
+        final_right = best_right
+        print("  [WARNING] Right YOLO empty. Trusting burst point.")
+
+    if fail_reason:
+        print(f"[FINE ALIGN] Fallback triggered: {fail_reason}")
+        return None, None, None, None, None
+
+    return final_left, final_right, frameL, frameR, best_solved
 
 
 def _pick_initial_target(gantry, cameras, detector, coarse_mover, planned_target, actual_hits):
@@ -281,13 +310,12 @@ def fine_align_target(
     )
 
     if left_pt_full is None or right_pt_full is None:
-        print("[FINE ALIGN FAIL] No initial stereo target found.")
-        end_live_fine_align()
+        print(f"\n[!] FINE ALIGN: Detection/Matching failed for target {planned_target.get('id', '?')}.")
+        print("[!] ACTION: Skipping strike. Moving to next target.")
         return False, None
 
     if not (_point_inside_crop(left_pt_full) and _point_inside_crop(right_pt_full)):
-        print("[FINE ALIGN FAIL] Initial target is outside the center crop.")
-        end_live_fine_align()
+        print("[FINE ALIGN FAIL] Target is outside the center crop. Skipping strike.")
         return False, None
 
     left_pt = _full_to_crop_point(left_pt_full)
@@ -300,13 +328,22 @@ def fine_align_target(
 
     old_gray_L = cv2.cvtColor(old_left, cv2.COLOR_BGR2GRAY)
     old_gray_R = cv2.cvtColor(old_right, cv2.COLOR_BGR2GRAY)
+
     prev_ex = 0.0
     prev_ey = 0.0
     inside_count = 0
     t0 = time.time()
 
+    # In manual mode, avoid immediately opening another OpenCV debug window
+    # right after the manual click UI. That handoff is exactly where Jetson
+    # HighGUI tends to be fragile.
+    effective_show_debug = show_debug and (DETECTOR_MODE != "manual")
+
     while time.time() - t0 < max_time:
         frameL_full, frameR_full = cameras.read_pair()
+        if frameL_full is None or frameR_full is None:
+            continue
+
         frameL = _crop_frame(frameL_full)
         frameR = _crop_frame(frameR_full)
         grayL = cv2.cvtColor(frameL, cv2.COLOR_BGR2GRAY)
@@ -335,7 +372,13 @@ def fine_align_target(
             print("[FINE ALIGN FAIL] Tracked point left the center crop.")
             return False, None
 
+        OFFSET_X_PX = -5.0
+        OFFSET_Y_PX = -1.0
+
         err_x, err_y = _compute_errors((xl, yl), (xr, yr))
+        err_x += OFFSET_X_PX
+        err_y += OFFSET_Y_PX
+
         dex = err_x - prev_ex
         dey = err_y - prev_ey
         prev_ex = err_x
@@ -351,12 +394,19 @@ def fine_align_target(
         dx = float(np.clip(dx, -MAX_JOG, MAX_JOG))
         dy = float(np.clip(dy, -MAX_JOG, MAX_JOG))
 
-        print_live_fine_align(err_x, err_y, dx, dy, planned_xy=planned_target["target_xy_mm"], throttle_s=0.25)
+        print_live_fine_align(
+            err_x,
+            err_y,
+            dx,
+            dy,
+            planned_xy=planned_target["target_xy_mm"],
+            throttle_s=0.25,
+        )
 
         if abs(err_x) <= DEADZONE and abs(err_y) <= DEADZONE:
             inside_count += 1
-            print(f"[DEBUG] Inside deadzone: count {inside_count}/{settle_frames} (ex={err_x:.1f}, ey={err_y:.1f})")
             gantry.stop()
+
             if inside_count >= settle_frames:
                 end_live_fine_align()
                 _safe_destroy_fine_align_window()
@@ -383,17 +433,14 @@ def fine_align_target(
                         "right_px": [float(right_pt_full[0]), float(right_pt_full[1])],
                         "score": 1.0,
                     }
-                    coarse_mover.append_actual_target(planned_target, planned_target, final_xy, filename="actual_pd_targets.json")
 
                 return True, actual_entry
         else:
-            if inside_count > 0:
-                print(f"[DEBUG] Fell OUT of deadzone! Resetting count to 0 (ex={err_x:.1f}, ey={err_y:.1f})")
             inside_count = 0
             if dx != 0.0 or dy != 0.0:
                 gantry.jog(dx, dy, FINE_FEED)
 
-        if show_debug:
+        if effective_show_debug:
             _show_combined_fine_align_window(frameL, frameR, (xl, yl), (xr, yr), err_x, err_y, dx, dy)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q") or key == ord("r"):

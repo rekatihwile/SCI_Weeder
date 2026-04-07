@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import json
+import sys
+from pathlib import Path
+
 import cv2
 import numpy as np
 
 
-LEFT_CAMERA_INDEX = 2
-RIGHT_CAMERA_INDEX = 1
+THIS_DIR = Path(__file__).resolve().parent
+WORKSPACE_ROOT = THIS_DIR.parent
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
+
+from config import IS_WINDOWS, LEFT_CAMERA_INDEX, RIGHT_CAMERA_INDEX
+
 WINDOW_NAME = "Stereo Sync Tuner"
 
 MAX_PREVIEW_WIDTH = 1400
@@ -30,10 +39,35 @@ def nothing(_: int) -> None:
     pass
 
 
-def open_camera(index: int) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # Windows; remove CAP_DSHOW if needed
+def _load_camera_devices() -> dict[str, str]:
+    hardware_config_path = WORKSPACE_ROOT / "params" / "hardware_config.json"
+    if not hardware_config_path.exists():
+        return {}
+
+    try:
+        hardware = json.loads(hardware_config_path.read_text())
+        cameras = hardware.get("cameras", {})
+        return {
+            side: str(info["device"])
+            for side, info in cameras.items()
+            if isinstance(info, dict) and info.get("device")
+        }
+    except Exception:
+        return {}
+
+
+def open_camera(index: int, side: str) -> cv2.VideoCapture:
+    if IS_WINDOWS:
+        cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+        source_desc = f"index {index}"
+    else:
+        camera_devices = _load_camera_devices()
+        source = camera_devices.get(side, f"/dev/video{index}")
+        cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+        source_desc = source
+
     if not cap.isOpened():
-        raise RuntimeError(f"Failed to open camera index {index}")
+        raise RuntimeError(f"Failed to open {side} camera ({source_desc})")
     return cap
 
 
@@ -158,8 +192,8 @@ def main() -> None:
     right = None
 
     try:
-        left = open_camera(LEFT_CAMERA_INDEX)
-        right = open_camera(RIGHT_CAMERA_INDEX)
+        left = open_camera(LEFT_CAMERA_INDEX, "left")
+        right = open_camera(RIGHT_CAMERA_INDEX, "right")
 
         # Hit both cameras repeatedly so the driver actually accepts the reset
         for _ in range(6):

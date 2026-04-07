@@ -1,0 +1,51 @@
+{
+    "total_runtime_sec": 125.248,
+    "total_plants": 5,
+    "plant_details": [
+        {
+            "plant_id": 1,
+            "duration_sec": 12.042,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 2,
+            "duration_sec": 8.391,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 3,
+            "duration_sec": 14.52,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 4,
+            "duration_sec": 15.46,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 5,
+            "duration_sec": 9.927,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        }
+    ]
+}

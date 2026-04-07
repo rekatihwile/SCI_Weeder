@@ -20,12 +20,12 @@ MODEL_MAP = {
     "yolo_w_kale": "yolo_w_kale.pt",
     "yolo_weed": "yolo_weed.pt",
     "sniper": "sniper.pt",
-    "best_targeting_v3": "best_targeting_v3.pth",
+    "best_targeting_v3": "new_best_targeting_v3.pth",
     "best_pigweed_145": "best_pigweed_145.pt",
 }
 
 DEFAULT_MODEL = "best_pigweed_145"
-DEFAULT_QPOINT_MODEL = "sniper"
+DEFAULT_QPOINT_MODEL = "best_targeting_v3"
 CV_PIPELINE_MODE = "two_stage"
 
 # ---------------------------------------------------
@@ -103,8 +103,8 @@ RECT_NPZ_PATH = BASE_DIR / "Triangulation/stereo_checkerboard_fisheye_rectify_ma
 
 CALIBRATION_EXPECTS_UNFLIPPED = False
 
-TRI_SIGN_X = -1.0
-TRI_SIGN_Y = 1.0
+TRI_SIGN_X = 1.0
+TRI_SIGN_Y = -1.0
 
 LASER_OFFSET_X_MM = 33.0
 LASER_OFFSET_Y_MM = 0.0
@@ -112,10 +112,10 @@ LASER_OFFSET_Y_MM = 0.0
 TRI_X_GAIN = 1.0
 TRI_Y_GAIN = 1.0
 
-USE_AFFINE_CORRECTION = False
-AFFINE_X_COEFFS = [-1.192043821870919, 1.001531761830695, 0.012082374519007066]
-AFFINE_Y_COEFFS = [10.508343050916622, -0.09675010667374007, 0.9966484990708326]
+# Use pixel error correction in triangulation to compensate for lens distortion and other non-linearities
 
+USE_PIXEL_ERROR_CORRECTION = True
+PIXEL_ERROR_MODEL_PATH = BASE_DIR / "params/stereo_pixel_error_model.json"
 # ---------------------------------------------------
 # MACHINE POSITIONS
 # ---------------------------------------------------
@@ -127,7 +127,7 @@ SURVEY_POS_Y = 200.0
 # CONTROL MODES
 # ---------------------------------------------------
 
-DETECTOR_MODE = "ai"
+DETECTOR_MODE = "manual"  # "manual", "ai", or "off"
 COARSE_MOVE_MODE = "triangulation"
 FINE_ALIGN_MODE = "pixel_pd"
 
@@ -140,12 +140,12 @@ SAVE_MATCH_DEBUG_IMAGE = True
 # DETECTOR / AI SETTINGS
 # ---------------------------------------------------
 
-MANUAL_DISPLAY_SCALE = 2.5
+MANUAL_DISPLAY_SCALE = .75
 
 AI_DISPLAY_SCALE = 2.0
 AI_BURST_SIZE = 5
 AI_MIN_STABLE_VIEWS = 3
-AI_CONFIDENCE = 0.60
+AI_CONFIDENCE = 0.30
 AI_IOM_THRESHOLD = 0.80
 
 # ---------------------------------------------------
@@ -154,7 +154,7 @@ AI_IOM_THRESHOLD = 0.80
 
 SURVEY_BURST_COUNT = 10
 SURVEY_MIN_HITS = 3
-SURVEY_CLUSTER_RADIUS_PX = 12.0
+SURVEY_CLUSTER_RADIUS_PX = 30.0
 
 # ---------------------------------------------------
 # FINE ALIGN SETTINGS
@@ -171,11 +171,11 @@ FINE_ALIGN_KP_Y = 10.0
 FINE_ALIGN_KD_Y = 2.5
 
 FINE_ALIGN_STEP_MM = 0.001
-FINE_ALIGN_DEADZONE_PX = 4
+FINE_ALIGN_DEADZONE_PX = 1.0
 FINE_ALIGN_MAX_JOG_MM = 10.0
 FINE_ALIGN_FEED = 5000
 
-FINE_ALIGN_BURST_COUNT = 5
+FINE_ALIGN_BURST_COUNT = 10
 FINE_ALIGN_MIN_HITS = 3
 FINE_ALIGN_CLUSTER_RADIUS_PX = 12.0
 

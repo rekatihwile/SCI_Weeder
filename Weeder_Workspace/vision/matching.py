@@ -168,8 +168,8 @@ def match_points(left_points, right_points, verbose=False):
         anchor_min_disp=5,
         anchor_max_disp=250,
         anchor_max_y_diff=150,
-        match_radius=30.0,
-        min_score=0.35,
+        match_radius=60.0,
+        min_score=0.25,
     )
 
     if verbose:

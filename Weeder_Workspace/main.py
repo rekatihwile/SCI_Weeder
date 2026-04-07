@@ -38,7 +38,8 @@ from ui.triangulation_debug import show_match_debug_view
 from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
-
+from run_logger import RunSession  # Adjust import based on where you put it
+import time
 
 def build_detector():
     if DETECTOR_MODE == "manual":
@@ -52,9 +53,11 @@ def build_detector():
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
+
 def main():
     gantry = None
     cameras = None
+    session = None  # Add session to the initial variables
 
     state = "INIT"
     detector = None
@@ -66,6 +69,10 @@ def main():
     actual_hits = []
 
     try:
+        # --- 1. INITIALIZE THE RUN SESSION LOGGER ---
+        # This instantly starts the dual-terminal logging and prepares the video thread
+        session = RunSession(base_folder="run_data")
+
         while state != "DONE":
             if state == "INIT":
                 gantry = Gantry(GRBL_PORT)
@@ -76,7 +83,11 @@ def main():
                 state = "HOME"
 
             elif state == "HOME":
+                
                 cameras.open()
+                #session.start_recording()
+                # --- 2. ATTACH THE BACKGROUND VIDEO RECORDER ---
+                #cameras.attach_recorder(session.recorder)
                 gantry.home()
                 state = "SURVEY"
 
@@ -106,6 +117,11 @@ def main():
                     right_points,
                     verbose=True,
                 )
+
+                # --- 3. SAVE THE HIGH-RES SURVEY IMAGES ---
+                if coarse_mover.last_survey_frameL is not None and coarse_mover.last_survey_frameR is not None:
+                    session.save_survey_images(coarse_mover.last_survey_frameL, coarse_mover.last_survey_frameR)
+
                 print_global_survey_results(len(left_points), len(right_points), len(matched_targets))
                 user = input("Enter = accept global survey | r = rescan | q = quit: ").strip().lower()
 
@@ -160,12 +176,17 @@ def main():
                 total = len(target_queue)
 
                 for i, solved in enumerate(target_queue, start=1):
+                    # --- 4. START THE PLANT TIMER ---
+                    session.start_plant_timer(plant_id=i)
+
                     if coarse_mover.is_duplicate_of_actual(
                         solved["target_xy_mm"],
                         actual_hits,
                         tol_mm=8.0,
                     ):
                         print_skip_target(i, total, solved, "Already covered by a previous PD lock.")
+                        # --- 5A. END TIMER (SKIPPED DUPLICATE) ---
+                        session.end_plant_timer(plant_id=i, status="Skipped (Duplicate)")
                         continue
 
                     show_current_target(i, total, solved)
@@ -190,6 +211,10 @@ def main():
                             filename="actual_pd_targets.json",
                         )
                         print_target_result(i, total, solved, actual_entry)
+                        
+                        # --- 5B. END TIMER (TRIANGULATION ONLY) ---
+                        session.end_plant_timer(plant_id=i, status="Triangulation Only")
+                        
                         user = input("Triangulation only: Enter = next | q = quit: ").strip().lower()
                         if user == "q":
                             state = "DONE"
@@ -213,8 +238,14 @@ def main():
                         print_target_result(i, total, solved, actual_entry)
                         print("[DEBUG] Entering strike...")
                         fire_target(gantry, solved)
+                        
+                        # --- 5C. END TIMER (LOCKED & FIRED) ---
+                        session.end_plant_timer(plant_id=i, status="Locked and Fired")
                     else:
                         print_skip_target(i, total, solved, "Fine align failed")
+                        
+                        # --- 5D. END TIMER (FAILED ALIGNMENT) ---
+                        session.end_plant_timer(plant_id=i, status="Failed (Fine Align)")
 
                 clear_current_target_line()
                 print("Finished all planned targets.")
@@ -231,10 +262,16 @@ def main():
         print(f"\nERROR: {e}")
 
     finally:
+        # --- 6. CRITICAL SHUTDOWN SEQUENCE ---
         if cameras is not None:
             cameras.close()
         if gantry is not None:
             gantry.close()
+        
+        # Ensures the video thread safely stops encoding and writes the JSON
+        
+        if session is not None:
+            session.end_session()
 
 
 if __name__ == "__main__":

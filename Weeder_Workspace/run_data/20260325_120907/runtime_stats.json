@@ -1,0 +1,123 @@
+{
+    "total_runtime_sec": 197.574,
+    "total_plants": 13,
+    "plant_details": [
+        {
+            "plant_id": 1,
+            "duration_sec": 13.384,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 2,
+            "duration_sec": 11.266,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 3,
+            "duration_sec": 5.277,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 4,
+            "duration_sec": 12.136,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 5,
+            "duration_sec": 14.873,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 6,
+            "duration_sec": 11.767,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 7,
+            "duration_sec": 15.727,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 8,
+            "duration_sec": 13.787,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 9,
+            "duration_sec": 14.399,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 10,
+            "duration_sec": 8.935,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 11,
+            "duration_sec": 5.884,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 12,
+            "duration_sec": 15.489,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 13,
+            "duration_sec": 5.002,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        }
+    ]
+}

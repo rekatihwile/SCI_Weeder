@@ -21,3 +21,9 @@ torch_jetson.whl
 training_photos/
 *.jpg
 *.jpeg
+
+# Archives
+*.zip
+
+# Logs
+*.log
