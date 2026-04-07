@@ -1,215 +1,281 @@
+"""
+Terminal UI for the Laser Weeder.
+
+Design goals:
+  - Works over SSH (pure ANSI, no curses)
+  - ANSI color/bold only when stdout is a real TTY; plain text otherwise
+  - Fine-align status updates in-place with \\r so the terminal doesn't flood
+  - Compact, readable layout; no 90-char walls of asterisks
+"""
+
 import os
 import sys
 import time
+import shutil
 
-_last_fine_line = ""
+# ── ANSI helpers ─────────────────────────────────────────────────────────────
+
+_IS_TTY = sys.stdout.isatty()
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _IS_TTY else text
+
+
+def _bold(t):   return _c("1",    t)
+def _cyan(t):   return _c("36",   t)
+def _green(t):  return _c("32",   t)
+def _yellow(t): return _c("33",   t)
+def _red(t):    return _c("31",   t)
+def _gray(t):   return _c("90",   t)
+def _white(t):  return _c("97",   t)
+
+
+def _w() -> int:
+    return shutil.get_terminal_size((90, 24)).columns
+
+
+def _rule(char="─", n=None):
+    return char * (n or _w())
+
+
+def _header(title: str):
+    w = _w()
+    bar = _rule("═", w)
+    print(_bold(_cyan(bar)))
+    print(_bold(_cyan(f"  {title}")))
+    print(_bold(_cyan(bar)))
+
+
+def _sep():
+    print(_gray(_rule("─")))
+
+
+# ── fine-align in-place state ────────────────────────────────────────────────
+
+_fine_in_place  = False   # True while we're mid in-place line
 _last_fine_time = 0.0
 
 
-def _term_width(default=90):
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return default
+def _finalize_fine_line():
+    """Print a newline to close an in-place fine-align line if one is open."""
+    global _fine_in_place
+    if _fine_in_place and _IS_TTY:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    _fine_in_place = False
 
 
-def _rule(char="=", width=None):
-    if width is None:
-        width = _term_width()
-    return char * width
-
+# ── public API ────────────────────────────────────────────────────────────────
 
 def clear_screen():
-    # Disabled for debugging so history is preserved
-    print("\n" + _rule("*") + "\n")
+    _finalize_fine_line()
+    if _IS_TTY:
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
+    else:
+        print("\n" + _rule("─"))
 
 
-def print_header(title):
-    width = _term_width()
-    print(_rule("=", width))
-    print(title.center(width))
-    print(_rule("=", width))
+def clear_current_target_line():
+    _finalize_fine_line()
 
 
-def print_section(title):
-    width = _term_width()
-    print("\n" + _rule("-", width))
-    print(title)
-    print(_rule("-", width))
+def print_header(title: str):
+    _finalize_fine_line()
+    _header(title)
 
 
-def print_kv(label, value, indent=0):
+def print_section(title: str):
+    _finalize_fine_line()
+    _sep()
+    print(_bold(title))
+    _sep()
+
+
+def print_kv(label: str, value, indent: int = 0):
     pad = " " * indent
-    print(f"{pad}{label:<32} {value}")
+    label_str = _gray(f"{label:<28}")
+    print(f"{pad}{label_str} {value}")
 
 
-def print_status_banner(state, subtitle=None):
+def print_status_banner(state: str, subtitle=None):
     clear_screen()
-    print_header("LASER WEEDER")
-    print_kv("STATE", state)
+    _header(f"LASER WEEDER  ·  {state}")
     if subtitle:
-        print_kv("INFO", subtitle)
+        print_kv("Info", subtitle)
+
+
+# ── survey & match ────────────────────────────────────────────────────────────
+
+def print_global_survey_ready(x: float, y: float):
+    clear_screen()
+    _header("LASER WEEDER  ·  GLOBAL SURVEY")
+    print_kv("Survey position", f"X={x:.1f} mm   Y={y:.1f} mm")
+    print()
+    print(f"  {_bold('Enter')} = run survey    {_bold('q')} = quit")
+    print()
+
+
+def print_global_survey_results(left_count: int, right_count: int, matched_count: int):
+    _sep()
+    print(_bold("  Survey results"))
+    ok = _green if matched_count > 0 else _red
+    print_kv("  Stable left",    left_count)
+    print_kv("  Stable right",   right_count)
+    print_kv("  Matched targets", ok(str(matched_count)))
+    print()
 
 
 def print_match_summary(matched_targets, unmatched_left, unmatched_right):
-    width = _term_width()
-    print("\n" + _rule("=", width))
-    print("MATCH SUMMARY")
-    print(_rule("=", width))
-
-    print_kv("Matched targets", len(matched_targets))
-    print_kv("Unmatched left", len(unmatched_left))
-    print_kv("Unmatched right", len(unmatched_right))
-    print(_rule("-", width))
+    _finalize_fine_line()
+    w = _w()
+    print()
+    _sep()
+    print(_bold("  Match summary"))
+    _sep()
+    print_kv("  Matched",         _green(str(len(matched_targets))))
+    print_kv("  Unmatched left",  len(unmatched_left))
+    print_kv("  Unmatched right", len(unmatched_right))
 
     if matched_targets:
-        print("IDX | LEFT (x,y)      | RIGHT (x,y)     | SCORE")
-        print(_rule("-", width))
-
+        print()
+        hdr = f"  {'#':>3}  {'Left (x,y)':<18}  {'Right (x,y)':<18}  Score"
+        print(_gray(hdr))
+        _sep()
         for i, t in enumerate(matched_targets):
-            lp = t["left_px"]
-            rp = t["right_px"]
-            sc = t["score"]
-            print(f"{i:>3} | {str(lp):<15} | {str(rp):<15} | {sc:0.3f}")
+            lp  = str(t["left_px"])
+            rp  = str(t["right_px"])
+            sc  = t["score"]
+            col = _green if sc >= 0.7 else (_yellow if sc >= 0.4 else _red)
+            print(f"  {i:>3}  {lp:<18}  {rp:<18}  {col(f'{sc:.3f}')}")
 
     if unmatched_left:
-        print("\nUnmatched LEFT:")
-        print(", ".join(str(p) for p in unmatched_left))
-
+        print(_yellow(f"\n  Unmatched LEFT: ") + ", ".join(str(p) for p in unmatched_left))
     if unmatched_right:
-        print("\nUnmatched RIGHT:")
-        print(", ".join(str(p) for p in unmatched_right))
+        print(_yellow(f"  Unmatched RIGHT: ") + ", ".join(str(p) for p in unmatched_right))
+    print()
 
-    print(_rule("=", width) + "\n")
 
+# ── target execution ──────────────────────────────────────────────────────────
 
 def print_workspace_plan(absolute_targets):
-    width = _term_width()
-    print("\n" + _rule("=", width))
-    print("PLANNED WORKSPACE TARGETS")
-    print(_rule("=", width))
-
+    _finalize_fine_line()
+    print()
+    _sep()
+    print(_bold("  Workspace plan"))
+    _sep()
     if not absolute_targets:
-        print("No targets planned.")
-        print(_rule("=", width) + "\n")
+        print("  No targets planned.")
         return
-
-    print("IDX | X (mm)     | Y (mm)")
-    print(_rule("-", width))
-    for i, solved in enumerate(absolute_targets, start=1):
-        tx, ty = solved["target_xy_mm"]
-        print(f"{i:>3} | {tx:>10.2f} | {ty:>10.2f}")
-
-    print(_rule("=", width) + "\n")
+    print(_gray(f"  {'#':>3}  {'X (mm)':>10}  {'Y (mm)':>10}"))
+    for i, s in enumerate(absolute_targets, 1):
+        tx, ty = s["target_xy_mm"]
+        print(f"  {i:>3}  {tx:>10.2f}  {ty:>10.2f}")
+    print()
 
 
-def show_current_target(i, total, solved_target):
-    tx, ty = solved_target["target_xy_mm"]
-
+def show_current_target(i: int, total: int, solved_target):
+    _finalize_fine_line()
     clear_screen()
-    print_header("LASER WEEDER - ACTIVE TARGET")
+    tx, ty = solved_target["target_xy_mm"]
+    frac   = i / max(total, 1)
+    bar_w  = 24
+    filled = int(frac * bar_w)
+    bar    = _green("█" * filled) + _gray("░" * (bar_w - filled))
 
-    print_kv("Target", f"{i}/{total}")
-    print_kv("Planned X (mm)", f"{tx:.2f}")
-    print_kv("Planned Y (mm)", f"{ty:.2f}")
+    _header(f"TARGET  {i} / {total}  [{bar}]")
+    print_kv("  Coarse X", f"{tx:.2f} mm")
+    print_kv("  Coarse Y", f"{ty:.2f} mm")
 
     if "source_target" in solved_target:
         src = solved_target["source_target"]
-        if "left_px" in src and "right_px" in src:
-            print_kv("Left image point", src["left_px"])
-            print_kv("Right image point", src["right_px"])
         if "score" in src:
-            print_kv("Match score", f"{src['score']:.3f}")
+            sc = src["score"]
+            col = _green if sc >= 0.7 else _yellow
+            print_kv("  Match score", col(f"{sc:.3f}"))
+    print()
 
-    print("\nWaiting for coarse move / fine align...")
 
-
-def print_target_result(i, total, solved_target, actual_entry=None):
+def print_target_result(i: int, total: int, solved_target, actual_entry=None):
+    _finalize_fine_line()
     tx, ty = solved_target["target_xy_mm"]
-
-    clear_screen()
-    print_header("LASER WEEDER - TARGET RESULT")
-
-    print_kv("Target", f"{i}/{total}")
-    print_kv("Coarse Triangulation Coordinates", f"X={tx:.2f} mm, Y={ty:.2f} mm")
-
-    if actual_entry is not None:
+    print(_green(f"  ✓ Target {i}/{total} locked"))
+    print_kv("    Triangulated", f"({tx:.2f}, {ty:.2f}) mm")
+    if actual_entry:
         fx, fy = actual_entry["final_xy_mm"]
-        print_kv("PD Confirmed Coordinates", f"X={fx:.2f} mm, Y={fy:.2f} mm")
-
-        if "selected_local_xy_mm" in actual_entry:
-            sx, sy = actual_entry["selected_local_xy_mm"]
-            print_kv("Local Re-triangulated Choice", f"X={sx:.2f} mm, Y={sy:.2f} mm")
-
         px, py = actual_entry["planned_xy_mm"]
-        dx = fx - px
-        dy = fy - py
-        print_kv("PD Offset from Planned", f"dX={dx:.2f} mm, dY={dy:.2f} mm")
-
-    else:
-        print_kv("PD Confirmed Coordinates", "Not available")
-
-    print("\nTarget completed.\n")
+        dx, dy = fx - px, fy - py
+        print_kv("    Final XY",    f"({fx:.2f}, {fy:.2f}) mm")
+        print_kv("    PD offset",   f"dX={dx:+.2f}  dY={dy:+.2f} mm")
+    print()
 
 
-def print_skip_target(i, total, solved_target, reason):
+def print_skip_target(i: int, total: int, solved_target, reason: str):
+    _finalize_fine_line()
     tx, ty = solved_target["target_xy_mm"]
-
-    clear_screen()
-    print_header("LASER WEEDER - TARGET SKIPPED")
-    print_kv("Target", f"{i}/{total}")
-    print_kv("Planned Coordinates", f"X={tx:.2f} mm, Y={ty:.2f} mm")
-    print_kv("Reason", reason)
+    print(_yellow(f"  ⚠ Target {i}/{total} skipped") + _gray(f"  ({tx:.1f}, {ty:.1f}) mm"))
+    print(_gray(f"    {reason}"))
     print()
 
 
-def print_global_survey_ready(x, y):
-    clear_screen()
-    print_header("LASER WEEDER - GLOBAL SURVEY")
-    print_kv("Survey Position", f"X={x:.2f} mm, Y={y:.2f} mm")
-    print()
-    print("Enter = survey | q = quit")
-    print()
+# ── fine-align live status ────────────────────────────────────────────────────
 
-
-def print_global_survey_results(left_count, right_count, matched_count):
-    print_section("GLOBAL SURVEY RESULTS")
-    print_kv("Stable left points", left_count)
-    print_kv("Stable right points", right_count)
-    print_kv("Matched targets", matched_count)
-    print()
-
-
-def print_live_fine_align(err_x, err_y, dx, dy, planned_xy=None, throttle_s=0.20):
-    global _last_fine_line, _last_fine_time
+def print_live_fine_align(
+    err_x: float, err_y: float,
+    dx: float, dy: float,
+    planned_xy=None,
+    throttle_s: float = 0.15,
+    settle_count: int = 0,
+    settle_frames: int = 0,
+):
+    """
+    Overwrites a single terminal line in-place while fine-align is running.
+    Falls back to a normal print when not on a TTY (log files, piped output).
+    """
+    global _fine_in_place, _last_fine_time
 
     now = time.time()
     if now - _last_fine_time < throttle_s:
         return
-
-    if planned_xy is not None:
-        px, py = planned_xy
-        line = (
-            f"Fine Align | coarse=({px:.2f}, {py:.2f}) mm | "
-            f"err=({err_x:.2f}, {err_y:.2f}) px | "
-            f"jog=({dx:.3f}, {dy:.3f}) mm"
-        )
-    else:
-        line = (
-            f"Fine Align | err=({err_x:.2f}, {err_y:.2f}) px | "
-            f"jog=({dx:.3f}, {dy:.3f}) mm"
-        )
-
-    # Print out standard lines instead of overwriting
-    print(line)
-
     _last_fine_time = now
 
+    mag = abs(err_x) + abs(err_y)
+    if mag < 3:
+        err_col = _green
+    elif mag < 15:
+        err_col = _yellow
+    else:
+        err_col = _red
 
-def end_live_fine_align():
-    print("--- End Fine Align ---")
+    err_str = err_col(f"({err_x:+6.1f}, {err_y:+6.1f})px")
+    jog_str = _cyan(f"({dx:+.4f}, {dy:+.4f})mm")
+
+    settle_str = ""
+    if settle_frames > 0:
+        settle_str = f"  settle {_green(str(settle_count))}/{settle_frames}"
+
+    line = f"  ⟳ Fine  err {err_str}  jog {jog_str}{settle_str}"
+
+    if _IS_TTY:
+        w       = _w()
+        # Strip ANSI codes for length calc is complex; just truncate raw
+        padded  = line.ljust(w - 1)[:w - 1]
+        sys.stdout.write(f"\r{padded}")
+        sys.stdout.flush()
+        _fine_in_place = True
+    else:
+        print(line)
 
 
-def clear_current_target_line():
-    # Disabled so it doesn't wipe terminal lines
-    pass
+def end_live_fine_align(status: str = ""):
+    """Call when fine-align finishes (success or failure) to close the live line."""
+    global _fine_in_place
+    if _fine_in_place and _IS_TTY:
+        suffix = f"  {status}" if status else ""
+        sys.stdout.write(f"\r  ✓ Fine align done{suffix}\n")
+        sys.stdout.flush()
+        _fine_in_place = False
+    else:
+        msg = f"Fine align: {status}" if status else "Fine align done"
+        print(f"  {msg}")

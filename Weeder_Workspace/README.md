@@ -9,6 +9,10 @@ It is not meant to explain the full project from scratch. It is meant to answer:
 - how to diagnose the most common failures quickly
 
 ---
+# In your terminal
+cd ~/Documents/oxnard_test
+tar cf Weeder_Workspace.tar Weeder_Workspace/
+
 
 # 1. QUICK START
 

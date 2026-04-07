@@ -4,6 +4,11 @@ import cv2
 import numpy as np
 
 
+def _pt(p):
+    """Accept either a plain (x, y) tuple or a {"point": (x,y), ...} dict."""
+    return p["point"] if isinstance(p, dict) else p
+
+
 def _fit_frame(frame, width):
     h, w = frame.shape[:2]
     if w == width:
@@ -14,7 +19,8 @@ def _fit_frame(frame, width):
 
 
 def _draw_points(img, points, color, prefix):
-    for i, (x, y) in enumerate(points, start=1):
+    for i, det in enumerate(points, start=1):
+        x, y = _pt(det)
         xi = int(round(x))
         yi = int(round(y))
         cv2.circle(img, (xi, yi), 7, color, -1)

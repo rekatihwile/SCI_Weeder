@@ -16,10 +16,11 @@ from config import (
     SURVEY_MIN_HITS,
     SURVEY_CLUSTER_RADIUS_PX,
     FINE_ALIGN_SETTLE_FRAMES,
+    SURVEY_TARGET_CLASSES,
 )
 
-from control.coarse_move import TriangulationCoarseMover
-from control.fine_align import fine_align_target
+from control.coarse_move import TriangulationCoarseMover, is_in_workspace, is_in_workspace
+from control.fine_align import fine_align_target, close_fine_align_window, close_fine_align_window
 from control.strike.strike_patterns import fire_target
 from hardware.cameras import StereoCameras
 from hardware.gantry import Gantry
@@ -60,13 +61,17 @@ def main():
     session = None  # Add session to the initial variables
 
     state = "INIT"
-    detector = None
+    detector     = None
     coarse_mover = None
-    left_points = []
-    right_points = []
+    # _detections  → full dicts {"point","box","views"} (AI) or plain tuples (manual)
+    # _points      → plain (x,y) tuples only, used by UI / display functions
+    left_detections  = []
+    right_detections = []
+    left_points      = []
+    right_points     = []
     matched_targets = []
-    target_queue = []
-    actual_hits = []
+    target_queue    = []
+    actual_hits     = []
 
     try:
         # --- 1. INITIALIZE THE RUN SESSION LOGGER ---
@@ -88,7 +93,7 @@ def main():
                 #session.start_recording()
                 # --- 2. ATTACH THE BACKGROUND VIDEO RECORDER ---
                 #cameras.attach_recorder(session.recorder)
-                gantry.home()
+                # gantry.home()
                 state = "SURVEY"
 
             elif state == "SURVEY":
@@ -101,7 +106,7 @@ def main():
                 state = "DONE" if user == "q" else "DETECT"
 
             elif state == "DETECT":
-                left_points, right_points = coarse_mover.detect_stable_points(
+                left_detections, right_detections = coarse_mover.detect_stable_points(
                     cameras,
                     detector,
                     detector_mode=DETECTOR_MODE,
@@ -109,12 +114,16 @@ def main():
                     min_hits=SURVEY_MIN_HITS,
                     cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
                 )
+                # Plain tuples for all UI / display calls
+                def _to_pt(d): return d["point"] if isinstance(d, dict) else d
+                left_points  = [_to_pt(d) for d in left_detections]
+                right_points = [_to_pt(d) for d in right_detections]
                 state = "MATCH"
 
             elif state == "MATCH":
                 matched_targets, unmatched_left, unmatched_right = match_points(
-                    left_points,
-                    right_points,
+                    left_detections,
+                    right_detections,
                     verbose=True,
                 )
 
@@ -179,6 +188,14 @@ def main():
                     # --- 4. START THE PLANT TIMER ---
                     session.start_plant_timer(plant_id=i)
 
+                    # ── bounds check before doing anything ─────────────────
+                    tx, ty = solved["target_xy_mm"]
+                    if not is_in_workspace(tx, ty):
+                        print_skip_target(i, total, solved,
+                            f"Outside workspace bounds ({tx:.1f}, {ty:.1f}) mm.")
+                        session.end_plant_timer(plant_id=i, status="Skipped (Out of Bounds)")
+                        continue
+
                     if coarse_mover.is_duplicate_of_actual(
                         solved["target_xy_mm"],
                         actual_hits,
@@ -190,7 +207,11 @@ def main():
                         continue
 
                     show_current_target(i, total, solved)
-                    coarse_mover.move_to_absolute_target(gantry, solved)
+                    moved = coarse_mover.move_to_absolute_target(gantry, solved)
+                    if not moved:
+                        # move_to_absolute_target already printed a warning
+                        session.end_plant_timer(plant_id=i, status="Skipped (Out of Bounds)")
+                        continue
 
                     if TRIANGULATION_ONLY_MODE:
                         gantry.sync_estimate_to_machine()
@@ -205,16 +226,11 @@ def main():
                         }
                         actual_hits.append(actual_entry)
                         coarse_mover.append_actual_target(
-                            solved,
-                            solved,
-                            final_xy,
+                            solved, solved, final_xy,
                             filename="actual_pd_targets.json",
                         )
                         print_target_result(i, total, solved, actual_entry)
-                        
-                        # --- 5B. END TIMER (TRIANGULATION ONLY) ---
                         session.end_plant_timer(plant_id=i, status="Triangulation Only")
-                        
                         user = input("Triangulation only: Enter = next | q = quit: ").strip().lower()
                         if user == "q":
                             state = "DONE"
@@ -230,6 +246,9 @@ def main():
                         actual_hits,
                         settle_frames=FINE_ALIGN_SETTLE_FRAMES,
                         show_debug=HAS_DISPLAY,
+                        survey_targets=target_queue,   # enables constellation re-ID
+                        target_idx=i,
+                        total_targets=total,
                     )
                     print(f"[DEBUG] fine_align returned aligned={aligned}")
 
@@ -238,17 +257,16 @@ def main():
                         print_target_result(i, total, solved, actual_entry)
                         print("[DEBUG] Entering strike...")
                         fire_target(gantry, solved)
-                        
-                        # --- 5C. END TIMER (LOCKED & FIRED) ---
                         session.end_plant_timer(plant_id=i, status="Locked and Fired")
                     else:
                         print_skip_target(i, total, solved, "Fine align failed")
-                        
-                        # --- 5D. END TIMER (FAILED ALIGNMENT) ---
                         session.end_plant_timer(plant_id=i, status="Failed (Fine Align)")
 
+                # Close the shared fine-align window once all targets are done
+                close_fine_align_window()
+                close_fine_align_window()
                 clear_current_target_line()
-                print("Finished all planned targets.")
+                print("\n  All targets complete.")
                 state = "DONE"
 
         print("\n=== DONE ===")

@@ -22,10 +22,13 @@ MODEL_MAP = {
     "sniper": "sniper.pt",
     "best_targeting_v3": "new_best_targeting_v3.pth",
     "best_pigweed_145": "best_pigweed_145.pt",
+    # New models
+    "plastic_nano": "26_plastic_nano.pt",
+    "targeting_tall_plastic": "new_best_targeting_tall_plastic.pth",
 }
 
-DEFAULT_MODEL = "best_pigweed_145"
-DEFAULT_QPOINT_MODEL = "best_targeting_v3"
+DEFAULT_MODEL = "plastic_nano"
+DEFAULT_QPOINT_MODEL = "targeting_tall_plastic"
 CV_PIPELINE_MODE = "two_stage"
 
 # ---------------------------------------------------
@@ -127,7 +130,7 @@ SURVEY_POS_Y = 200.0
 # CONTROL MODES
 # ---------------------------------------------------
 
-DETECTOR_MODE = "manual"  # "manual", "ai", or "off"
+DETECTOR_MODE = "ai"  # "manual", "ai", or "off"
 COARSE_MOVE_MODE = "triangulation"
 FINE_ALIGN_MODE = "pixel_pd"
 
@@ -145,15 +148,36 @@ MANUAL_DISPLAY_SCALE = .75
 AI_DISPLAY_SCALE = 2.0
 AI_BURST_SIZE = 5
 AI_MIN_STABLE_VIEWS = 3
-AI_CONFIDENCE = 0.30
+AI_CONFIDENCE = .50
 AI_IOM_THRESHOLD = 0.80
+
+# ---------------------------------------------------
+# CLASS SELECTION
+# ---------------------------------------------------
+# AI_TARGET_CLASS  — used for fine-align detection (and survey if SURVEY_TARGET_CLASSES is None)
+#   int        →  single class,  e.g. 0
+#   list[int]  →  multiple,      e.g. [0, 2]
+#   None       →  all classes
+#
+# SURVEY_TARGET_CLASSES  — override for the survey burst only
+#   None  →  use AI_TARGET_CLASS (default)
+#   list  →  e.g. [0, 1, 2] to survey for all plant types even if fine-align targets one
+#
+# Quick class lookup:
+#   python -c "from ultralytics import YOLO; m=YOLO('params/26_plastic_nano.pt'); print(m.names)"
+AI_TARGET_CLASS       = 1     # fine-align class filter
+SURVEY_TARGET_CLASSES = None  # None = use AI_TARGET_CLASS; set e.g. [0,1,2] to survey all
 
 # ---------------------------------------------------
 # GLOBAL SURVEY SETTINGS
 # ---------------------------------------------------
 
-SURVEY_BURST_COUNT = 10
-SURVEY_MIN_HITS = 3
+# IoU threshold for grouping detections across burst frames during survey.
+# 0.15 is permissive enough for boxes that shift slightly between frames.
+SURVEY_BOX_IOU_THRESH = 0.15
+
+SURVEY_BURST_COUNT = 3
+SURVEY_MIN_HITS = 2
 SURVEY_CLUSTER_RADIUS_PX = 30.0
 
 # ---------------------------------------------------
