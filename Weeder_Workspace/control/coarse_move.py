@@ -18,9 +18,10 @@ from config import (
     TRI_X_GAIN,
     TRI_Y_GAIN,
     SURVEY_CLUSTER_RADIUS_PX,
-    WORKSPACE_X_MIN, WORKSPACE_X_MAX,
-    WORKSPACE_Y_MIN, WORKSPACE_Y_MAX,
-    SURVEY_BOX_IOU_THRESH,
+    WORKSPACE_X_MIN,
+    WORKSPACE_X_MAX,
+    WORKSPACE_Y_MIN,
+    WORKSPACE_Y_MAX,
 )
 
 # ── workspace bounds helpers (exported so main.py can import them) ────────────
@@ -44,35 +45,6 @@ def clamp_to_workspace(x, y, margin=_WS_MARGIN_MM):
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
-
-
-# ── workspace bounds helpers ──────────────────────────────────────────────────
-_WS_MARGIN_MM = 5.0
-
-def is_in_workspace(x, y, margin=_WS_MARGIN_MM):
-    """Return True if (x, y) mm is safely inside the workspace."""
-    return (WORKSPACE_X_MIN + margin <= x <= WORKSPACE_X_MAX - margin
-            and WORKSPACE_Y_MIN + margin <= y <= WORKSPACE_Y_MAX - margin)
-
-def clamp_to_workspace(x, y, margin=_WS_MARGIN_MM):
-    """Clamp (x, y) to the safe interior of the workspace."""
-    import numpy as np
-    return (float(np.clip(x, WORKSPACE_X_MIN + margin, WORKSPACE_X_MAX - margin)),
-            float(np.clip(y, WORKSPACE_Y_MIN + margin, WORKSPACE_Y_MAX - margin)))
-
-
-
-# ── workspace bounds helpers ──────────────────────────────────────────────────
-_WS_MARGIN_MM = 5.0
-
-def is_in_workspace(x, y, margin=_WS_MARGIN_MM):
-    return (WORKSPACE_X_MIN + margin <= x <= WORKSPACE_X_MAX - margin
-            and WORKSPACE_Y_MIN + margin <= y <= WORKSPACE_Y_MAX - margin)
-
-def clamp_to_workspace(x, y, margin=_WS_MARGIN_MM):
-    import numpy as np
-    return (float(np.clip(x, WORKSPACE_X_MIN+margin, WORKSPACE_X_MAX-margin)),
-            float(np.clip(y, WORKSPACE_Y_MIN+margin, WORKSPACE_Y_MAX-margin)))
 
 
 def _unflip_point_180(u, v, width, height):
@@ -246,8 +218,7 @@ class TriangulationCoarseMover:
     def detect_stable_points(
         self, cameras=None, detector=None, detector_mode=None,
         burst_count=5, min_hits=3, cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
-        survey_classes=None,    # int | list[int] | None — per-survey class override
-        survey_iou_thresh=SURVEY_BOX_IOU_THRESH,  # box IoU grouping threshold
+        survey_classes=None,  # int | list[int] | None — per-survey class override
     ):
         if detector_mode == "manual" and cameras:
             ptsL, ptsR = detector.detect_live(cameras)
@@ -277,11 +248,9 @@ class TriangulationCoarseMover:
 
         stable_left  = detector.cv_left.return_burst_stable(
             left_frames, min_stable_views=min_hits,
-            group_iou_thresh=survey_iou_thresh,
             group_radius_px=cluster_radius_px, classes_override=survey_classes)
         stable_right = detector.cv_right.return_burst_stable(
             right_frames, min_stable_views=min_hits,
-            group_iou_thresh=survey_iou_thresh,
             group_radius_px=cluster_radius_px, classes_override=survey_classes)
         return stable_left, stable_right
 

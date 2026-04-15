@@ -1,4 +1,5 @@
 from config import (
+    HOMING,
     DETECTOR_MODE,
     GRBL_PORT,
     SURVEY_POS_X,
@@ -17,6 +18,7 @@ from config import (
     SURVEY_CLUSTER_RADIUS_PX,
     FINE_ALIGN_SETTLE_FRAMES,
     SURVEY_TARGET_CLASSES,
+    RECORD_TRIAL,
 )
 
 from control.coarse_move import TriangulationCoarseMover, is_in_workspace, is_in_workspace
@@ -39,8 +41,9 @@ from ui.triangulation_debug import show_match_debug_view
 from vision.detectors.ai_detector import AIDetector
 from vision.detectors.manual_detector_local import ManualDetectorLocal
 from vision.matching import match_points
-from run_logger import RunSession  # Adjust import based on where you put it
+from run_logger import RunSession
 import time
+
 
 def build_detector():
     if DETECTOR_MODE == "manual":
@@ -54,29 +57,30 @@ def build_detector():
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
+def _flush_camera_buffer(cameras, n=8):
+    for _ in range(n):
+        cameras.read_pair()
+
 
 def main():
     gantry = None
     cameras = None
-    session = None  # Add session to the initial variables
+    session = None
 
     state = "INIT"
-    detector     = None
+    detector = None
     coarse_mover = None
-    # _detections  → full dicts {"point","box","views"} (AI) or plain tuples (manual)
-    # _points      → plain (x,y) tuples only, used by UI / display functions
-    left_detections  = []
+
+    left_detections = []
     right_detections = []
-    left_points      = []
-    right_points     = []
+    left_points = []
+    right_points = []
     matched_targets = []
-    target_queue    = []
-    actual_hits     = []
+    target_queue = []
+    actual_hits = []
 
     try:
-        # --- 1. INITIALIZE THE RUN SESSION LOGGER ---
-        # This instantly starts the dual-terminal logging and prepares the video thread
-        # session = RunSession(base_folder="run_data")
+        session = RunSession(base_folder="run_data")
 
         while state != "DONE":
             if state == "INIT":
@@ -88,12 +92,11 @@ def main():
                 state = "HOME"
 
             elif state == "HOME":
-                
                 cameras.open()
-                #session.start_recording()
-                # --- 2. ATTACH THE BACKGROUND VIDEO RECORDER ---
-                #cameras.attach_recorder(session.recorder)
-                # gantry.home()
+                # session.start_recording()
+                # cameras.attach_recorder(session.recorder)
+                if HOMING:
+                    gantry.home()
                 state = "SURVEY"
 
             elif state == "SURVEY":
@@ -103,9 +106,16 @@ def main():
 
             elif state == "SURVEY_CONFIRM":
                 user = input("Enter = survey | q = quit: ").strip().lower()
-                state = "DONE" if user == "q" else "DETECT"
+                if user == "q":
+                    state = "DONE"
+                else:
+                    if RECORD_TRIAL:
+                        cameras.start_recording()
+                    state = "DETECT"
 
             elif state == "DETECT":
+                _flush_camera_buffer(cameras, n=8)
+
                 left_detections, right_detections = coarse_mover.detect_stable_points(
                     cameras,
                     detector,
@@ -114,9 +124,11 @@ def main():
                     min_hits=SURVEY_MIN_HITS,
                     cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
                 )
-                # Plain tuples for all UI / display calls
-                def _to_pt(d): return d["point"] if isinstance(d, dict) else d
-                left_points  = [_to_pt(d) for d in left_detections]
+
+                def _to_pt(d):
+                    return d["point"] if isinstance(d, dict) else d
+
+                left_points = [_to_pt(d) for d in left_detections]
                 right_points = [_to_pt(d) for d in right_detections]
                 state = "MATCH"
 
@@ -127,9 +139,11 @@ def main():
                     verbose=True,
                 )
 
-                # --- 3. SAVE THE HIGH-RES SURVEY IMAGES ---
                 if coarse_mover.last_survey_frameL is not None and coarse_mover.last_survey_frameR is not None:
-                    session.save_survey_images(coarse_mover.last_survey_frameL, coarse_mover.last_survey_frameR)
+                    session.save_survey_images(
+                        coarse_mover.last_survey_frameL,
+                        coarse_mover.last_survey_frameR,
+                    )
 
                 print_global_survey_results(len(left_points), len(right_points), len(matched_targets))
                 user = input("Enter = accept global survey | r = rescan | q = quit: ").strip().lower()
@@ -185,14 +199,11 @@ def main():
                 total = len(target_queue)
 
                 for i, solved in enumerate(target_queue, start=1):
-                    # --- 4. START THE PLANT TIMER ---
                     session.start_plant_timer(plant_id=i)
 
-                    # ── bounds check before doing anything ─────────────────
                     tx, ty = solved["target_xy_mm"]
                     if not is_in_workspace(tx, ty):
-                        print_skip_target(i, total, solved,
-                            f"Outside workspace bounds ({tx:.1f}, {ty:.1f}) mm.")
+                        print_skip_target(i, total, solved, f"Outside workspace bounds ({tx:.1f}, {ty:.1f}) mm.")
                         session.end_plant_timer(plant_id=i, status="Skipped (Out of Bounds)")
                         continue
 
@@ -202,14 +213,12 @@ def main():
                         tol_mm=8.0,
                     ):
                         print_skip_target(i, total, solved, "Already covered by a previous PD lock.")
-                        # --- 5A. END TIMER (SKIPPED DUPLICATE) ---
                         session.end_plant_timer(plant_id=i, status="Skipped (Duplicate)")
                         continue
 
                     show_current_target(i, total, solved)
                     moved = coarse_mover.move_to_absolute_target(gantry, solved)
                     if not moved:
-                        # move_to_absolute_target already printed a warning
                         session.end_plant_timer(plant_id=i, status="Skipped (Out of Bounds)")
                         continue
 
@@ -246,7 +255,7 @@ def main():
                         actual_hits,
                         settle_frames=FINE_ALIGN_SETTLE_FRAMES,
                         show_debug=HAS_DISPLAY,
-                        survey_targets=target_queue,   # enables constellation re-ID
+                        survey_targets=target_queue,
                         target_idx=i,
                         total_targets=total,
                     )
@@ -262,7 +271,6 @@ def main():
                         print_skip_target(i, total, solved, "Fine align failed")
                         session.end_plant_timer(plant_id=i, status="Failed (Fine Align)")
 
-                # Close the shared fine-align window once all targets are done
                 close_fine_align_window()
                 close_fine_align_window()
                 clear_current_target_line()
@@ -280,14 +288,11 @@ def main():
         print(f"\nERROR: {e}")
 
     finally:
-        # --- 6. CRITICAL SHUTDOWN SEQUENCE ---
         if cameras is not None:
+            cameras.stop_recording()
             cameras.close()
         if gantry is not None:
             gantry.close()
-        
-        # Ensures the video thread safely stops encoding and writes the JSON
-        
         if session is not None:
             session.end_session()
 

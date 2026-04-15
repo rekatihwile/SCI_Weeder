@@ -31,6 +31,9 @@ DEFAULT_MODEL = "plastic_nano"
 DEFAULT_QPOINT_MODEL = "targeting_tall_plastic"
 CV_PIPELINE_MODE = "two_stage"
 
+# Print per-detection qpoint debug lines (very noisy). Off by default.
+QPOINT_DEBUG = True
+
 # ---------------------------------------------------
 # TRAINING PHOTO COLLECTION
 # ---------------------------------------------------
@@ -147,8 +150,8 @@ MANUAL_DISPLAY_SCALE = .75
 
 AI_DISPLAY_SCALE = 2.0
 AI_BURST_SIZE = 5
-AI_MIN_STABLE_VIEWS = 3
-AI_CONFIDENCE = .50
+AI_MIN_STABLE_VIEWS = 2
+AI_CONFIDENCE = .45
 AI_IOM_THRESHOLD = 0.80
 
 # ---------------------------------------------------
@@ -165,19 +168,15 @@ AI_IOM_THRESHOLD = 0.80
 #
 # Quick class lookup:
 #   python -c "from ultralytics import YOLO; m=YOLO('params/26_plastic_nano.pt'); print(m.names)"
-AI_TARGET_CLASS       = 1     # fine-align class filter
-SURVEY_TARGET_CLASSES = None  # None = use AI_TARGET_CLASS; set e.g. [0,1,2] to survey all
+AI_TARGET_CLASS       = None   # fine-align class filter
+SURVEY_TARGET_CLASSES = 0  # None = use AI_TARGET_CLASS; set e.g. [0,1,2] to survey all
 
 # ---------------------------------------------------
 # GLOBAL SURVEY SETTINGS
 # ---------------------------------------------------
 
-# IoU threshold for grouping detections across burst frames during survey.
-# 0.15 is permissive enough for boxes that shift slightly between frames.
-SURVEY_BOX_IOU_THRESH = 0.15
-
 SURVEY_BURST_COUNT = 10
-SURVEY_MIN_HITS = 8
+SURVEY_MIN_HITS = 2
 SURVEY_CLUSTER_RADIUS_PX = 30.0
 
 # ---------------------------------------------------
@@ -189,7 +188,7 @@ FINE_ALIGN_CROP_SCALE = 0.5
 FINE_ALIGN_LK_WIN_SIZE = 31
 FINE_ALIGN_LK_MAX_LEVEL = 3
 
-FINE_ALIGN_KP_X = 12.5
+FINE_ALIGN_KP_X = 10.0
 FINE_ALIGN_KD_X = 2.5
 FINE_ALIGN_KP_Y = 10.0
 FINE_ALIGN_KD_Y = 2.5
@@ -199,9 +198,13 @@ FINE_ALIGN_DEADZONE_PX = 3.0
 FINE_ALIGN_MAX_JOG_MM = 10.0
 FINE_ALIGN_FEED = 5000
 
-FINE_ALIGN_BURST_COUNT = 4
-FINE_ALIGN_MIN_HITS = 3
+FINE_ALIGN_BURST_COUNT = 5
+FINE_ALIGN_MIN_HITS = 2
 FINE_ALIGN_CLUSTER_RADIUS_PX = 12.0
+
+# How many LK frames between re-anchor attempts (snap back to fresh YOLO+qpoint).
+# Lower = less drift but more YOLO calls per second. 1 = snap every frame.
+FINE_ALIGN_LK_REDETECT_INTERVAL = 45
 
 FINE_ALIGN_MAX_TIME_SEC = 15.0
 FINE_ALIGN_SETTLE_FRAMES = 10
@@ -211,9 +214,9 @@ FINE_ALIGN_SETTLE_FRAMES = 10
 # ---------------------------------------------------
 
 STRIKE_PATTERN = "pulse"
-LASER_FIRE_POWER = 1000
+LASER_FIRE_POWER = 25
 LASER_FIRE_DURATION_SEC = 2
-LASER_ARM_DELAY_SEC = 0.100
+LASER_ARM_DELAY_SEC = 0.01
 LASER_TRIGGER_FEED = 100
 
 # ---------------------------------------------------
@@ -221,3 +224,18 @@ LASER_TRIGGER_FEED = 100
 # ---------------------------------------------------
 
 IS_WINDOWS = sys.platform.startswith("win")
+
+
+HOMING = False  # if True, gantry will home at startup
+FIRE = False  # if True, gantry will fire laser when strike_target is called
+# ---------------------------------------------------
+# TRIAL RECORDING
+# ---------------------------------------------------
+
+# Set to True to record a side-by-side stereo video starting from survey confirm.
+# Videos are saved to SCI_Weeder/trial_recordings/<timestamp>.mp4  (NOT inside run_data).
+RECORD_TRIAL = False
+RECORD_VIDEO_FPS = 15.0    # Playback FPS written into the file header
+RECORD_VIDEO_SCALE = 0.5   # Downscale per side before combining
+                           # 0.5 → 640x360 each → 1280x360 combined
+TRIAL_RECORDINGS_DIR = BASE_DIR / "trial_recordings"

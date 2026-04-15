@@ -1,0 +1,105 @@
+{
+    "total_runtime_sec": 79.906,
+    "total_plants": 11,
+    "plant_details": [
+        {
+            "plant_id": 1,
+            "duration_sec": 8.372,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 2,
+            "duration_sec": 7.603,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 3,
+            "duration_sec": 3.768,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 4,
+            "duration_sec": 3.711,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 5,
+            "duration_sec": 3.344,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 6,
+            "duration_sec": 3.452,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 7,
+            "duration_sec": 3.647,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 8,
+            "duration_sec": 3.421,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 9,
+            "duration_sec": 3.565,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 10,
+            "duration_sec": 3.286,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        },
+        {
+            "plant_id": 11,
+            "duration_sec": 9.149,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        }
+    ]
+}

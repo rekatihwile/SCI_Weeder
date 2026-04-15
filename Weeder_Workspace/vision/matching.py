@@ -242,6 +242,15 @@ def match_points_constellation(
             entry["left_box"]  = left_boxes[l_idx]
             entry["right_box"] = right_boxes[r_idx]
             entry["box_iou"]   = float(best_meta[l_idx].get("iou", 0.0))
+            # Thread class + confidence through so downstream code can filter by plant type
+            ld = left_detections[l_idx]
+            rd = right_detections[r_idx]
+            if isinstance(ld, dict):
+                entry["left_cls"]  = ld.get("cls")
+                entry["left_conf"] = ld.get("conf")
+            if isinstance(rd, dict):
+                entry["right_cls"]  = rd.get("cls")
+                entry["right_conf"] = rd.get("conf")
 
         matched_targets.append(entry)
         matched_left_idx.add(l_idx)

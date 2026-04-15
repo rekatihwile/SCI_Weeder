@@ -1,0 +1,15 @@
+{
+    "total_runtime_sec": 29.066,
+    "total_plants": 1,
+    "plant_details": [
+        {
+            "plant_id": 1,
+            "duration_sec": 7.763,
+            "status": "Failed (Fine Align)",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        }
+    ]
+}

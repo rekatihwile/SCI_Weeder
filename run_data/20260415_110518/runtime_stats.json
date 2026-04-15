@@ -1,0 +1,15 @@
+{
+    "total_runtime_sec": 33.343,
+    "total_plants": 1,
+    "plant_details": [
+        {
+            "plant_id": 1,
+            "duration_sec": 8.434,
+            "status": "Locked and Fired",
+            "final_err_px": {
+                "x": 0.0,
+                "y": 0.0
+            }
+        }
+    ]
+}
