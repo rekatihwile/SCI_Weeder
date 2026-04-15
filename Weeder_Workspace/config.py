@@ -22,11 +22,20 @@ MODEL_MAP = {
     "sniper": "sniper.pt",
     "best_targeting_v3": "best_targeting_v3.pth",
     "best_pigweed_145": "best_pigweed_145.pt",
+    # Plastic plant models (tall plastic, field test)
+    "plastic_nano": "26_plastic_nano.pt",
+    "targeting_tall_plastic": "new_best_targeting_tall_plastic.pth",
 }
 
 DEFAULT_MODEL = "best_pigweed_145"
 DEFAULT_QPOINT_MODEL = "sniper"
 CV_PIPELINE_MODE = "two_stage"
+
+# ---------------------------------------------------
+# PLASTIC PLANT MODELS  (used by cv_figure_maker)
+# ---------------------------------------------------
+DEFAULT_PLASTIC_MODEL        = "plastic_nano"
+DEFAULT_PLASTIC_QPOINT_MODEL = "targeting_tall_plastic"
 
 # ---------------------------------------------------
 # TRAINING PHOTO COLLECTION

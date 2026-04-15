@@ -25,6 +25,7 @@ class _WeedCVCore:
         self.yolo = YOLO(str(self.yolo_path))
         self.qpoint_model = None
         self.filtered_boxes = []
+        self.qpoint_is_heatmap = False  # updated by _probe_output_is_heatmap after load
 
         self.conf = conf
         self.iom_thresh = iom_thresh
@@ -36,15 +37,60 @@ class _WeedCVCore:
             print("[WARN] No qpoint model found. Falling back to box centers.")
             return
 
+        name = self.qpoint_path.name
+
+        # --- Strategy 1: TorchScript (torch.jit.save / torch.jit.trace) ---
         try:
-            self.qpoint_model = torch.jit.load(str(self.qpoint_path), map_location=self.device).eval()
+            model = torch.jit.load(str(self.qpoint_path), map_location=self.device).eval()
             if self.device == "cuda":
-                self.qpoint_model.cuda()
-            print(f"[INFO] Using qpoint model: {self.qpoint_path}")
+                model.cuda()
+            self.qpoint_model = model
+            self.qpoint_is_heatmap = False
+            print(f"[INFO] Loaded qpoint model (TorchScript): {name}")
+            return
+        except Exception:
+            pass   # not a TorchScript file — try next strategy
+
+        # --- Strategy 2: Full model object (torch.save(model, path)) ---
+        try:
+            # weights_only=False required to unpickle the full model object.
+            # Suppress the FutureWarning about weights_only on older PyTorch.
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = torch.load(str(self.qpoint_path),
+                                   map_location=self.device,
+                                   weights_only=False)
+            if hasattr(model, "eval"):
+                model = model.eval()
+            if self.device == "cuda" and hasattr(model, "cuda"):
+                model = model.cuda()
+            self.qpoint_model = model
+            # Probe output shape on a dummy input to decide coord vs heatmap
+            self.qpoint_is_heatmap = self._probe_output_is_heatmap()
+            mode = "heatmap" if self.qpoint_is_heatmap else "coord"
+            print(f"[INFO] Loaded qpoint model (torch.load, {mode}): {name}")
+            return
         except Exception as exc:
-            print(f"[WARN] Could not load qpoint model ({self.qpoint_path}): {exc}")
+            print(f"[WARN] Could not load qpoint model ({name}): {exc}")
             print("[WARN] Falling back to box centers.")
             self.qpoint_model = None
+
+    def _probe_output_is_heatmap(self) -> bool:
+        """
+        Run a blank 640×640 input through the model and inspect the output
+        shape.  If the output has spatial dimensions (H×W > 4) we treat it
+        as a heatmap; otherwise we assume it returns normalised (x, y)
+        coordinates.
+        """
+        try:
+            dummy = torch.zeros(1, 3, 640, 640, dtype=torch.float32).to(self.device)
+            with torch.no_grad():
+                out = self.qpoint_model(dummy)
+            # Any dimension > 4 values is almost certainly spatial
+            return any(d > 4 for d in out.shape)
+        except Exception:
+            return False   # can't tell — default to coord mode
 
     def _iom(self, b1, b2):
         x1 = max(b1[0], b2[0])
@@ -100,12 +146,87 @@ class _WeedCVCore:
         img_t = self._prep_crop_input(crop)
 
         with torch.no_grad():
-            out = self.qpoint_model(img_t).detach().cpu().numpy().reshape(-1)
+            raw = self.qpoint_model(img_t)
 
-        if out.size < 2:
+        out = raw.detach().cpu()
+
+        # ----------------------------------------------------------------
+        # Heatmap output  (e.g. shape 1×1×H×W or 1×H×W)
+        # The predicted point is the argmax of the spatial heatmap, then
+        # mapped back to crop pixel coordinates.
+        # ----------------------------------------------------------------
+        if self.qpoint_is_heatmap or out.dim() >= 3:
+            hm = out.squeeze()           # drop batch + channel dims → (H, W)
+            if hm.dim() == 3:            # still (C, H, W) — collapse channels
+                hm = hm.max(dim=0).values
+            if hm.dim() != 2:
+                return 0.5 * w, 0.5 * h
+            hm_np = hm.numpy()
+            flat_idx         = int(np.argmax(hm_np))
+            peak_y, peak_x   = np.unravel_index(flat_idx, hm_np.shape)
+            return (float(peak_x) / hm_np.shape[1] * w,
+                    float(peak_y) / hm_np.shape[0] * h)
+
+        # ----------------------------------------------------------------
+        # Coordinate output  (flat vector [x_norm, y_norm])
+        # ----------------------------------------------------------------
+        flat = out.numpy().reshape(-1)
+        if flat.size < 2:
             return 0.5 * w, 0.5 * h
 
-        return float(out[0]) * w, float(out[1]) * h
+        return float(flat[0]) * w, float(flat[1]) * h
+
+    def detect_with_visuals(self, frame):
+        """
+        Run detection and return bounding boxes + keypoints together.
+
+        Returns a list of dicts, one per detected plant:
+            {
+                "box":      (x1, y1, x2, y2),   # YOLO bbox in frame pixels
+                "conf":     float,               # YOLO confidence score
+                "keypoint": (x, y),              # Predicted stem point in frame pixels
+            }
+        """
+        boxes = self._get_filtered_boxes(frame)
+        results = []
+
+        for box in boxes:
+            b = box.xyxy[0].cpu().numpy().astype(int)
+            x1, y1, x2, y2 = b.tolist()
+            conf = float(box.conf[0])
+
+            w = x2 - x1
+            h = y2 - y1
+            px = int(0.2 * w)
+            py = int(0.2 * h)
+
+            cx1 = max(0, x1 - px)
+            cy1 = max(0, y1 - py)
+            cx2 = min(frame.shape[1], x2 + px)
+            cy2 = min(frame.shape[0], y2 + py)
+
+            crop = frame[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                continue
+
+            dx, dy = self._predict_point_in_crop(crop)
+            kx = int(round(cx1 + dx))
+            ky = int(round(cy1 + dy))
+            kx = max(0, min(frame.shape[1] - 1, kx))
+            ky = max(0, min(frame.shape[0] - 1, ky))
+
+            cls_id   = int(box.cls[0])
+            cls_name = self.yolo.names.get(cls_id, str(cls_id))
+
+            results.append({
+                "box":      (x1, y1, x2, y2),
+                "conf":     conf,
+                "keypoint": (kx, ky),
+                "cls_id":   cls_id,
+                "cls_name": cls_name,
+            })
+
+        return results
 
     def detect_points(self, frame):
         boxes = self._get_filtered_boxes(frame)

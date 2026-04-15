@@ -21,3 +21,19 @@ torch_jetson.whl
 training_photos/
 *.jpg
 *.jpeg
+
+# Ignore folder named "Spaghetti"
+Spaghetti/
+
+*.tar
+*.zip
+*.pdf
+captures/
+*/calib_pairs/
+Weeder_Workspace/Photo_Tests/figure_outputs/
+*.tar
+*.zip
+*.pdf
+captures/
+*/calib_pairs/
+Weeder_Workspace/Photo_Tests/figure_outputs/
