@@ -76,7 +76,7 @@ def main():
     try:
         # --- 1. INITIALIZE THE RUN SESSION LOGGER ---
         # This instantly starts the dual-terminal logging and prepares the video thread
-        session = RunSession(base_folder="run_data")
+        # session = RunSession(base_folder="run_data")
 
         while state != "DONE":
             if state == "INIT":
