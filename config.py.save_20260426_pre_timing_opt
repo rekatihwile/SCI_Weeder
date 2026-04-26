@@ -67,7 +67,7 @@ FIRE = False
 RECORD_TRIAL = True
 # Record raw stereo frame pairs and a JSONL manifest each run.
 
-AUTO_RENDER_TRIAL = False
+AUTO_RENDER_TRIAL = True
 # Post-render an annotated video after the run completes. Requires RECORD_TRIAL=True.
 
 AUTO_RENDER_DELETE_RAW = True
@@ -78,10 +78,6 @@ TRIANGULATION_ONLY_MODE = False
 
 FULL_AUTO = True
 # Skip all operator prompts and run unattended.
-
-RUN_PIPELINE_CYCLES = 2
-# Number of full HOME->SURVEY->PLAN->EXECUTE cycles per main.py run.
-# 2 means the full targeting pipeline is repeated once after completion.
 
 AUTO_MODE = False
 # Let cameras self-adjust exposure and white-balance after startup settings are applied.
@@ -305,10 +301,8 @@ SURVEY_FRAME_HEIGHT = None
 # Camera resolution during survey. None = use FRAME_WIDTH/HEIGHT.
 # Set higher (e.g. 1920x1080) to improve detection range at the cost of settle time.
 
-SURVEY_BURST_COUNT = 75
+SURVEY_BURST_COUNT = 80
 # Frames captured per survey. Turn UP for more stable detections; slower.
-# 75: reliable direct detection of all 16 plants in dark lab without triggering repair.
-# Repair mechanism can synthesize ghost targets from marginal edge detections — avoid relying on it.
 
 SURVEY_MIN_HITS = 1
 # Minimum burst-frame hits for a detection to count as stable. Turn UP to filter weak detections.
@@ -386,9 +380,8 @@ FINE_ALIGN_CROP_SCALE = 1
 # LK/PD tracking window scale relative to full frame. 1.0 = full frame; lower = centered sub-region.
 # Re-ID candidates are rejected if their pixel position falls outside this window.
 
-FINE_ALIGN_REID_BURST_COUNT = 20
+FINE_ALIGN_REID_BURST_COUNT = 40
 # Frames captured per Re-ID burst. Turn UP for more stable re-detection; slower.
-# 20: min_hits=1 + epipolar/tri_dist/geo_score ranking guards against mismatches.
 
 FINE_ALIGN_MIN_HITS = 1
 # Minimum burst frames a Re-ID detection must appear in to be accepted.
@@ -445,9 +438,8 @@ FINE_ALIGN_KD_Y = 2.5
 FINE_ALIGN_MM_PER_PX = 0.001
 # Converts PD output (pixels) to gantry jog distance (mm). Turn UP for larger jogs per pixel.
 
-FINE_ALIGN_DEADZONE_PX = 3.0
+FINE_ALIGN_DEADZONE_PX = 2.5
 # Pixel error below which the gantry holds position (lock accepted). Turn UP for a looser lock.
-# Increased from 2.5: still sub-mm accuracy; duplicate guard unchanged at 8mm tol.
 
 FINE_ALIGN_MAX_JOG_MM = 10.0
 # Hard cap on a single fine-align jog step in mm.
@@ -458,9 +450,8 @@ FINE_ALIGN_FEED = 5000
 FINE_ALIGN_MAX_TIME_SEC = 15.0
 # Timeout before abandoning fine-align on a difficult target.
 
-FINE_ALIGN_SETTLE_FRAMES = 7
+FINE_ALIGN_SETTLE_FRAMES = 10
 # Consecutive frames within the deadzone required before firing.
-# Reduced from 10: 7 consecutive in-deadzone frames is still a robust lock signal.
 
 
 # =============================================================================

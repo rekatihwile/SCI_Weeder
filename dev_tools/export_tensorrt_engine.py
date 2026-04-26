@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from config import CV_WEIGHTS_DIR, DEFAULT_MODEL_PT, MODEL_MAP, YOLO_WARMUP_IMGSZ  # noqa: E402
+from config import CV_WEIGHTS_DIR, DEFAULT_MODEL, MODEL_MAP, YOLO_WARMUP_IMGSZ  # noqa: E402
 
 
 def _resolve_weight_path(model_name_or_path):
@@ -106,7 +106,7 @@ def export_engine(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", default=DEFAULT_MODEL_PT, help="YOLO .pt model name/path. Default: config DEFAULT_MODEL_PT.")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="YOLO .pt model name/path. Default: config DEFAULT_MODEL.")
     parser.add_argument("--output", help="Output .engine path. Default: same folder/name as the .pt.")
     parser.add_argument("--imgsz", type=int, default=YOLO_WARMUP_IMGSZ, help="Static TensorRT image size.")
     parser.add_argument("--device", default=0, help="CUDA device for export, usually 0 on the Jetson.")

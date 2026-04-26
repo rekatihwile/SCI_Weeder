@@ -17,9 +17,9 @@
         }
     },
     "runtime": {
-        "has_display": true,
-        "headless": false,
-        "ui_mode": "window",
-        "display_backend": ":1"
+        "has_display": false,
+        "headless": true,
+        "ui_mode": "headless",
+        "display_backend": ""
     }
 }

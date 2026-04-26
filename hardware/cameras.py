@@ -33,7 +33,6 @@ from config import (
     RECORD_VIDEO_FPS,
     RECORD_VIDEO_SCALE,
     RECORD_VIDEO_TIMESTAMP,
-    RECORD_VIDEO_OVERLAY,
     RECORD_VIDEO_DEBUG,
 )
 
@@ -163,7 +162,7 @@ class LiveVideoRecorder:
             t0 = time.time()
 
             with self._lock:
-                if (RECORD_LIVE_OVERLAYS or RECORD_VIDEO_OVERLAY) and self._latest_overlay_l is not None:
+                if RECORD_LIVE_OVERLAYS and self._latest_overlay_l is not None:
                     fl = self._latest_overlay_l
                     fr = self._latest_overlay_r
                 else:

@@ -23,7 +23,6 @@ from config import (
     AI_IOM_THRESHOLD,
     AI_TARGET_CLASS,
     DEFAULT_MODEL,
-    DEFAULT_MODEL_PT,
     DEFAULT_MODEL_ENGINE,
     DEFAULT_QPOINT_MODEL,
     MODEL_MAP,
@@ -71,6 +70,20 @@ def _box_iou(b1, b2):
     a2 = max(0.0, b2[2] - b2[0]) * max(0.0, b2[3] - b2[1])
     union = a1 + a2 - inter
     return inter / union if union > 0.0 else 0.0
+
+
+def _box_center(box):
+    return (0.5 * (box[0] + box[2]), 0.5 * (box[1] + box[3]))
+
+
+def _point_dist(p1, p2):
+    return float(np.hypot(float(p1[0]) - float(p2[0]), float(p1[1]) - float(p2[1])))
+
+
+def _adaptive_group_radius(box, base_radius=None):
+    bw = max(1.0, float(box[2]) - float(box[0]))
+    bh = max(1.0, float(box[3]) - float(box[1]))
+    return max(float(base_radius or 0.0), 0.30 * min(bw, bh), 10.0)
 
 
 def _resolve_classes(target_class, override=None):
@@ -136,7 +149,7 @@ def _select_yolo_model_path(explicit_path=None):
     if backend_cfg not in ("pt", "engine", "auto"):
         raise ValueError(f"Unknown YOLO_BACKEND: {YOLO_BACKEND}")
 
-    pt_path = _resolve_weight_path(DEFAULT_MODEL_PT or DEFAULT_MODEL)
+    pt_path = _resolve_weight_path(DEFAULT_MODEL)
     engine_path = _resolve_weight_path(DEFAULT_MODEL_ENGINE)
     want_engine = backend_cfg == "engine" or (backend_cfg == "auto" and USE_TENSORRT_ENGINE)
 
@@ -340,11 +353,12 @@ class _WeedCVCore:
         return results
 
     def _effective_yolo_conf(self, conf_override=None):
-        if conf_override is not None:
-            return conf_override
+        base = conf_override if conf_override is not None else self.conf
         if self.class_conf:
-            return min(self.conf, min(self.class_conf.values()))
-        return self.conf
+            # Always run YOLO at the lowest per-class threshold so per-class
+            # post-filtering can act on all candidate detections.
+            return min(base, min(self.class_conf.values()))
+        return base
 
     def _resolve_imgsz(self, frame_or_frames, imgsz):
         if imgsz is not None:
@@ -383,12 +397,15 @@ class _WeedCVCore:
             if all(self._iom(bi, raw_boxes[j].xyxy[0].cpu().numpy()) <= self.iom_thresh for j in keep):
                 keep.append(i)
 
-        # Per-class confidence filter (applied after IoM so we deduplicate first)
-        if self.class_conf and conf_override is None:
+        # Per-class confidence filter (applied after IoM so we deduplicate first).
+        # Per-class always takes precedence; conf_override (or self.conf) is the fallback
+        # for classes that have no per-class entry.
+        if self.class_conf:
+            fallback = conf_override if conf_override is not None else self.conf
             keep = [
                 i for i in keep
                 if float(raw_boxes[i].conf[0].cpu().item())
-                   >= self.class_conf.get(int(raw_boxes[i].cls[0].cpu().item()), self.conf)
+                   >= self.class_conf.get(int(raw_boxes[i].cls[0].cpu().item()), fallback)
             ]
 
         filtered_boxes = [raw_boxes[i] for i in keep]
@@ -721,26 +738,77 @@ class _WeedCVCore:
         t_group = time.perf_counter()
         groups = []
 
+        def _refresh_group(g):
+            arr = np.array(g["boxes"], dtype=float)
+            pts = np.array(g["points"], dtype=float)
+            g["box_mean"] = tuple(np.mean(arr, axis=0).tolist())
+            g["point_mean"] = tuple(np.mean(pts, axis=0).tolist())
+
+        def _group_modal_cls(g):
+            return Counter(g["cls_votes"]).most_common(1)[0][0]
+
+        def _group_match_score(det, g):
+            iou = _box_iou(det["box"], g["box_mean"])
+            radius = max(
+                _adaptive_group_radius(det["box"], group_radius_px),
+                _adaptive_group_radius(g["box_mean"], group_radius_px),
+            )
+            dist = _point_dist(det["point"], g["point_mean"])
+            same_cls = det["cls"] == _group_modal_cls(g)
+            near_enough = dist <= radius
+            overlap_enough = iou >= group_iou_thresh
+            if not (near_enough or overlap_enough):
+                return None
+
+            dist_score = max(0.0, 1.0 - dist / max(1.0, radius))
+            cls_bonus = 0.05 if same_cls else 0.0
+            return max(iou, dist_score) + cls_bonus
+
+        def _groups_look_duplicate(g1, g2):
+            iou = _box_iou(g1["box_mean"], g2["box_mean"])
+            radius = max(
+                _adaptive_group_radius(g1["box_mean"], group_radius_px),
+                _adaptive_group_radius(g2["box_mean"], group_radius_px),
+            )
+            dist = _point_dist(g1["point_mean"], g2["point_mean"])
+            cls1 = _group_modal_cls(g1)
+            cls2 = _group_modal_cls(g2)
+            if iou >= max(0.15, 0.60 * group_iou_thresh):
+                return True
+            if cls1 == cls2 and dist <= 0.90 * radius:
+                return True
+            return dist <= 0.55 * radius
+
+        def _merge_groups(dst, src):
+            dst["boxes"].extend(src["boxes"])
+            dst["points"].extend(src["points"])
+            dst["cls_votes"].extend(src["cls_votes"])
+            dst["confs"].extend(src["confs"])
+            dst["views"] += src["views"]
+            _refresh_group(dst)
+
         for frame_data in all_detections:
             for det in frame_data:
                 best_group = None
-                best_iou = 0.0
+                best_score = -1.0
 
                 for gi, g in enumerate(groups):
-                    iou = _box_iou(det["box"], g["box_mean"])
-                    if iou >= group_iou_thresh and iou > best_iou:
-                        best_iou = iou
+                    score = _group_match_score(det, g)
+                    if score is not None and score > best_score:
+                        best_score = score
                         best_group = gi
 
                 if best_group is None:
-                    groups.append({
+                    group = {
                         "boxes":     [det["box"]],
                         "points":    [det["point"]],
                         "cls_votes": [det["cls"]],
                         "confs":     [det["conf"]],
                         "views":     1,
                         "box_mean":  det["box"],
-                    })
+                        "point_mean": det["point"],
+                    }
+                    groups.append(group)
                 else:
                     g = groups[best_group]
                     g["boxes"].append(det["box"])
@@ -748,19 +816,38 @@ class _WeedCVCore:
                     g["cls_votes"].append(det["cls"])
                     g["confs"].append(det["conf"])
                     g["views"] += 1
-                    arr = np.array(g["boxes"])
-                    g["box_mean"] = tuple(np.mean(arr, axis=0).tolist())
+                    _refresh_group(g)
+
+        # Second pass: collapse any leftover duplicate groups for the same plant.
+        dedup_groups = groups[:]
+        changed = True
+        while changed and len(dedup_groups) > 1:
+            changed = False
+            next_groups = []
+            used = [False] * len(dedup_groups)
+            for i, base in enumerate(dedup_groups):
+                if used[i]:
+                    continue
+                for j in range(i + 1, len(dedup_groups)):
+                    if used[j]:
+                        continue
+                    other = dedup_groups[j]
+                    if _groups_look_duplicate(base, other):
+                        _merge_groups(base, other)
+                        used[j] = True
+                        changed = True
+                next_groups.append(base)
+            dedup_groups = next_groups
+        groups = dedup_groups
 
         stable = []
         for g in groups:
             if g["views"] < min_stable_views:
                 continue
 
-            pts = np.array(g["points"], dtype=float)
-            mean_pt = np.mean(pts, axis=0)
-            arr = np.array(g["boxes"])
-            mean_box = tuple(np.mean(arr, axis=0).tolist())
-            modal_cls = Counter(g["cls_votes"]).most_common(1)[0][0]
+            mean_pt = np.array(g["point_mean"], dtype=float)
+            mean_box = g["box_mean"]
+            modal_cls = _group_modal_cls(g)
             mean_conf = float(np.mean(g["confs"]))
 
             stable.append({

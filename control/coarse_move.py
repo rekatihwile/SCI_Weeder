@@ -16,19 +16,28 @@ from config import (
     CALIB_NPZ_PATH,
     RECT_NPZ_PATH,
     CALIBRATION_EXPECTS_UNFLIPPED,
-    TRI_SIGN_X,
-    TRI_SIGN_Y,
+    TRI_X_SIGN,
+    TRI_Y_SIGN,
     LASER_OFFSET_X_MM,
     LASER_OFFSET_Y_MM,
     TRI_X_GAIN,
     TRI_Y_GAIN,
     SURVEY_CLUSTER_RADIUS_PX,
-    SURVEY_CROP_HALF_PX,
+    SURVEY_CROP_MODE,
+    SURVEY_CROP_HALF_X_PX,
+    SURVEY_CROP_HALF_Y_PX,
+    SURVEY_PROJECT_CROP_MARGIN_PX,
+    SURVEY_PROJECT_Z_MIN_MM,
+    SURVEY_PROJECT_Z_MAX_MM,
+    SURVEY_PROJECT_Z_SAMPLES,
+    SURVEY_POS_X,
+    SURVEY_POS_Y,
     WORKSPACE_X_MIN,
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
     WORKSPACE_Y_MAX,
 )
+from vision.workspace_crop import project_workspace_crop_left_right, crop_frame_with_rect
 
 # ── workspace bounds helpers (exported so main.py can import them) ────────────
 
@@ -199,8 +208,8 @@ class TriangulationCoarseMover:
         offset_m = np.array([LASER_OFFSET_X_MM / 1000.0, LASER_OFFSET_Y_MM / 1000.0, 0.0])
         X_laser  = X_mid - offset_m
 
-        dx_mm = TRI_SIGN_X * TRI_X_GAIN * float(X_laser[0] * 1000.0)
-        dy_mm = TRI_SIGN_Y * TRI_Y_GAIN * float(X_laser[1] * 1000.0)
+        dx_mm = TRI_X_SIGN * TRI_X_GAIN * float(X_laser[0] * 1000.0)
+        dy_mm = TRI_Y_SIGN * TRI_Y_GAIN * float(X_laser[1] * 1000.0)
         return X_rect, X_mid, X_laser, dx_mm, dy_mm
 
     def solve_target_from_pose(self, target, ref_x, ref_y):
@@ -323,25 +332,105 @@ class TriangulationCoarseMover:
         # Scale the cluster radius if we captured at HD (groups are physically bigger in HD pixels).
         burst_radius = cluster_radius_px * (SURVEY_FRAME_WIDTH / FRAME_WIDTH) if use_hd else cluster_radius_px
 
-        # Optional centre-crop before YOLO — mirrors the re-ID crop approach for speed.
-        survey_crop_half = SURVEY_CROP_HALF_PX
-        if survey_crop_half is not None and not use_hd:
-            cw, ch = capture_w, capture_h
-            cx, cy = cw // 2, ch // 2
-            scx0 = max(0, cx - survey_crop_half)
-            scx1 = min(cw, cx + survey_crop_half)
-            scy0 = max(0, cy - survey_crop_half)
-            scy1 = min(ch, cy + survey_crop_half)
-            left_frames_yolo  = [f[scy0:scy1, scx0:scx1] for f in left_frames]
-            right_frames_yolo = [f[scy0:scy1, scx0:scx1] for f in right_frames]
-            _survey_debug(
-                f"survey crop: x={scx0}:{scx1} y={scy0}:{scy1} "
-                f"half={survey_crop_half}px → {scx1-scx0}×{scy1-scy0}"
+        # Optional survey crop before YOLO.
+        # Mode is configurable: projected or centered.
+        survey_crop_mode = str(SURVEY_CROP_MODE or "projected").strip().lower()
+        if survey_crop_mode not in ("projected", "centered"):
+            survey_crop_mode = "projected"
+
+        survey_crop_half_x = SURVEY_CROP_HALF_X_PX
+        survey_crop_half_y = SURVEY_CROP_HALF_Y_PX
+
+        def _build_centered_rect():
+            if survey_crop_half_x is None or survey_crop_half_y is None:
+                return None
+            cx, cy = capture_w // 2, capture_h // 2
+            x0 = max(0, int(cx - survey_crop_half_x))
+            x1 = min(capture_w, int(cx + survey_crop_half_x))
+            y0 = max(0, int(cy - survey_crop_half_y))
+            y1 = min(capture_h, int(cy + survey_crop_half_y))
+            if x1 <= x0 or y1 <= y0:
+                return None
+            return (x0, y0, x1, y1)
+
+        left_rect = (0, 0, capture_w, capture_h)
+        right_rect = (0, 0, capture_w, capture_h)
+        projected_crop_ok = False
+
+        if not use_hd and survey_crop_mode == "projected":
+            left_rect_proj, right_rect_proj, proj_info = project_workspace_crop_left_right(
+                frame_width=capture_w,
+                frame_height=capture_h,
+                calib_npz_path=CALIB_NPZ_PATH,
+                rect_npz_path=RECT_NPZ_PATH,
+                workspace_x_min=WORKSPACE_X_MIN,
+                workspace_x_max=WORKSPACE_X_MAX,
+                workspace_y_min=WORKSPACE_Y_MIN,
+                workspace_y_max=WORKSPACE_Y_MAX,
+                survey_pos_x=SURVEY_POS_X,
+                survey_pos_y=SURVEY_POS_Y,
+                tri_sign_x=TRI_X_SIGN,
+                tri_sign_y=TRI_Y_SIGN,
+                tri_x_gain=TRI_X_GAIN,
+                tri_y_gain=TRI_Y_GAIN,
+                laser_offset_x_mm=LASER_OFFSET_X_MM,
+                laser_offset_y_mm=LASER_OFFSET_Y_MM,
+                z_min_mm=SURVEY_PROJECT_Z_MIN_MM,
+                z_max_mm=SURVEY_PROJECT_Z_MAX_MM,
+                z_samples=SURVEY_PROJECT_Z_SAMPLES,
+                margin_px=SURVEY_PROJECT_CROP_MARGIN_PX,
+                calibration_expects_unflipped=CALIBRATION_EXPECTS_UNFLIPPED,
             )
+            if left_rect_proj is not None and right_rect_proj is not None:
+                left_rect = left_rect_proj
+                right_rect = right_rect_proj
+                projected_crop_ok = True
+                print("[SURVEY CROP] mode=projected")
+                lx0, ly0, lx1, ly1 = left_rect
+                rx0, ry0, rx1, ry1 = right_rect
+                print(
+                    f"[SURVEY CROP] projected LEFT  x={lx0} y={ly0} "
+                    f"size={lx1-lx0}x{ly1-ly0}"
+                )
+                print(
+                    f"[SURVEY CROP] projected RIGHT x={rx0} y={ry0} "
+                    f"size={rx1-rx0}x{ry1-ry0}"
+                )
+            else:
+                reason = (proj_info or {}).get("reason", "unknown")
+                print(f"[SURVEY CROP] projected fallback -> centered reason={reason}")
+
+        if not use_hd and projected_crop_ok:
+            left_frames_yolo = [crop_frame_with_rect(f, left_rect) for f in left_frames]
+            right_frames_yolo = [crop_frame_with_rect(f, right_rect) for f in right_frames]
+        elif not use_hd:
+            centered_rect = _build_centered_rect()
+            if centered_rect is not None:
+                left_rect = centered_rect
+                right_rect = centered_rect
+                scx0, scy0, scx1, scy1 = centered_rect
+                left_frames_yolo = [crop_frame_with_rect(f, left_rect) for f in left_frames]
+                right_frames_yolo = [crop_frame_with_rect(f, right_rect) for f in right_frames]
+                print("[SURVEY CROP] mode=centered")
+                print(
+                    f"[SURVEY CROP] centered LEFT  x={scx0} y={scy0} "
+                    f"size={scx1-scx0}x{scy1-scy0}"
+                )
+                print(
+                    f"[SURVEY CROP] centered RIGHT x={scx0} y={scy0} "
+                    f"size={scx1-scx0}x{scy1-scy0}"
+                )
+            else:
+                left_frames_yolo = left_frames
+                right_frames_yolo = right_frames
+                print("[SURVEY CROP] mode=full (centered crop disabled)")
         else:
-            left_frames_yolo  = left_frames
+            left_frames_yolo = left_frames
             right_frames_yolo = right_frames
-            scx0 = scy0 = 0
+            if use_hd:
+                print("[SURVEY CROP] mode=full (HD survey capture)")
+            else:
+                print("[SURVEY CROP] mode=full (crop disabled)")
 
         def _stable_side(core, frames, label):
             t_side = time.perf_counter()
@@ -366,20 +455,22 @@ class TriangulationCoarseMover:
             stable_right, right_dt, right_timing = right_future.result()
 
         # Translate crop-space points back to full-frame coordinates.
-        if survey_crop_half is not None and not use_hd:
-            def _to_full_survey(stable_list):
+        if not use_hd:
+            def _to_full_survey(stable_list, crop_rect):
+                x0, y0, _, _ = crop_rect
                 out = []
                 for s in stable_list:
-                    px = s["point"][0] + scx0
-                    py = s["point"][1] + scy0
-                    x1 = s["box"][0] + scx0
-                    y1 = s["box"][1] + scy0
-                    x2 = s["box"][2] + scx0
-                    y2 = s["box"][3] + scy0
+                    px = s["point"][0] + x0
+                    py = s["point"][1] + y0
+                    x1 = s["box"][0] + x0
+                    y1 = s["box"][1] + y0
+                    x2 = s["box"][2] + x0
+                    y2 = s["box"][3] + y0
                     out.append({**s, "point": (int(round(px)), int(round(py))), "box": (x1, y1, x2, y2)})
                 return out
-            stable_left  = _to_full_survey(stable_left)
-            stable_right = _to_full_survey(stable_right)
+
+            stable_left = _to_full_survey(stable_left, left_rect)
+            stable_right = _to_full_survey(stable_right, right_rect)
 
         detect_dt = time.perf_counter() - t_detect
         _survey_debug(
@@ -419,24 +510,10 @@ class TriangulationCoarseMover:
         _survey_debug(f"confidence sensitivity step took {conf_dt:.2f}s")
 
         t_frame_prep = time.perf_counter()
-        if use_hd:
-            # Scale HD keypoints and boxes back to calibration space (1280×720).
-            sx = FRAME_WIDTH  / SURVEY_FRAME_WIDTH
-            sy = FRAME_HEIGHT / SURVEY_FRAME_HEIGHT
-            stable_left  = _scale_stable_to_calib(stable_left,  sx, sy)
-            stable_right = _scale_stable_to_calib(stable_right, sx, sy)
-            # Use the merged burst frame for debug overlays (downscaled to calibration space).
-            merged_L = getattr(detector.cv_left,  '_last_burst_merged', left_frames[-1])
-            merged_R = getattr(detector.cv_right, '_last_burst_merged', right_frames[-1])
-            self.last_survey_frameL = cv2.resize(merged_L, (FRAME_WIDTH, FRAME_HEIGHT))
-            self.last_survey_frameR = cv2.resize(merged_R, (FRAME_WIDTH, FRAME_HEIGHT))
-        else:
-            # Always use the original full-frame captures for the debug overlay.
-            # _last_burst_merged is in crop space when SURVEY_CROP_HALF_PX is set,
-            # which causes points (translated back to full-frame) to mis-align on the canvas.
-            self.last_survey_frameL = left_frames[-1]
-            self.last_survey_frameR = right_frames[-1]
+        self.last_survey_frameL = left_frames[-1]
+        self.last_survey_frameR = right_frames[-1]
 
+        
         frame_prep_dt = time.perf_counter() - t_frame_prep
         self.last_survey_timing = {
             "survey_camera_read_time_s": round(read_time_total, 6),

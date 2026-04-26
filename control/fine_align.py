@@ -18,11 +18,10 @@ from config import (
     FINE_ALIGN_KD_X,
     FINE_ALIGN_KP_Y,
     FINE_ALIGN_KD_Y,
-    FINE_ALIGN_STEP_MM,
+    FINE_ALIGN_MM_PER_PX,
     FINE_ALIGN_DEADZONE_PX,
     FINE_ALIGN_MAX_JOG_MM,
     FINE_ALIGN_FEED,
-    FINE_ALIGN_BURST_COUNT,
     FINE_ALIGN_REID_BURST_COUNT,
     FINE_ALIGN_MIN_HITS,
     FINE_ALIGN_CLUSTER_RADIUS_PX,
@@ -41,7 +40,8 @@ from config import (
     FINE_ALIGN_SNAP_CROP_HALF_PX,
     FINE_ALIGN_REID_EPIPOLAR_TOL_MULT,
     FINE_ALIGN_REID_MAX_TRI_DIST_MM,
-    OVERRIDE_BURST_NUMBER,
+    FINE_ALIGN_REID_SYNTHETIC_MAX_TRI_DIST_MM,
+    OVERRIDE_BURST_ENABLED,
     OVERRIDE_BURST_COUNT,
     OVERRIDE_POINT_MODE,
     OVERRIDE_POINT_MODE_VALUE,
@@ -53,8 +53,9 @@ from config import (
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
     WORKSPACE_Y_MAX,
+    SURVEY_CAN_TARGET_CLASSES,
+    SURVEY_CANT_TARGET_CLASSES,
 )
-from vision.matching import match_points
 
 FULL_W = FRAME_WIDTH
 FULL_H = FRAME_HEIGHT
@@ -78,7 +79,7 @@ Kd_x = FINE_ALIGN_KD_X
 Kp_y = FINE_ALIGN_KP_Y
 Kd_y = FINE_ALIGN_KD_Y
 
-STEP_MM = FINE_ALIGN_STEP_MM
+STEP_MM = FINE_ALIGN_MM_PER_PX
 DEADZONE = FINE_ALIGN_DEADZONE_PX
 MAX_JOG = FINE_ALIGN_MAX_JOG_MM
 FINE_FEED = FINE_ALIGN_FEED
@@ -94,13 +95,14 @@ _REID_MIN_DISP = FINE_ALIGN_REID_MIN_DISPARITY_PX
 _REID_MAX_DISP = FINE_ALIGN_REID_MAX_DISPARITY_PX
 _REID_EPIPOLAR_TOL_MULT = FINE_ALIGN_REID_EPIPOLAR_TOL_MULT
 _REID_MAX_TRI_DIST_MM = FINE_ALIGN_REID_MAX_TRI_DIST_MM
+_REID_SYNTHETIC_MAX_TRI_DIST_MM = FINE_ALIGN_REID_SYNTHETIC_MAX_TRI_DIST_MM
 
 _WS_MARGIN = 5.0
 _FINE_WINDOW = "Fine Align"
 
 
 def _resolve_burst_count(default_count):
-    if OVERRIDE_BURST_NUMBER:
+    if OVERRIDE_BURST_ENABLED:
         return max(1, int(OVERRIDE_BURST_COUNT))
     return max(1, int(default_count))
 
@@ -159,6 +161,56 @@ def get_default_reid_settings():
     return _resolve_reid_settings()
 
 
+def _expected_class_id(planned_target):
+    source = planned_target.get("source_target") or {}
+    cls = source.get("left_cls")
+    if cls is None:
+        cls = planned_target.get("class_id")
+    try:
+        return int(cls) if cls is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _target_reid_max_tri_dist(planned_target):
+    source = planned_target.get("source_target") or {}
+    repair_mode = source.get("survey_repair")
+    if source.get("synthetic_right") or repair_mode == "left_only_offset_fill":
+        return float(_REID_SYNTHETIC_MAX_TRI_DIST_MM)
+    return float(_REID_MAX_TRI_DIST_MM)
+
+
+def _normalise_class_selector(spec):
+    if spec is None:
+        return None
+    if isinstance(spec, int):
+        return {int(spec)}
+    out = set()
+    for v in spec:
+        try:
+            out.add(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out if out else set()
+
+
+_CAN_TARGET_SET = _normalise_class_selector(SURVEY_CAN_TARGET_CLASSES)
+_CANT_TARGET_SET = _normalise_class_selector(SURVEY_CANT_TARGET_CLASSES)
+
+
+def _is_target_class_pair(left_cls, right_cls):
+    # CANT always wins.
+    if _CANT_TARGET_SET:
+        if left_cls in _CANT_TARGET_SET or right_cls in _CANT_TARGET_SET:
+            return False
+
+    # If CAN set exists, require at least one side to match (robust to one-sided class noise).
+    if _CAN_TARGET_SET is not None:
+        return (left_cls in _CAN_TARGET_SET) or (right_cls in _CAN_TARGET_SET)
+
+    return True
+
+
 def close_fine_align_window():
     if HAS_DISPLAY:
         try:
@@ -196,6 +248,81 @@ def _pair_pd_error(left_pt, right_pt):
     return float(np.hypot(avg_x - FULL_W / 2.0, avg_y - FULL_H / 2.0))
 
 
+def _shift_box(box, dx, dy):
+    return (
+        float(box[0]) + dx,
+        float(box[1]) + dy,
+        float(box[2]) + dx,
+        float(box[3]) + dy,
+    )
+
+
+def _box_iou(box_a, box_b):
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter <= 0.0:
+        return 0.0
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return inter / union if union > 0.0 else 0.0
+
+
+def _enumerate_reid_pairs(stable_left, stable_right, settings):
+    """Enumerate all local stereo pair candidates.
+
+    Re-ID crops can contain only a few nearby plants. A global constellation
+    match can prefer a larger wrong mini-constellation and omit the true pair;
+    ranking by triangulated distance needs every plausible pair instead.
+    """
+    pairs = []
+    for left in stable_left:
+        for right in stable_right:
+            xl, yl = left["point"]
+            xr, yr = right["point"]
+            y_diff = float(abs(yl - yr))
+            disp = float(abs(xl - xr))
+            if y_diff > settings["max_y_diff_px"]:
+                continue
+            if disp < settings["min_disparity_px"] or disp > settings["max_disparity_px"]:
+                continue
+
+            dx = float(xr - xl)
+            dy = float(yr - yl)
+            pd_err = _pair_pd_error((xl, yl), (xr, yr))
+            y_score = max(0.0, 1.0 - y_diff / max(1.0, settings["max_y_diff_px"]))
+            pd_score = max(0.0, 1.0 - pd_err / max(1.0, settings["max_pd_error_px"]))
+            box_iou = 0.0
+            if left.get("box") is not None and right.get("box") is not None:
+                box_iou = _box_iou(_shift_box(left["box"], dx, dy), right["box"])
+
+            entry = {
+                "left_px": tuple(map(int, left["point"])),
+                "right_px": tuple(map(int, right["point"])),
+                "score": float(0.35 * y_score + 0.35 * pd_score + 0.30 * box_iou),
+                "y_diff_px": y_diff,
+                "disp_px": disp,
+                "dx_px": dx,
+                "dy_px": dy,
+                "box_iou": float(box_iou),
+                "left_box": left.get("box"),
+                "right_box": right.get("box"),
+                "left_cls": left.get("cls"),
+                "right_cls": right.get("cls"),
+                "left_conf": left.get("conf"),
+                "right_conf": right.get("conf"),
+            }
+            pairs.append(entry)
+
+    pairs.sort(key=lambda t: (-t["score"], t["y_diff_px"], t["disp_px"]))
+    return pairs
+
+
 def _clamp_jog(dx, dy, est_x, est_y):
     new_x = np.clip(est_x + dx, WORKSPACE_X_MIN + _WS_MARGIN, WORKSPACE_X_MAX - _WS_MARGIN)
     new_y = np.clip(est_y + dy, WORKSPACE_Y_MIN + _WS_MARGIN, WORKSPACE_Y_MAX - _WS_MARGIN)
@@ -205,7 +332,9 @@ def _clamp_jog(dx, dy, est_x, est_y):
 def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=None, return_debug=False):
     t_total = time.perf_counter()
     settings = _resolve_reid_settings(reid_settings)
-    classes_arg = [expected_cls] if expected_cls is not None else None
+    # Do not hard-gate YOLO by expected class during re-ID. Survey class labels can
+    # be noisy, and strict gating can eliminate all candidates for a target.
+    classes_arg = None
     _burst_match_ai_points.last_timing = {
         "reid_point_mode": settings["point_mode"],
         "reid_burst_count": int(settings["burst_count"]),
@@ -355,20 +484,14 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
         return []
 
     t_match = time.perf_counter()
-    matched_targets, _, _ = match_points(
-        stable_left,
-        stable_right,
-        verbose=False,
-        anchor_min_disp=settings["min_disparity_px"],
-        anchor_max_disp=settings["max_disparity_px"],
-        anchor_max_y_diff=settings["max_y_diff_px"],
-    )
+    matched_targets = _enumerate_reid_pairs(stable_left, stable_right, settings)
     match_dt = time.perf_counter() - t_match
 
     filtered = []
     reject_y = 0
     reject_disp = 0
-    reject_class = 0
+    class_mismatch = 0
+    reject_policy = 0
     for i, t in enumerate(matched_targets, start=1):
         xl, yl = t["left_px"]
         xr, yr = t["right_px"]
@@ -383,12 +506,17 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
         elif disp < settings["min_disparity_px"] or disp > settings["max_disparity_px"]:
             reject_reason = f"disp not in {settings['min_disparity_px']:.1f}-{settings['max_disparity_px']:.1f}"
             reject_disp += 1
-        elif expected_cls is not None and (
-            t.get("left_cls") != expected_cls or t.get("right_cls") != expected_cls
-        ):
-            reject_reason = f"cls!=expected({expected_cls})"
-            reject_class += 1
-        else:
+        elif not _is_target_class_pair(t.get("left_cls"), t.get("right_cls")):
+            reject_reason = "class_policy"
+            reject_policy += 1
+        elif expected_cls is not None:
+            left_cls = t.get("left_cls")
+            right_cls = t.get("right_cls")
+            # Keep class mismatch as a debug signal only (not a hard reject).
+            if left_cls is not None and right_cls is not None and left_cls != expected_cls and right_cls != expected_cls:
+                class_mismatch += 1
+
+        if reject_reason is None:
             filtered.append(t)
 
         status = "KEEP" if reject_reason is None else f"REJECT {reject_reason}"
@@ -399,8 +527,9 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
         )
 
     _fine_debug(
-        f"RE-ID matching.py took {match_dt:.2f}s: raw={len(matched_targets)} kept={len(filtered)} "
-        f"reject_y={reject_y} reject_disp={reject_disp} reject_class={reject_class} "
+        f"RE-ID pair enumeration took {match_dt:.2f}s: raw={len(matched_targets)} kept={len(filtered)} "
+        f"reject_y={reject_y} reject_disp={reject_disp} reject_policy={reject_policy} "
+        f"class_mismatch={class_mismatch} "
         f"total={time.perf_counter() - t_total:.2f}s"
     )
     _burst_match_ai_points.last_timing = {
@@ -495,6 +624,7 @@ def _rank_reid_matches(gantry, coarse_mover, planned_target, actual_hits, matche
     current_x, current_y = gantry.get_estimated_xy()
     solved_all = coarse_mover.solve_all_from_pose(matched_targets, ref_x=current_x, ref_y=current_y)
     target_xy_mm = planned_target["target_xy_mm"]
+    max_tri_dist_mm = _target_reid_max_tri_dist(planned_target)
 
     # All stereo-solved tri_xys for geometric neighbourhood scoring (includes filtered-out pairs).
     all_tri_xys = [
@@ -512,6 +642,9 @@ def _rank_reid_matches(gantry, coarse_mover, planned_target, actual_hits, matche
     ep_tol = max(ep_tol_raw * _REID_EPIPOLAR_TOL_MULT, 0.15)
 
     candidates = []
+    epipolar_candidates = []
+    pd_candidates = []
+    far_candidates = []
     rejects = {"crop": 0, "duplicate": 0, "pd": 0, "epipolar": 0, "max_tri_dist": 0}
     for t_solved in solved_all:
         src = t_solved["source_target"]
@@ -543,52 +676,84 @@ def _rank_reid_matches(gantry, coarse_mover, planned_target, actual_hits, matche
             continue
 
         pd_err = _pair_pd_error((xl, yl), (xr, yr))
-        if pd_err > settings["max_pd_error_px"]:
-            rejects["pd"] += 1
-            continue
-
-        # Epipolar slope check with 2× survey tolerance.
-        if ep_slope is not None:
-            dx_pair = float(xr) - float(xl)
-            if abs(dx_pair) > 5.0:
-                pair_slope = (float(yr) - float(yl)) / dx_pair
-                if abs(pair_slope - ep_slope) > ep_tol:
-                    rejects["epipolar"] += 1
-                    _fine_debug(
-                        f"RE-ID epipolar reject: slope={pair_slope:.3f} expected "
-                        f"{ep_slope:.3f}±{ep_tol:.3f} (2×{ep_tol_raw:.3f}) "
-                        f"L={src['left_px']} R={src['right_px']}"
-                    )
-                    continue
-
         tri_dist_mm = float(np.hypot(
             t_solved["target_xy_mm"][0] - target_xy_mm[0],
             t_solved["target_xy_mm"][1] - target_xy_mm[1],
         ))
-        # Hard cutoff: good re-ID picks are <10mm from planned; block distant fallbacks
-        # to prevent cascade duplicate-rejection failures on subsequent targets.
-        if tri_dist_mm > _REID_MAX_TRI_DIST_MM:
-            rejects["max_tri_dist"] += 1
-            _fine_debug(
-                f"RE-ID candidate rejected: tri_dist={tri_dist_mm:.1f}mm > {_REID_MAX_TRI_DIST_MM:.0f}mm limit "
-                f"L={src['left_px']} R={src['right_px']}"
-            )
-            continue
-
         geo_score = _survey_geo_score(
             tuple(map(float, t_solved["target_xy_mm"])),
             all_tri_xys,
             current_planned_xy,
             coarse_mover,
         )
-        candidates.append((t_solved, pd_err, tri_dist_mm, geo_score))
-        _fine_debug(
-            f"RE-ID candidate: tri_dist={tri_dist_mm:.1f}mm pd_err={pd_err:.1f}px "
-            f"geo={geo_score:.2f} L={src['left_px']} R={src['right_px']}"
-        )
+        row = (t_solved, pd_err, tri_dist_mm, geo_score)
+        if tri_dist_mm > max_tri_dist_mm:
+            far_candidates.append(row)
+            _fine_debug(
+                f"RE-ID candidate far: tri_dist={tri_dist_mm:.1f}mm > {max_tri_dist_mm:.0f}mm "
+                f"pd_err={pd_err:.1f}px geo={geo_score:.2f} L={src['left_px']} R={src['right_px']}"
+            )
+            continue
 
-    # Primary sort: geo_score descending (survey-geometry match); tri_dist ascending as tiebreaker.
-    return sorted(candidates, key=lambda x: (-x[3], x[2])), rejects
+        if pd_err > settings["max_pd_error_px"]:
+            rejects["pd"] += 1
+
+        # Epipolar slope check with 2× survey tolerance.
+        epipolar_failed = False
+        if ep_slope is not None:
+            dx_pair = float(xr) - float(xl)
+            if abs(dx_pair) > 5.0:
+                pair_slope = (float(yr) - float(yl)) / dx_pair
+                if abs(pair_slope - ep_slope) > ep_tol:
+                    rejects["epipolar"] += 1
+                    epipolar_failed = True
+                    _fine_debug(
+                        f"RE-ID epipolar reject: slope={pair_slope:.3f} expected "
+                        f"{ep_slope:.3f}±{ep_tol:.3f} (2×{ep_tol_raw:.3f}) "
+                        f"L={src['left_px']} R={src['right_px']}"
+                    )
+
+        row = (t_solved, pd_err, tri_dist_mm, geo_score)
+        if pd_err > settings["max_pd_error_px"]:
+            pd_candidates.append(row)
+            _fine_debug(
+                f"RE-ID candidate high-pd: tri_dist={tri_dist_mm:.1f}mm pd_err={pd_err:.1f}px "
+                f"geo={geo_score:.2f} L={src['left_px']} R={src['right_px']}"
+            )
+        elif epipolar_failed:
+            epipolar_candidates.append(row)
+            _fine_debug(
+                f"RE-ID candidate epipolar-fallback: tri_dist={tri_dist_mm:.1f}mm pd_err={pd_err:.1f}px "
+                f"geo={geo_score:.2f} L={src['left_px']} R={src['right_px']}"
+            )
+        else:
+            candidates.append(row)
+            _fine_debug(
+                f"RE-ID candidate: tri_dist={tri_dist_mm:.1f}mm pd_err={pd_err:.1f}px "
+                f"geo={geo_score:.2f} L={src['left_px']} R={src['right_px']}"
+            )
+
+    rejects["max_tri_dist"] = len(far_candidates)
+    if not candidates:
+        # Staged fallbacks: relax stereo/pixel gates, but never the target-identity
+        # gate. A far triangulated candidate is usually a different plant.
+        if epipolar_candidates:
+            candidates = epipolar_candidates
+            rejects["epipolar"] = 0
+            _fine_debug(
+                f"RE-ID fallback: using {len(epipolar_candidates)} epipolar-relaxed candidate(s)"
+            )
+        elif pd_candidates:
+            candidates = pd_candidates
+            rejects["pd"] = 0
+            _fine_debug(
+                f"RE-ID fallback: using {len(pd_candidates)} high-PD candidate(s)"
+            )
+
+    # Primary sort: target identity distance. Geometry score is only a tiebreaker;
+    # in crowded local crops, a farther same-shape plant can otherwise look attractive.
+    rejects["max_tri_dist_limit_mm"] = max_tri_dist_mm
+    return sorted(candidates, key=lambda x: (x[2], x[1], -x[3])), rejects
 
 
 def _print_reid_ranked(candidates, header="[RE-ID RANKED] candidates after stereo solve + pair PD filter:"):
@@ -671,7 +836,7 @@ def debug_reid_target(
     total_targets=None,
 ):
     settings = _resolve_reid_settings(reid_settings)
-    expected_cls = planned_target.get("source_target", {}).get("left_cls")
+    expected_cls = _expected_class_id(planned_target)
     matched_targets, debug_data = _burst_match_ai_points(
         cameras,
         detector,
@@ -700,7 +865,8 @@ def debug_reid_target(
             f"crop={rejects['crop']} duplicate={rejects['duplicate']} "
             f"pd>{settings['max_pd_error_px']:.1f}px={rejects['pd']} "
             f"epipolar={rejects['epipolar']} "
-            f"max_tri_dist>{_REID_MAX_TRI_DIST_MM:.0f}mm={rejects['max_tri_dist']}"
+            f"max_tri_dist>{rejects.get('max_tri_dist_limit_mm', _REID_MAX_TRI_DIST_MM):.0f}mm="
+            f"{rejects['max_tri_dist']}"
         )
         if show_debug:
             _show_reid_debug_window(debug_data, [], target_idx=target_idx, total_targets=total_targets)
@@ -748,7 +914,8 @@ def _pick_best_ai_target(
             f"crop={rejects['crop']}, duplicate={rejects['duplicate']}, "
             f"pd>{settings['max_pd_error_px']}px={rejects['pd']}, "
             f"epipolar={rejects['epipolar']}, "
-            f"max_tri_dist>{_REID_MAX_TRI_DIST_MM:.0f}mm={rejects['max_tri_dist']}"
+            f"max_tri_dist>{rejects.get('max_tri_dist_limit_mm', _REID_MAX_TRI_DIST_MM):.0f}mm="
+            f"{rejects['max_tri_dist']}"
         )
         return None, None, None, None, None, None
 
@@ -768,6 +935,7 @@ def _pick_best_ai_target(
     reid_info = {
         "pd_error_px": round(best_pd_err, 1),
         "tri_dist_mm": round(best_tri_dist, 1),
+        "tri_gate_mm": round(rejects.get("max_tri_dist_limit_mm", _REID_MAX_TRI_DIST_MM), 1),
         "n_candidates": len(candidates),
         "tri_xy_mm": [round(v, 3) for v in best_solved["target_xy_mm"]],
         "timing": dict(getattr(_burst_match_ai_points, "last_timing", {})),
@@ -870,7 +1038,7 @@ def fine_align_target(
         except Exception:
             pass
 
-    expected_cls = planned_target.get("source_target", {}).get("left_cls")
+    expected_cls = _expected_class_id(planned_target)
 
     left_pt_full, right_pt_full, old_left_full, old_right_full, selected_target, reid_info = _pick_initial_target(
         gantry, cameras, detector, coarse_mover,

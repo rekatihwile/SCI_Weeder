@@ -23,9 +23,9 @@ from config import (
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
     WORKSPACE_Y_MAX,
-    X_SUBSECTIONS,
-    Y_SUBSECTIONS,
-    PHOTO_SETTLE_SEC,
+    GRID_X_SUBSECTIONS,
+    GRID_Y_SUBSECTIONS,
+    GRID_PHOTO_SETTLE_SEC,
 )
 from hardware.cameras import StereoCameras
 from hardware.gantry import Gantry
@@ -265,10 +265,10 @@ def main():
     parser.add_argument("--x-max", type=float, default=WORKSPACE_X_MAX)
     parser.add_argument("--y-min", type=float, default=WORKSPACE_Y_MIN)
     parser.add_argument("--y-max", type=float, default=WORKSPACE_Y_MAX)
-    parser.add_argument("--cols", type=int, default=X_SUBSECTIONS)
-    parser.add_argument("--rows", type=int, default=Y_SUBSECTIONS)
+    parser.add_argument("--cols", type=int, default=GRID_X_SUBSECTIONS)
+    parser.add_argument("--rows", type=int, default=GRID_Y_SUBSECTIONS)
     parser.add_argument("--feed", type=float, default=MOVE_FEED_MM_MIN)
-    parser.add_argument("--settle", type=float, default=PHOTO_SETTLE_SEC)
+    parser.add_argument("--settle", type=float, default=GRID_PHOTO_SETTLE_SEC)
     parser.add_argument(
         "--scale", type=float, default=1.0, help="Scale the grid area around its center (e.g., 0.75 for 75%)"
     )

@@ -11,7 +11,7 @@ import cv2
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from config import AI_CONFIDENCE, DEFAULT_MODEL_PT, DEFAULT_MODEL_ENGINE  # noqa: E402
+from config import AI_CONFIDENCE, DEFAULT_MODEL, DEFAULT_MODEL_ENGINE  # noqa: E402
 from vision.detectors.ai_detector import _WeedCVCore, _resolve_weight_path  # noqa: E402
 
 
@@ -71,7 +71,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("images", nargs="*", help="Image paths to benchmark.")
     parser.add_argument("--folder", help="Folder of images/crops to benchmark.")
-    parser.add_argument("--pt", default=DEFAULT_MODEL_PT, help="PT model name/path. Default: config DEFAULT_MODEL_PT.")
+    parser.add_argument("--pt", default=DEFAULT_MODEL, help="PT model name/path. Default: config DEFAULT_MODEL.")
     parser.add_argument("--engine", default=DEFAULT_MODEL_ENGINE, help="Engine model path/name. Default: config DEFAULT_MODEL_ENGINE.")
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO imgsz.")
     parser.add_argument("--conf", type=float, default=AI_CONFIDENCE, help="YOLO confidence.")

@@ -262,9 +262,11 @@ def match_points_constellation(
             if isinstance(ld, dict):
                 entry["left_cls"]  = ld.get("cls")
                 entry["left_conf"] = ld.get("conf")
+                entry["left_views"] = ld.get("views")
             if isinstance(rd, dict):
                 entry["right_cls"]  = rd.get("cls")
                 entry["right_conf"] = rd.get("conf")
+                entry["right_views"] = rd.get("views")
 
         matched_targets.append(entry)
         matched_left_idx.add(l_idx)
