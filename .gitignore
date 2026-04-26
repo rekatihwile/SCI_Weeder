@@ -14,3 +14,6 @@ Photo_Tests/
 
 runs/
 *.log
+
+# json files
+*.json
