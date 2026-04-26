@@ -30,7 +30,7 @@ from config import (  # noqa: E402
 #   python dev_tools/render_trial_video.py
 #
 # Example: TRIAL_NUMBER = 7 matches trial_recordings/trial_007_*
-TRIAL_NUMBER = 25
+TRIAL_NUMBER = 27
 
 # Optional fallback if you prefer a path instead of a number.
 TRIAL_RUN_DIR = None
@@ -39,7 +39,7 @@ TRIAL_RUN_DIR = None
 # Default saves into REPO_ROOT/Rendered_Videos/.
 OUTPUT_PATH = "Rendered_Videos"
 
-RUN_YOLO = False
+RUN_YOLO = True
 YOLO_MODEL = None
 YOLO_IMGSZ = 640
 YOLO_CONF = AI_CONFIDENCE
@@ -498,9 +498,13 @@ def _new_pd_flow_state():
         "old_gray_right": None,
         "pt_left": None,
         "pt_right": None,
+        "trail_left": [],
+        "trail_right": [],
         "reid_detected": False,
-        "reid_loser_pts_left": [],
-        "reid_loser_pts_right": [],
+        "reid_dets_left": [],
+        "reid_dets_right": [],
+        "reid_winner_idx_left": None,
+        "reid_winner_idx_right": None,
     }
 
 
@@ -694,21 +698,40 @@ def _draw_reid_crop_view(frame, raw_frame, crop_box, seed_pt, title, color, cand
     frame[oy:oy + inset_h, ox:ox + inset_w] = inset
 
 
-def _yolo_pts_in_box(core, raw_frame, box, conf):
-    """Run YOLO on the crop defined by box=(x0,y0,x1,y1) and return full-frame center points."""
-    bx0, by0, bx1, by1 = box
+def _yolo_detections_in_box(core, raw_frame, crop_box, conf):
+    """Run YOLO on the crop region; return full-frame detection dicts {center, box, conf}.
+
+    Uses classes=None so every plant class is shown as a candidate, regardless of
+    what target_class the detector was configured for.
+    """
+    bx0, by0, bx1, by1 = crop_box
     crop = raw_frame[by0:by1, bx0:bx1]
     if crop.size == 0:
         return []
     try:
-        boxes, _ = core._get_filtered_results(crop, conf_override=conf)
+        results = core.yolo(
+            crop,
+            imgsz=640,
+            verbose=False,
+            conf=conf,
+            retina_masks=False,
+            classes=None,
+            **core._yolo_predict_kwargs(),
+        )
+        raw_boxes = results[0].boxes if results and results[0].boxes is not None else []
     except Exception:
         return []
-    return [
-        (int((b.xyxy[0][0] + b.xyxy[0][2]) / 2) + bx0,
-         int((b.xyxy[0][1] + b.xyxy[0][3]) / 2) + by0)
-        for b in boxes
-    ]
+    dets = []
+    for b in raw_boxes:
+        xyxy = b.xyxy[0]
+        x1, y1 = int(xyxy[0]) + bx0, int(xyxy[1]) + by0
+        x2, y2 = int(xyxy[2]) + bx0, int(xyxy[3]) + by0
+        dets.append({
+            "center": ((x1 + x2) // 2, (y1 + y2) // 2),
+            "box": (x1, y1, x2, y2),
+            "conf": float(b.conf[0]),
+        })
+    return dets
 
 
 def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed,
@@ -718,46 +741,76 @@ def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed
     right_seed = seed.get("right") if seed else None
     label = f"RE-ID T{active_id}  {segment_elapsed:.1f}/{max(reid_delay, 0.01):.1f}s"
 
-    # Winner drawn in green.
-    _draw_reid_crop_view(left,  raw_left,  left_box,  left_seed,  label, (0, 220, 80), candidates=[], winner_id=active_id)
-    _draw_reid_crop_view(right, raw_right, right_box, right_seed, label, (0, 220, 80), candidates=[], winner_id=active_id)
+    # Draw crop region outline + label; winner seed marker drawn after detection below.
+    for frame, box in ((left, left_box), (right, right_box)):
+        x0, y0, x1, y1 = box
+        cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 220, 80), 2, cv2.LINE_AA)
+        _put_text(frame, label, (x0 + 6, max(22, y0 - 8)), scale=0.48, color=(0, 220, 80))
 
-    # Losers: run YOLO once on the very first RE-ID frame, cache in state, show statically.
     if detector is None or state is None:
+        # No YOLO — fall back to seed marker only.
+        for frame, seed_pt in ((left, left_seed), (right, right_seed)):
+            if seed_pt is not None:
+                _draw_cv_box(frame, seed_pt, "winner", color=(0, 220, 80), half=22, winner=True)
         return
 
+    # Detect once on the first RE-ID frame; cache for the whole segment.
     if not state.get("reid_detected"):
         conf = yolo_conf if yolo_conf is not None else YOLO_CONF
 
-        def _detect_losers(core, raw_frame, box, seed_pt):
-            pts = _yolo_pts_in_box(core, raw_frame, box, conf)
-            if not pts:
-                return []
-            sp = _as_int_pt(seed_pt)
-            if sp is None:
-                return pts
-            best = min(range(len(pts)), key=lambda i: (pts[i][0] - sp[0]) ** 2 + (pts[i][1] - sp[1]) ** 2)
-            return [pt for i, pt in enumerate(pts) if i != best]
+        def _detect_side(core, raw_frame, box, seed_pt):
+            dets = _yolo_detections_in_box(core, raw_frame, box, conf)
+            winner_idx = None
+            if dets and seed_pt is not None:
+                sp = _as_int_pt(seed_pt)
+                if sp is not None:
+                    winner_idx = min(
+                        range(len(dets)),
+                        key=lambda i: (dets[i]["center"][0] - sp[0]) ** 2
+                                     + (dets[i]["center"][1] - sp[1]) ** 2,
+                    )
+            return dets, winner_idx
 
-        state["reid_loser_pts_left"]  = _detect_losers(detector.cv_left,  raw_left,  left_box,  left_seed)
-        state["reid_loser_pts_right"] = _detect_losers(detector.cv_right, raw_right, right_box, right_seed)
+        state["reid_dets_left"],  state["reid_winner_idx_left"]  = _detect_side(
+            detector.cv_left,  raw_left,  left_box,  left_seed)
+        state["reid_dets_right"], state["reid_winner_idx_right"] = _detect_side(
+            detector.cv_right, raw_right, right_box, right_seed)
         state["reid_detected"] = True
 
-    for pt in state.get("reid_loser_pts_left") or []:
-        _draw_cv_box(left,  pt, "loser", color=(30, 30, 220), half=22)
-    for pt in state.get("reid_loser_pts_right") or []:
-        _draw_cv_box(right, pt, "loser", color=(30, 30, 220), half=22)
+    # Draw all detections: winner in green, losers in red.
+    for frame, dets_key, winner_key in (
+        (left,  "reid_dets_left",  "reid_winner_idx_left"),
+        (right, "reid_dets_right", "reid_winner_idx_right"),
+    ):
+        dets = state.get(dets_key) or []
+        winner_idx = state.get(winner_key)
+        for i, det in enumerate(dets):
+            is_winner = (i == winner_idx)
+            color = (0, 220, 80) if is_winner else (0, 0, 220)
+            x1, y1, x2, y2 = det["box"]
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3 if is_winner else 2, cv2.LINE_AA)
+            cx, cy = det["center"]
+            cv2.drawMarker(frame, (cx, cy), color, cv2.MARKER_CROSS, 16, 2, cv2.LINE_AA)
+            tag = f"{'winner' if is_winner else 'loser'} {det['conf']:.2f}"
+            _put_text(frame, tag, (x1, max(14, y1 - 4)), scale=0.42, color=color)
 
 
 def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points, reid_delays, state,
                           detector=None, yolo_conf=None):
-    if record.get("state_name") != "FINE_ALIGN":
-        if state.get("target_id") is not None:
-            _reset_pd_flow_state(state)
-        return
-
     active_id = _target_id(record.get("current_target_id"))
     timestamp = record.get("timestamp_monotonic")
+
+    # Reset only when the tracked target changes — not just because we left FINE_ALIGN.
+    # This keeps pt_left/right alive so the fire marker can use the last LK position.
+    if active_id != state.get("target_id"):
+        _reset_pd_flow_state(
+            state, active_id,
+            float(timestamp) if timestamp is not None else None,
+        )
+
+    if record.get("state_name") != "FINE_ALIGN":
+        return
+
     if active_id is None or timestamp is None:
         return
     timestamp = float(timestamp)
@@ -813,6 +866,13 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
     left_pt  = state["pt_left"]
     right_pt = state["pt_right"]
 
+    # Accumulate trail; cap at PD_FLOW_TRAIL_LEN.
+    state["trail_left"].append(left_pt)
+    state["trail_right"].append(right_pt)
+    if len(state["trail_left"]) > PD_FLOW_TRAIL_LEN:
+        state["trail_left"] = state["trail_left"][-PD_FLOW_TRAIL_LEN:]
+        state["trail_right"] = state["trail_right"][-PD_FLOW_TRAIL_LEN:]
+
     ex = record.get("pd_error_x_px")
     ey = record.get("pd_error_y_px")
     pd_locked = record.get("pd_locked")
@@ -828,8 +888,8 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
     color_l = (120, 255, 120) if pd_locked else (0, 255, 255)
     color_r = (120, 255, 180) if pd_locked else (0, 255, 180)
 
-    _draw_flow_tracker(left,  [left_pt],  left_pt,  "box center", color_l)
-    _draw_flow_tracker(right, [right_pt], right_pt, "box center", color_r)
+    _draw_flow_tracker(left,  state["trail_left"],  left_pt,  "box center", color_l)
+    _draw_flow_tracker(right, state["trail_right"], right_pt, "box center", color_r)
     _draw_zoom_inset(left,  raw_left,  left_pt,  "PD zoom L", color=color_l)
     _draw_zoom_inset(right, raw_right, right_pt, "PD zoom R", color=color_r)
 
@@ -893,7 +953,8 @@ def _draw_progress_header(canvas, elapsed, total_duration, n_hits, total_targets
     cv2.putText(canvas, lbl, (pad + 4, tg_y1 - 1), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (180, 255, 180), 1)
 
 
-def _draw_manifest_overlays(left, right, record, first_ts, survey_flash_start_ts=None, fire_start_times=None):
+def _draw_manifest_overlays(left, right, record, first_ts, survey_flash_start_ts=None,
+                            fire_start_times=None, lk_pt_left=None, lk_pt_right=None):
     elapsed = 0.0
     if record.get("timestamp_monotonic") is not None and first_ts is not None:
         elapsed = float(record["timestamp_monotonic"]) - float(first_ts)
@@ -962,8 +1023,10 @@ def _draw_manifest_overlays(left, right, record, first_ts, survey_flash_start_ts
         else:
             label = f"FIRED {tgt_str}"
             color = (0, 0, 235)
-        _draw_strike_marker(left, hit.get("left_px") if hit else None, label, color=color, fallback_center=True)
-        _draw_strike_marker(right, hit.get("right_px") if hit else None, label, color=color, fallback_center=True)
+        left_pt  = lk_pt_left  or (hit.get("left_px")  if hit else None)
+        right_pt = lk_pt_right or (hit.get("right_px") if hit else None)
+        _draw_strike_marker(left,  left_pt,  label, color=color, fallback_center=True)
+        _draw_strike_marker(right, right_pt, label, color=color, fallback_center=True)
         if state == "FIRE":
             _draw_fire_countdown(left, remaining_s, active_id)
             _draw_fire_countdown(right, remaining_s, active_id)
@@ -1048,14 +1111,12 @@ def render_trial(args):
         raw_left = left.copy()
         raw_right = right.copy()
 
-        if detector is not None:
-            left = _draw_yolo(detector.cv_left, left, args.imgsz, args.conf)
-            right = _draw_yolo(detector.cv_right, right, args.imgsz, args.conf)
-
         _draw_manifest_overlays(
             left, right, record, first_ts,
             survey_flash_start_ts=survey_flash_start_ts,
             fire_start_times=fire_start_times,
+            lk_pt_left=pd_flow_state.get("pt_left"),
+            lk_pt_right=pd_flow_state.get("pt_right"),
         )
         if getattr(args, "pd_flow_overlay", PD_FLOW_OVERLAY):
             _draw_pd_flow_overlay(
@@ -1092,7 +1153,7 @@ def render_trial(args):
             combined = cv2.resize(combined, out_size)
 
         writer.write(combined)
-        if idx % 50 == 0:
+        if idx % 25 == 0:
             print(f"[render] {idx}/{len(records)} frames")
 
     if writer is not None:
