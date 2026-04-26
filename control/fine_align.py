@@ -23,6 +23,7 @@ from config import (
     FINE_ALIGN_MAX_JOG_MM,
     FINE_ALIGN_FEED,
     FINE_ALIGN_BURST_COUNT,
+    FINE_ALIGN_REID_BURST_COUNT,
     FINE_ALIGN_MIN_HITS,
     FINE_ALIGN_CLUSTER_RADIUS_PX,
     FINE_ALIGN_REID_CROP_HALF_PX,
@@ -34,9 +35,20 @@ from config import (
     FINE_ALIGN_MAX_TIME_SEC,
     FINE_ALIGN_SETTLE_FRAMES,
     FINE_ALIGN_SNAP_SETTLE_FRAMES,
-    FINE_ALIGN_REID_STEREO_DISP_PX,
+    FINE_ALIGN_ENABLE_SNAP,
+    FINE_ALIGN_SNAP_MODE,
+    FINE_ALIGN_SNAP_ON_DEADZONE,
+    FINE_ALIGN_SNAP_CROP_HALF_PX,
     FINE_ALIGN_REID_EPIPOLAR_TOL_MULT,
     FINE_ALIGN_REID_MAX_TRI_DIST_MM,
+    OVERRIDE_BURST_NUMBER,
+    OVERRIDE_BURST_COUNT,
+    OVERRIDE_POINT_MODE,
+    OVERRIDE_POINT_MODE_VALUE,
+    FINE_ALIGN_REID_POINT_MODE,
+    FINAL_SNAP_POINT_MODE,
+    FINAL_SNAP_BURST_COUNT,
+    RECORD_LIVE_OVERLAYS,
     WORKSPACE_X_MIN,
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
@@ -70,7 +82,7 @@ STEP_MM = FINE_ALIGN_STEP_MM
 DEADZONE = FINE_ALIGN_DEADZONE_PX
 MAX_JOG = FINE_ALIGN_MAX_JOG_MM
 FINE_FEED = FINE_ALIGN_FEED
-BURST_COUNT = FINE_ALIGN_BURST_COUNT
+BURST_COUNT = FINE_ALIGN_REID_BURST_COUNT
 MIN_HITS = FINE_ALIGN_MIN_HITS
 CLUSTER_RADIUS_PX = FINE_ALIGN_CLUSTER_RADIUS_PX
 
@@ -87,13 +99,29 @@ _WS_MARGIN = 5.0
 _FINE_WINDOW = "Fine Align"
 
 
+def _resolve_burst_count(default_count):
+    if OVERRIDE_BURST_NUMBER:
+        return max(1, int(OVERRIDE_BURST_COUNT))
+    return max(1, int(default_count))
+
+
+def _resolve_point_mode(default_mode):
+    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
+    mode = str(mode or "box_center").strip().lower()
+    if mode == "heatmap":
+        mode = "qpoint"
+    if mode not in ("box_center", "qpoint", "none"):
+        raise ValueError(f"Unknown point mode: {mode}")
+    return mode
+
+
 def _fine_debug(msg):
     print(f"[FINE DEBUG] {msg}", flush=True)
 
 
 def _default_reid_settings():
     return {
-        "burst_count": BURST_COUNT,
+        "burst_count": _resolve_burst_count(BURST_COUNT),
         "min_hits": MIN_HITS,
         "cluster_radius_px": CLUSTER_RADIUS_PX,
         "crop_half_px": _REID_HALF,
@@ -102,6 +130,7 @@ def _default_reid_settings():
         "min_disparity_px": _REID_MIN_DISP,
         "max_disparity_px": _REID_MAX_DISP,
         "max_pd_error_px": _REID_MAX_PD_ERR,
+        "point_mode": _resolve_point_mode(FINE_ALIGN_REID_POINT_MODE),
     }
 
 
@@ -122,6 +151,7 @@ def _resolve_reid_settings(overrides=None):
     settings["min_disparity_px"] = float(settings["min_disparity_px"])
     settings["max_disparity_px"] = float(settings["max_disparity_px"])
     settings["max_pd_error_px"] = float(settings["max_pd_error_px"])
+    settings["point_mode"] = _resolve_point_mode(settings.get("point_mode", FINE_ALIGN_REID_POINT_MODE))
     return settings
 
 
@@ -176,19 +206,26 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
     t_total = time.perf_counter()
     settings = _resolve_reid_settings(reid_settings)
     classes_arg = [expected_cls] if expected_cls is not None else None
+    _burst_match_ai_points.last_timing = {
+        "reid_point_mode": settings["point_mode"],
+        "reid_burst_count": int(settings["burst_count"]),
+    }
 
     _fine_debug(
         f"RE-ID burst start: frames={settings['burst_count']} min_hits={settings['min_hits']} "
-        f"radius={settings['cluster_radius_px']:.1f}px expected_cls={expected_cls}"
+        f"radius={settings['cluster_radius_px']:.1f}px point_mode={settings['point_mode']} "
+        f"expected_cls={expected_cls}"
     )
 
     left_frames, right_frames = [], []
     attempts = 0
+    read_time_total = 0.0
     while len(left_frames) < settings["burst_count"] and attempts < settings["burst_count"] * 3:
         t_read = time.perf_counter()
         fL, fR = cameras.read_pair()
         attempts += 1
         read_dt = time.perf_counter() - t_read
+        read_time_total += read_dt
         if fL is None or fR is None:
             _fine_debug(f"RE-ID capture attempt {attempts}: missing after {read_dt:.2f}s")
             time.sleep(0.05)
@@ -199,22 +236,22 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
 
     if not left_frames:
         _fine_debug(f"RE-ID no frames captured; total={time.perf_counter() - t_total:.2f}s")
+        _burst_match_ai_points.last_timing.update({
+            "reid_camera_read_time_s": round(read_time_total, 6),
+            "reid_total_time_s": round(time.perf_counter() - t_total, 6),
+        })
         return ([], None) if return_debug else []
 
     cx, cy = FULL_W // 2, FULL_H // 2
     crop_half = settings["crop_half_px"]
-    # Left crop: symmetric around image centre.
+    # Re-ID uses the same symmetric crop in both cameras.
     lx0 = max(0, cx - crop_half);       lx1 = min(FULL_W, cx + crop_half)
     ly0 = max(0, cy - crop_half);       ly1 = min(FULL_H, cy + crop_half)
-    # Right crop: extended LEFT by FINE_ALIGN_REID_STEREO_DISP_PX so that any plant
-    # visible in the left crop always has its right-camera stereo partner in view,
-    # regardless of the crop size.  Same vertical bounds as left.
-    disp_ext = int(FINE_ALIGN_REID_STEREO_DISP_PX)
-    rx0 = max(0, cx - crop_half - disp_ext); rx1 = min(FULL_W, cx + crop_half)
-    ry0 = ly0;                               ry1 = ly1
+    rx0, rx1 = lx0, lx1
+    ry0, ry1 = ly0, ly1
     _fine_debug(
         f"RE-ID crop: L x={lx0}:{lx1} y={ly0}:{ly1}  "
-        f"R x={rx0}:{rx1} y={ry0}:{ry1}  half={crop_half}px disp_ext={disp_ext}px"
+        f"R x={rx0}:{rx1} y={ry0}:{ry1}  half={crop_half}px"
     )
 
     # Store per-camera crop offsets so heatmap refinement can map back to full-frame.
@@ -240,20 +277,39 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
             classes_override=classes_arg,
             debug_label=label,
             imgsz=yolo_imgsz,
-            heatmap_final=False,
+            heatmap_final=(settings["point_mode"] != "box_center"),
+            point_mode=settings["point_mode"],
         )
-        return stable, time.perf_counter() - t_side
+        timing = getattr(core, "last_burst_timing", {})
+        return stable, time.perf_counter() - t_side, timing
 
     t_detect = time.perf_counter()
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="reid-burst") as pool:
         left_future  = pool.submit(_stable_side, detector.cv_left,  cropped_left,  "[FINE DEBUG] RE-ID LEFT")
         right_future = pool.submit(_stable_side, detector.cv_right, cropped_right, "[FINE DEBUG] RE-ID RIGHT")
-        stable_left_crop, left_dt   = left_future.result()
-        stable_right_crop, right_dt = right_future.result()
+        stable_left_crop, left_dt, left_timing   = left_future.result()
+        stable_right_crop, right_dt, right_timing = right_future.result()
+    detect_dt = time.perf_counter() - t_detect
     _fine_debug(
         f"RE-ID stable detection done: left={left_dt:.2f}s right={right_dt:.2f}s "
-        f"total={time.perf_counter() - t_detect:.2f}s"
+        f"total={detect_dt:.2f}s"
     )
+    _burst_match_ai_points.last_timing.update({
+        "reid_camera_read_time_s": round(read_time_total, 6),
+        "reid_yolo_time_s": round(max(
+            float(left_timing.get("yolo_time_s", 0.0)),
+            float(right_timing.get("yolo_time_s", 0.0)),
+        ), 6),
+        "reid_grouping_time_s": round(max(
+            float(left_timing.get("grouping_time_s", 0.0)),
+            float(right_timing.get("grouping_time_s", 0.0)),
+        ), 6),
+        "reid_qpoint_time_s": round(max(
+            float(left_timing.get("qpoint_time_s", 0.0)),
+            float(right_timing.get("qpoint_time_s", 0.0)),
+        ), 6),
+        "reid_detection_wall_time_s": round(detect_dt, 6),
+    })
 
     def _to_full_offset(stable_list, ox, oy):
         """Translate crop-space detections to full-frame coordinates."""
@@ -276,7 +332,7 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
     for i, det in enumerate(stable_right, start=1):
         _fine_debug(f"RE-ID stable R{i}: pt={det.get('point')} cls={det.get('cls')} conf={det.get('conf')}")
 
-    if cameras._recorder is not None:
+    if cameras._recorder is not None and RECORD_LIVE_OVERLAYS:
         ann_L = detector.cv_left.draw_stable_detections(left_frames[-1], stable_left)
         ann_R = detector.cv_right.draw_stable_detections(right_frames[-1], stable_right)
         cameras._recorder.write_overlay(ann_L, ann_R)
@@ -294,6 +350,7 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
                 "right_frames": right_frames,
                 "stable_left": stable_left,
                 "stable_right": stable_right,
+                "timing": dict(_burst_match_ai_points.last_timing),
             }
         return []
 
@@ -346,6 +403,26 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
         f"reject_y={reject_y} reject_disp={reject_disp} reject_class={reject_class} "
         f"total={time.perf_counter() - t_total:.2f}s"
     )
+    _burst_match_ai_points.last_timing = {
+        "reid_camera_read_time_s": round(read_time_total, 6),
+        "reid_yolo_time_s": round(max(
+            float(left_timing.get("yolo_time_s", 0.0)),
+            float(right_timing.get("yolo_time_s", 0.0)),
+        ), 6),
+        "reid_grouping_time_s": round(max(
+            float(left_timing.get("grouping_time_s", 0.0)),
+            float(right_timing.get("grouping_time_s", 0.0)),
+        ), 6),
+        "reid_qpoint_time_s": round(max(
+            float(left_timing.get("qpoint_time_s", 0.0)),
+            float(right_timing.get("qpoint_time_s", 0.0)),
+        ), 6),
+        "reid_detection_wall_time_s": round(detect_dt, 6),
+        "reid_matching_time_s": round(match_dt, 6),
+        "reid_total_time_s": round(time.perf_counter() - t_total, 6),
+        "reid_point_mode": settings["point_mode"],
+        "reid_burst_count": int(settings["burst_count"]),
+    }
     if return_debug:
         return filtered, {
             "settings": settings,
@@ -355,6 +432,7 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
             "stable_left": stable_left,
             "stable_right": stable_right,
             "matched_targets": filtered,
+            "timing": dict(_burst_match_ai_points.last_timing),
         }
     return filtered
 
@@ -692,6 +770,7 @@ def _pick_best_ai_target(
         "tri_dist_mm": round(best_tri_dist, 1),
         "n_candidates": len(candidates),
         "tri_xy_mm": [round(v, 3) for v in best_solved["target_xy_mm"]],
+        "timing": dict(getattr(_burst_match_ai_points, "last_timing", {})),
     }
     return src["left_px"], src["right_px"], frameL, frameR, best_solved, reid_info
 
@@ -753,9 +832,29 @@ def fine_align_target(
     total_targets=None,
 ):
     target_label = f"{target_idx}/{total_targets}" if target_idx is not None else "?"
+    snap_point_mode = _resolve_point_mode(FINAL_SNAP_POINT_MODE)
+    snap_enabled = (
+        bool(FINE_ALIGN_ENABLE_SNAP)
+        and str(FINE_ALIGN_SNAP_MODE).lower() == "qpoint"
+        and snap_point_mode == "qpoint"
+    )
+    snap_burst_count = _resolve_burst_count(FINAL_SNAP_BURST_COUNT)
+    fine_align_target.last_timing = {
+        "fine_align_reid_yolo_time_s": 0.0,
+        "fine_align_reid_total_time_s": 0.0,
+        "fine_align_pd_lk_time_s": 0.0,
+        "final_snap_time_s": 0.0,
+        "fine_align_iterations": 0,
+        "fine_align_snap_used": False,
+        "fine_align_snap_move_px": None,
+        "fine_align_snap_mode": FINE_ALIGN_SNAP_MODE,
+        "final_snap_point_mode": snap_point_mode,
+    }
     _fine_debug(
         f"start target {target_label}: max_time={max_time:.1f}s "
-        f"settle_frames={settle_frames} deadzone={DEADZONE:.1f}px crop={FINE_W}x{FINE_H}"
+        f"settle_frames={settle_frames} deadzone={DEADZONE:.1f}px crop={FINE_W}x{FINE_H} "
+        f"snap_enabled={snap_enabled} snap_mode={FINE_ALIGN_SNAP_MODE} "
+        f"final_point_mode={snap_point_mode} snap_burst={snap_burst_count}"
     )
 
     if cameras is not None:
@@ -778,6 +877,18 @@ def fine_align_target(
         planned_target, actual_hits,
         expected_cls=expected_cls,
     )
+    reid_timing = reid_info.get("timing") if isinstance(reid_info, dict) else None
+    if not reid_timing:
+        reid_timing = getattr(_burst_match_ai_points, "last_timing", {})
+    if reid_timing:
+        fine_align_target.last_timing.update({
+            "fine_align_reid_yolo_time_s": float(reid_timing.get("reid_yolo_time_s", 0.0)),
+            "fine_align_reid_total_time_s": float(reid_timing.get("reid_total_time_s", 0.0)),
+            "fine_align_reid_grouping_time_s": float(reid_timing.get("reid_grouping_time_s", 0.0)),
+            "fine_align_reid_matching_time_s": float(reid_timing.get("reid_matching_time_s", 0.0)),
+            "fine_align_reid_point_mode": reid_timing.get("reid_point_mode"),
+            "fine_align_reid_burst_count": reid_timing.get("reid_burst_count"),
+        })
 
     if left_pt_full is None or right_pt_full is None:
         print("\n[!] FINE ALIGN: Detection/Matching failed.")
@@ -814,8 +925,20 @@ def fine_align_target(
     last_dx = 0.0
     last_dy = 0.0
 
-    _snap_done = False
+    _snap_done = not snap_enabled
     _active_settle = settle_frames
+    snap_move_px = None
+    snap_used = False
+    t_pd_loop = time.perf_counter()
+
+    def _update_pd_timing():
+        snap_time = float(fine_align_target.last_timing.get("final_snap_time_s", 0.0))
+        fine_align_target.last_timing.update({
+            "fine_align_pd_lk_time_s": round(max(0.0, time.perf_counter() - t_pd_loop - snap_time), 6),
+            "fine_align_iterations": int(iterations),
+            "fine_align_snap_used": bool(snap_used),
+            "fine_align_snap_move_px": snap_move_px,
+        })
 
     while time.time() - t0 < max_time:
         frameL_full, frameR_full = cameras.read_pair()
@@ -834,6 +957,7 @@ def fine_align_target(
         if stL is None or stR is None or stL[0][0] == 0 or stR[0][0] == 0:
             gantry.stop()
             end_live_fine_align()
+            _update_pd_timing()
             print("[FINE ALIGN FAIL] Lost LK tracking.")
             return False, None
 
@@ -848,6 +972,7 @@ def fine_align_target(
         if not (0 <= xl < FINE_W and 0 <= yl < FINE_H and 0 <= xr < FINE_W and 0 <= yr < FINE_H):
             gantry.stop()
             end_live_fine_align()
+            _update_pd_timing()
             print("[FINE ALIGN FAIL] Tracked point left the centre crop.")
             return False, None
 
@@ -856,6 +981,14 @@ def fine_align_target(
         err_y += -1.0
         last_err_x = err_x
         last_err_y = err_y
+
+        if cameras is not None:
+            cameras.set_recording_context(
+                pd_error_x_px=round(err_x, 3),
+                pd_error_y_px=round(err_y, 3),
+                pd_locked=bool(abs(err_x) <= DEADZONE and abs(err_y) <= DEADZONE),
+                pd_settle_count=int(inside_cnt),
+            )
 
         dex = err_x - prev_ex
         dey = err_y - prev_ey
@@ -885,7 +1018,7 @@ def fine_align_target(
             max_time_s=max_time,
         )
 
-        if cameras is not None and cameras._recorder is not None:
+        if cameras is not None and cameras._recorder is not None and RECORD_LIVE_OVERLAYS:
             tgt_str = f"{target_idx}/{total_targets} | " if target_idx is not None else ""
             _status = f"{tgt_str}ex={err_x:.1f}px ey={err_y:.1f}px"
             recL = frameL_full.copy()
@@ -899,19 +1032,30 @@ def fine_align_target(
             inside_cnt += 1
             gantry.stop()
 
-            if inside_cnt >= _active_settle and not _snap_done and DETECTOR_MODE == "ai" \
-                    and detector is not None and selected_target is not None:
+            if (
+                inside_cnt >= _active_settle
+                and not _snap_done
+                and FINE_ALIGN_SNAP_ON_DEADZONE
+                and DETECTOR_MODE == "ai"
+                and detector is not None
+                and selected_target is not None
+            ):
                 # Snap: crop 1.2× the initial bbox around the current LK point,
                 # run qpoint directly (no YOLO) to get a sub-pixel meristem location,
                 # then re-seed LK for a final short settle to cancel any drift.
+                t_snap = time.perf_counter()
                 _src_box = selected_target.get("source_target", {}).get("left_box")
-                if _src_box:
+                if FINE_ALIGN_SNAP_CROP_HALF_PX is not None:
+                    _px = _py = max(4, int(FINE_ALIGN_SNAP_CROP_HALF_PX))
+                elif _src_box:
                     _bw = max(20, _src_box[2] - _src_box[0])
                     _bh = max(20, _src_box[3] - _src_box[1])
+                    _px = max(24, int(_bw * 0.6))
+                    _py = max(24, int(_bh * 0.6))
                 else:
                     _bw = _bh = 60
-                _px = max(24, int(_bw * 0.6))
-                _py = max(24, int(_bh * 0.6))
+                    _px = max(24, int(_bw * 0.6))
+                    _py = max(24, int(_bh * 0.6))
 
                 _xl_f, _yl_f = xl + CROP_X0, yl + CROP_Y0
                 _xr_f, _yr_f = xr + CROP_X0, yr + CROP_Y0
@@ -923,12 +1067,28 @@ def fine_align_target(
 
                 _snap_cropL = frameL_full[_lsy0:_lsy1, _lsx0:_lsx1]
                 _snap_cropR = frameR_full[_rsy0:_rsy1, _rsx0:_rsx1]
+                if snap_burst_count > 1:
+                    _crops_l = [_snap_cropL]
+                    _crops_r = [_snap_cropR]
+                    for _ in range(snap_burst_count - 1):
+                        _extra_l, _extra_r = cameras.read_pair()
+                        if _extra_l is None or _extra_r is None:
+                            continue
+                        _crops_l.append(_extra_l[_lsy0:_lsy1, _lsx0:_lsx1])
+                        _crops_r.append(_extra_r[_rsy0:_rsy1, _rsx0:_rsx1])
+                    if len(_crops_l) > 1:
+                        _snap_cropL = np.mean(np.stack(_crops_l), axis=0).astype(np.uint8)
+                        _snap_cropR = np.mean(np.stack(_crops_r), axis=0).astype(np.uint8)
 
                 with ThreadPoolExecutor(max_workers=2, thread_name_prefix="snap") as _sp:
                     _fl = _sp.submit(detector.cv_left.snap_meristem_on_crop, _snap_cropL)
                     _fr = _sp.submit(detector.cv_right.snap_meristem_on_crop, _snap_cropR)
                     _spt_l = _fl.result()
                     _spt_r = _fr.result()
+                snap_dt = time.perf_counter() - t_snap
+                fine_align_target.last_timing["final_snap_time_s"] = round(
+                    fine_align_target.last_timing.get("final_snap_time_s", 0.0) + snap_dt, 6
+                )
 
                 if _spt_l is not None and _spt_r is not None:
                     _new_xl = float(_spt_l[0] + _lsx0) - CROP_X0
@@ -937,10 +1097,16 @@ def fine_align_target(
                     _new_yr = float(_spt_r[1] + _rsy0) - CROP_Y0
                     if (0 <= _new_xl < FINE_W and 0 <= _new_yl < FINE_H
                             and 0 <= _new_xr < FINE_W and 0 <= _new_yr < FINE_H):
+                        move_l = float(np.hypot(_new_xl - xl, _new_yl - yl))
+                        move_r = float(np.hypot(_new_xr - xr, _new_yr - yr))
+                        snap_move_px = round((move_l + move_r) / 2.0, 3)
+                        snap_used = True
                         _fine_debug(
                             f"snap re-seed: L ({xl:.1f},{yl:.1f})→({_new_xl:.1f},{_new_yl:.1f}) "
-                            f"R ({xr:.1f},{yr:.1f})→({_new_xr:.1f},{_new_yr:.1f})"
+                            f"R ({xr:.1f},{yr:.1f})→({_new_xr:.1f},{_new_yr:.1f}) "
+                            f"move={snap_move_px:.2f}px time={snap_dt:.3f}s"
                         )
+                        print(f"[SNAP] qpoint snap used; mean move={snap_move_px:.2f}px time={snap_dt:.3f}s")
                         track_pt_L = np.array([[_new_xl, _new_yl]], dtype=np.float32).reshape(1, 1, 2)
                         track_pt_R = np.array([[_new_xr, _new_yr]], dtype=np.float32).reshape(1, 1, 2)
                         old_gray_L = grayL
@@ -950,8 +1116,10 @@ def fine_align_target(
                         _active_settle = FINE_ALIGN_SNAP_SETTLE_FRAMES
                         continue
                     else:
+                        print(f"[SNAP] qpoint snap skipped; refined point left crop after {snap_dt:.3f}s")
                         _fine_debug("snap point outside crop, using LK position")
                 else:
+                    print(f"[SNAP] qpoint snap failed; using LK point after {snap_dt:.3f}s")
                     _fine_debug("snap failed (qpoint None), using LK position")
                 _snap_done = True  # don't retry snap even if it failed
 
@@ -959,6 +1127,11 @@ def fine_align_target(
                 gantry.wait_for_idle(timeout=3.0)
                 end_live_fine_align()
                 print(f"Fine align locked: ex={err_x:.2f}px ey={err_y:.2f}px")
+                _update_pd_timing()
+                if not snap_enabled:
+                    print("[SNAP] disabled; firing from LK/PD lock.")
+                elif not snap_used:
+                    print("[SNAP] not used; firing from LK/PD lock.")
 
                 gantry.sync_estimate_to_machine()
                 final_xy = gantry.get_estimated_xy()
@@ -982,6 +1155,8 @@ def fine_align_target(
 
                 if actual_entry is not None and reid_info is not None:
                     actual_entry["reid_protocol"] = reid_info
+                if actual_entry is not None:
+                    actual_entry["timing"] = dict(fine_align_target.last_timing)
 
                 if cameras is not None:
                     cls_name = "Target"
@@ -1024,6 +1199,7 @@ def fine_align_target(
 
     gantry.stop()
     end_live_fine_align("timeout")
+    _update_pd_timing()
     elapsed = time.time() - t0
     if last_err_x is None or last_err_y is None:
         print(f"[FINE ALIGN FAIL] Timeout after {elapsed:.1f}s before any usable tracking frame.")

@@ -1,5 +1,6 @@
 import json
 import math
+import time
 from datetime import datetime
 
 from config import (
@@ -18,12 +19,17 @@ from config import (
     AI_DISPLAY_SCALE,
     AI_CONFIDENCE,
     SURVEY_BURST_COUNT,
+    SURVEY_POINT_MODE,
     SURVEY_MIN_HITS,
     SURVEY_CLUSTER_RADIUS_PX,
     SURVEY_TARGET_CLASSES,
     FINE_ALIGN_SETTLE_FRAMES,
     RECORD_TRIAL,
     TRIAL_RECORDINGS_DIR,
+    OVERRIDE_BURST_NUMBER,
+    OVERRIDE_BURST_COUNT,
+    OVERRIDE_POINT_MODE,
+    OVERRIDE_POINT_MODE_VALUE,
     WORKSPACE_X_MIN,
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
@@ -73,17 +79,131 @@ def build_detector():
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
+def _resolve_burst_count(default_count):
+    if OVERRIDE_BURST_NUMBER:
+        return max(1, int(OVERRIDE_BURST_COUNT))
+    return max(1, int(default_count))
+
+
+def _resolve_point_mode(default_mode):
+    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
+    mode = str(mode or "box_center").strip().lower()
+    if mode == "heatmap":
+        mode = "qpoint"
+    if mode not in ("box_center", "qpoint"):
+        raise ValueError(f"Unknown point mode: {mode}")
+    return mode
+
+
 def _flush_camera_buffer(cameras, n=8):
     for _ in range(n):
         cameras.read_pair()
 
 
-def _save_manifest(manifest, timestamp):
-    TRIAL_RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
-    path = TRIAL_RECORDINGS_DIR / f"manifest_{timestamp}.json"
+def _save_manifest(manifest, timestamp, recording_dir=None):
+    if recording_dir is not None:
+        recording_dir.mkdir(parents=True, exist_ok=True)
+        path = recording_dir / "trial_summary.json"
+    else:
+        TRIAL_RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+        path = TRIAL_RECORDINGS_DIR / f"manifest_{timestamp}.json"
     with open(path, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"[MANIFEST] Saved → {path}")
+
+
+def _compact_target_list(target_queue):
+    out = []
+    for idx, target in enumerate(target_queue or [], start=1):
+        src = target.get("source_target", {})
+        xy = target.get("target_xy_mm")
+        out.append({
+            "id": idx,
+            "target_xy_mm": list(xy) if xy is not None else None,
+            "left_px": src.get("left_px"),
+            "right_px": src.get("right_px"),
+            "class_id": src.get("left_cls", src.get("right_cls")),
+            "confidence": src.get("left_conf", src.get("right_conf", src.get("conf"))),
+        })
+    return out
+
+
+def _compact_hits(actual_hits):
+    return [
+        {
+            "id": idx,
+            "planned_xy_mm": hit.get("planned_xy_mm"),
+            "final_xy_mm": hit.get("final_xy_mm"),
+            "left_px": hit.get("left_px"),
+            "right_px": hit.get("right_px"),
+        }
+        for idx, hit in enumerate(actual_hits or [], start=1)
+    ]
+
+
+def _gantry_xy(gantry):
+    if gantry is None:
+        return None
+    try:
+        xy = gantry.get_estimated_xy()
+        return [float(xy[0]), float(xy[1])]
+    except Exception:
+        return None
+
+
+def _metrics_snapshot(logger):
+    if logger is None or not getattr(logger, "run", None):
+        return {}
+    return {
+        k: v
+        for k, v in logger.run.items()
+        if k.endswith("_time_s") or k in ("run_id", "num_targets_fired", "num_targets_attempted")
+    }
+
+
+def _active_target_xy(active_target):
+    if not active_target:
+        return None
+    xy = active_target.get("target_xy_mm")
+    return list(xy) if xy is not None else None
+
+
+def _update_recording_context(
+    cameras,
+    state_name,
+    gantry=None,
+    target_queue=None,
+    current_target_id=None,
+    active_target=None,
+    actual_hits=None,
+    logger=None,
+):
+    if cameras is None:
+        return
+    cameras.set_recording_context(
+        state_name=state_name,
+        current_target_id=current_target_id,
+        current_target_index=current_target_id,
+        gantry_position_mm=_gantry_xy(gantry),
+        planned_target_list=_compact_target_list(target_queue),
+        active_target_workspace_mm=_active_target_xy(active_target),
+        hit_targets_so_far=_compact_hits(actual_hits),
+        metrics_timestamps=_metrics_snapshot(logger),
+    )
+
+
+def _attach_recording_metrics(logger, cameras):
+    if logger is None or cameras is None:
+        return
+    stats = cameras.get_recording_stats()
+    if stats:
+        logger.run.update(stats)
+
+
+def _add_run_total(logger, key, value):
+    if logger is None or value is None:
+        return
+    logger.run[key] = round((logger.run.get(key) or 0.0) + float(value), 3)
 
 
 def _print_final_targets(actual_hits):
@@ -98,10 +218,11 @@ def _print_final_targets(actual_hits):
     print(f"  {len(actual_hits)} target(s) locked.\n")
 
 
-def _save_metrics(logger, status):
+def _save_metrics(logger, status, cameras=None):
     if logger is None:
         return
     try:
+        _attach_recording_metrics(logger, cameras)
         logger.end_run(status=status)
         logger.save_csvs()
         logger.save_json()
@@ -117,6 +238,8 @@ def main():
     detector = None
     coarse_mover = None
     logger = None
+    model_load_time_s = 0.0
+    warmup_info = {}
 
     left_detections = []
     right_detections = []
@@ -138,7 +261,9 @@ def main():
             if state == "INIT":
                 gantry = Gantry(GRBL_PORT)
                 cameras = StereoCameras()
+                t_model = time.perf_counter()
                 detector = build_detector()
+                model_load_time_s = round(time.perf_counter() - t_model, 3)
                 coarse_mover = TriangulationCoarseMover()
                 coarse_mover.clear_actual_targets_log()
                 if ENABLE_EXPERIMENT_LOGGING:
@@ -157,13 +282,22 @@ def main():
 
             elif state == "HOME":
                 cameras.open()
+                _update_recording_context(cameras, "HOME", gantry, target_queue, None, None, actual_hits, logger)
                 if HOMING:
                     gantry.home()
+                if DETECTOR_MODE == "ai" and hasattr(detector, "warmup"):
+                    warmup_info = detector.warmup()
                 if logger is not None:
-                    logger.start_run()
+                    logger.start_run(run_metadata={
+                        "model_load_time_s": model_load_time_s,
+                        **warmup_info,
+                    })
+                    _attach_recording_metrics(logger, cameras)
+                    _update_recording_context(cameras, "HOME", gantry, target_queue, None, None, actual_hits, logger)
                 state = "SURVEY"
 
             elif state == "SURVEY":
+                _update_recording_context(cameras, "SURVEY", gantry, target_queue, None, None, actual_hits, logger)
                 gantry.move_absolute(SURVEY_POS_X, SURVEY_POS_Y)
                 print_global_survey_ready(SURVEY_POS_X, SURVEY_POS_Y)
                 state = "SURVEY_CONFIRM"
@@ -172,7 +306,11 @@ def main():
                 state = "DETECT"
 
             elif state == "DETECT":
+                _update_recording_context(cameras, "DETECT", gantry, target_queue, None, None, actual_hits, logger)
                 _flush_camera_buffer(cameras, n=8)
+                survey_burst_count = _resolve_burst_count(SURVEY_BURST_COUNT)
+                survey_point_mode = _resolve_point_mode(SURVEY_POINT_MODE)
+                print(f"[CV CONFIG] SURVEY burst_count={survey_burst_count} point_mode={survey_point_mode}")
 
                 if logger is not None:
                     logger.start_section("survey")
@@ -180,15 +318,17 @@ def main():
                     cameras,
                     detector,
                     detector_mode=DETECTOR_MODE,
-                    burst_count=SURVEY_BURST_COUNT,
+                    burst_count=survey_burst_count,
                     min_hits=SURVEY_MIN_HITS,
                     cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
                     survey_classes=SURVEY_TARGET_CLASSES,
+                    point_mode=survey_point_mode,
                 )
                 if logger is not None:
                     logger.end_section("survey")
                     logger.run["num_detections_left"] = len(left_detections)
                     logger.run["num_detections_right"] = len(right_detections)
+                    logger.run.update(getattr(coarse_mover, "last_survey_timing", {}))
 
                 def _to_pt(d):
                     return d["point"] if isinstance(d, dict) else d
@@ -198,6 +338,7 @@ def main():
                 state = "MATCH"
 
             elif state == "MATCH":
+                _update_recording_context(cameras, "MATCH", gantry, target_queue, None, None, actual_hits, logger)
                 if logger is not None:
                     logger.start_section("stereo_matching")
                 matched_targets, _, _ = match_points(
@@ -223,6 +364,7 @@ def main():
                         state = "PLAN"
 
             elif state == "PLAN":
+                _update_recording_context(cameras, "PLAN", gantry, target_queue, None, None, actual_hits, logger)
                 if logger is not None:
                     logger.start_section("triangulation")
                 coarse_mover.fit_epipolar(matched_targets)
@@ -240,6 +382,7 @@ def main():
                     absolute_targets,
                     start_xy=gantry.get_estimated_xy(),
                 )
+                _update_recording_context(cameras, "PLAN", gantry, target_queue, None, None, actual_hits, logger)
                 if logger is not None:
                     logger.end_section("planning")
                     logger.run["num_targets_planned"] = len(target_queue)
@@ -284,6 +427,7 @@ def main():
                     tx, ty = solved["target_xy_mm"]
                     src = solved.get("source_target", {})
                     travel_dist = round(math.hypot(tx - prev_xy[0], ty - prev_xy[1]), 2)
+                    _update_recording_context(cameras, "TARGET", gantry, target_queue, i, solved, actual_hits, logger)
 
                     if logger is not None:
                         logger.start_target(i, {
@@ -340,9 +484,11 @@ def main():
 
                     if logger is not None:
                         logger.start_target_section(i, "travel")
+                    _update_recording_context(cameras, "TRAVEL", gantry, target_queue, i, solved, actual_hits, logger)
                     moved = coarse_mover.move_to_absolute_target(gantry, solved)
                     if logger is not None:
                         logger.end_target_section(i, "travel")
+                    _update_recording_context(cameras, "POST_TRAVEL", gantry, target_queue, i, solved, actual_hits, logger)
 
                     if not moved:
                         if logger is not None:
@@ -408,6 +554,7 @@ def main():
 
                     if logger is not None:
                         logger.start_target_section(i, "pd")
+                    _update_recording_context(cameras, "FINE_ALIGN", gantry, target_queue, i, solved, actual_hits, logger)
                     aligned, actual_entry = fine_align_target(
                         gantry,
                         cameras,
@@ -422,16 +569,26 @@ def main():
                     )
                     if logger is not None:
                         logger.end_target_section(i, "pd")
+                        fa_timing = dict(getattr(fine_align_target, "last_timing", {}))
+                        if fa_timing:
+                            logger.update_target(i, fa_timing)
+                            _add_run_total(logger, "total_fine_align_reid_yolo_time_s", fa_timing.get("fine_align_reid_yolo_time_s"))
+                            _add_run_total(logger, "total_fine_align_reid_time_s", fa_timing.get("fine_align_reid_total_time_s"))
+                            _add_run_total(logger, "total_fine_align_pd_lk_time_s", fa_timing.get("fine_align_pd_lk_time_s"))
+                            _add_run_total(logger, "total_final_snap_time_s", fa_timing.get("final_snap_time_s"))
 
                     if aligned:
                         actual_hits.append(actual_entry)
+                        _update_recording_context(cameras, "LOCKED", gantry, target_queue, i, solved, actual_hits, logger)
                         print_target_result(i, total, solved, actual_entry)
 
                         if logger is not None:
                             logger.start_target_section(i, "fire")
-                        fire_target(gantry, solved)
+                        _update_recording_context(cameras, "FIRE", gantry, target_queue, i, solved, actual_hits, logger)
+                        fire_target(gantry, solved, cameras=cameras)
                         if logger is not None:
                             logger.end_target_section(i, "fire")
+                        _update_recording_context(cameras, "FIRED", gantry, target_queue, i, solved, actual_hits, logger)
 
                         manifest["targets"].append({
                             "target_id": i,
@@ -452,6 +609,7 @@ def main():
                                 "status": "locked_fired",
                             })
                     else:
+                        _update_recording_context(cameras, "FAILED_FINE_ALIGN", gantry, target_queue, i, solved, actual_hits, logger)
                         cameras.set_recording_status([
                             f"Target {i}/{total}",
                             f"Coarse: ({tx:.1f}, {ty:.1f}) mm",
@@ -478,7 +636,9 @@ def main():
                 clear_current_target_line()
                 print("\n  All targets complete.")
                 _print_final_targets(actual_hits)
-                _save_metrics(logger, "complete")
+                if cameras is not None:
+                    cameras.stop_recording()
+                _save_metrics(logger, "complete", cameras)
                 state = "DONE"
 
         print("\n=== DONE ===")
@@ -486,15 +646,16 @@ def main():
     except KeyboardInterrupt:
         clear_current_target_line()
         print("\nInterrupted by user.")
-        _save_metrics(logger, "user_aborted")
+        _save_metrics(logger, "user_aborted", cameras)
 
     except Exception as e:
         clear_current_target_line()
         print(f"\nERROR: {e}")
-        _save_metrics(logger, "failed")
+        _save_metrics(logger, "failed", cameras)
 
     finally:
-        _save_manifest(manifest, trial_timestamp)
+        recording_dir = cameras.get_recording_dir() if cameras is not None else None
+        _save_manifest(manifest, trial_timestamp, recording_dir=recording_dir)
         if cameras is not None:
             cameras.stop_recording()
             cameras.close()

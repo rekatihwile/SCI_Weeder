@@ -4,6 +4,7 @@ import time
 import os
 import sys
 import json
+import queue
 import threading
 import numpy as np
 from datetime import datetime
@@ -21,6 +22,14 @@ from config import (
     BASE_DIR,
     TRIAL_RECORDINGS_DIR,
     RECORD_TRIAL,
+    RECORD_RAW_FRAMES_ONLY,
+    RECORD_FRAME_FORMAT,
+    RECORD_JPEG_QUALITY,
+    RECORD_EVERY_N_FRAMES,
+    RECORD_MAX_FPS,
+    RECORD_MIN_INTERVAL_SEC,
+    RECORD_LIVE_VIDEO,
+    RECORD_LIVE_OVERLAYS,
     RECORD_VIDEO_FPS,
     RECORD_VIDEO_SCALE,
     RECORD_VIDEO_TIMESTAMP,
@@ -72,16 +81,16 @@ def apply_camera_settings(cap, props, dev_path=None):
 
 
 def _next_recording_index(recordings_dir):
-    """Return the next sequential trial index by scanning existing trial_NNN_*.mp4 files."""
+    """Return the next sequential trial index by scanning existing trial_NNN outputs."""
     max_idx = 0
-    for p in Path(recordings_dir).glob("trial_*.mp4"):
+    for p in Path(recordings_dir).glob("trial_*"):
         m = re.match(r"trial_(\d+)_", p.name)
         if m:
             max_idx = max(max_idx, int(m.group(1)))
     return max_idx + 1
 
 
-class TrialRecorder:
+class LiveVideoRecorder:
     """
     Async frame queue that encodes to MP4 at the end of a trial.
 
@@ -126,6 +135,10 @@ class TrialRecorder:
         with self._lock:
             self._status_lines = list(lines)
 
+    def set_context(self, **context):
+        """Compatibility hook used by the raw recorder."""
+        return
+
     def _burn_status(self, frame):
         with self._lock:
             lines = list(self._status_lines)
@@ -150,7 +163,7 @@ class TrialRecorder:
             t0 = time.time()
 
             with self._lock:
-                if RECORD_VIDEO_OVERLAY and self._latest_overlay_l is not None:
+                if (RECORD_LIVE_OVERLAYS or RECORD_VIDEO_OVERLAY) and self._latest_overlay_l is not None:
                     fl = self._latest_overlay_l
                     fr = self._latest_overlay_r
                 else:
@@ -273,11 +286,233 @@ class TrialRecorder:
             pass
 
 
+def _json_safe(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+class RawFrameRecorder:
+    """
+    Lightweight live recorder.
+
+    The live path only enqueues left/right frames and writes them as raw image files
+    on a background thread. It does not draw overlays, stitch frames, resize, or encode
+    a video while the experiment is running.
+    """
+
+    def __init__(
+        self,
+        run_dir,
+        fps=15.0,
+        frame_format="jpg",
+        jpeg_quality=90,
+        every_n_frames=1,
+        min_interval_sec=0.0,
+        queue_size=16,
+    ):
+        self.run_dir = Path(run_dir)
+        self.left_dir = self.run_dir / "left"
+        self.right_dir = self.run_dir / "right"
+        self.left_dir.mkdir(parents=True, exist_ok=True)
+        self.right_dir.mkdir(parents=True, exist_ok=True)
+
+        fmt = str(frame_format or "jpg").lower().lstrip(".")
+        if fmt == "jpeg":
+            fmt = "jpg"
+        if fmt not in ("jpg", "png"):
+            raise ValueError(f"Unsupported RECORD_FRAME_FORMAT: {frame_format}")
+
+        self.frame_format = fmt
+        self.jpeg_quality = int(jpeg_quality)
+        self.every_n_frames = max(1, int(every_n_frames or 1))
+        if RECORD_MAX_FPS:
+            self.min_interval_sec = 1.0 / float(RECORD_MAX_FPS)
+        else:
+            self.min_interval_sec = max(0.0, float(min_interval_sec or 0.0))
+        self.fps = fps
+
+        self.manifest_path = self.run_dir / "manifest.jsonl"
+        self.metadata_path = self.run_dir / "recording_meta.json"
+        self._manifest_f = open(self.manifest_path, "a", buffering=1)
+        self._queue = queue.Queue(maxsize=queue_size)
+        self._lock = threading.Lock()
+        self._context = {}
+        self._stop_event = threading.Event()
+        self._start_mono = time.monotonic()
+        self._last_saved_mono = 0.0
+        self._seen_frames = 0
+        self._saved_frames = 0
+        self._dropped_frames = 0
+        self._next_frame_index = 1
+        self._total_save_time_s = 0.0
+
+        self._thread = threading.Thread(target=self._writer_loop, daemon=True)
+        self._thread.start()
+
+        self._write_metadata(status="running")
+        _rprint(
+            f"[REC] Raw recorder started: {self.run_dir} "
+            f"format={self.frame_format} every={self.every_n_frames} "
+            f"min_interval={self.min_interval_sec:.3f}s"
+        )
+
+    def _write_metadata(self, status):
+        data = {
+            "status": status,
+            "started_monotonic": self._start_mono,
+            "frame_format": self.frame_format,
+            "jpeg_quality": self.jpeg_quality,
+            "every_n_frames": self.every_n_frames,
+            "min_interval_sec": self.min_interval_sec,
+            "manifest": self.manifest_path.name,
+            "left_dir": self.left_dir.relative_to(self.run_dir).as_posix(),
+            "right_dir": self.right_dir.relative_to(self.run_dir).as_posix(),
+            "stats": self.stats(),
+        }
+        with open(self.metadata_path, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+
+    def set_status_lines(self, lines):
+        self.set_context(status_lines=list(lines))
+
+    def set_context(self, **context):
+        with self._lock:
+            self._context.update(_json_safe(context))
+
+    def write_overlay(self, frame_l, frame_r):
+        # Raw recording intentionally ignores live overlays.
+        return
+
+    def _should_record_locked(self, timestamp_monotonic):
+        self._seen_frames += 1
+        if (self._seen_frames - 1) % self.every_n_frames != 0:
+            return False
+        if self.min_interval_sec > 0.0:
+            if timestamp_monotonic - self._last_saved_mono < self.min_interval_sec:
+                return False
+        self._last_saved_mono = timestamp_monotonic
+        return True
+
+    def write(self, frame_l, frame_r):
+        if frame_l is None or frame_r is None:
+            return
+
+        timestamp_monotonic = time.monotonic()
+        with self._lock:
+            if not self._should_record_locked(timestamp_monotonic):
+                return
+            context = dict(self._context)
+            idx = self._next_frame_index
+            self._next_frame_index += 1
+
+        left_rel = Path("left") / f"left_{idx:06d}.{self.frame_format}"
+        right_rel = Path("right") / f"right_{idx:06d}.{self.frame_format}"
+        record = {
+            "frame_index": idx,
+            "left_image_path": left_rel.as_posix(),
+            "right_image_path": right_rel.as_posix(),
+            "timestamp_monotonic": timestamp_monotonic,
+            "timestamp_wall": datetime.now().isoformat(timespec="milliseconds"),
+            **context,
+        }
+
+        try:
+            self._queue.put_nowait((frame_l, frame_r, left_rel, right_rel, record))
+        except queue.Full:
+            self._dropped_frames += 1
+            if RECORD_VIDEO_DEBUG and self._dropped_frames % 20 == 1:
+                _rprint(f"[REC DEBUG] raw recorder queue full; dropped={self._dropped_frames}")
+
+    def _imwrite_params(self):
+        if self.frame_format == "jpg":
+            return [int(cv2.IMWRITE_JPEG_QUALITY), int(self.jpeg_quality)]
+        if self.frame_format == "png":
+            return [int(cv2.IMWRITE_PNG_COMPRESSION), 1]
+        return []
+
+    def _writer_loop(self):
+        params = self._imwrite_params()
+        _io_error = False
+        while not self._stop_event.is_set() or not self._queue.empty():
+            try:
+                frame_l, frame_r, left_rel, right_rel, record = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if _io_error:
+                self._dropped_frames += 1
+                self._queue.task_done()
+                continue
+
+            try:
+                t_save = time.perf_counter()
+                ok_l = cv2.imwrite(str(self.run_dir / left_rel), frame_l, params)
+                ok_r = cv2.imwrite(str(self.run_dir / right_rel), frame_r, params)
+                save_dt = time.perf_counter() - t_save
+                self._total_save_time_s += save_dt
+
+                record["recording_save_time_s"] = round(save_dt, 6)
+                record["recording_ok"] = bool(ok_l and ok_r)
+                self._manifest_f.write(json.dumps(_json_safe(record), default=str) + "\n")
+                self._saved_frames += 1
+            except OSError as e:
+                _rprint(f"[REC] Write error ({e}); dropping remaining frames.")
+                _io_error = True
+                self._dropped_frames += 1
+            finally:
+                self._queue.task_done()
+
+    def stats(self):
+        elapsed = max(0.0, time.monotonic() - self._start_mono)
+        return {
+            "recording_dir": str(self.run_dir),
+            "recording_manifest_path": str(self.manifest_path),
+            "recording_frames_seen": int(self._seen_frames),
+            "recording_frames_saved": int(self._saved_frames),
+            "recording_frames_dropped": int(self._dropped_frames),
+            "recording_frame_save_time_s": round(float(self._total_save_time_s), 3),
+            "recording_elapsed_s": round(elapsed, 3),
+        }
+
+    def release(self):
+        _rprint("[REC] Stopping raw recorder...")
+        self._stop_event.set()
+        self._thread.join(timeout=60.0)
+        if self._thread.is_alive():
+            _rprint("[REC] WARNING: raw recorder still flushing in background.")
+        try:
+            self._manifest_f.flush()
+            self._manifest_f.close()
+        except Exception:
+            pass
+        self._write_metadata(status="complete")
+        stats = self.stats()
+        _rprint(
+            f"[REC] Saved {stats['recording_frames_saved']} frame pair(s), "
+            f"dropped {stats['recording_frames_dropped']}, "
+            f"frame-save time {stats['recording_frame_save_time_s']:.3f}s"
+        )
+        _rprint(f"[REC] Manifest: {self.manifest_path}")
+
+
 class StereoCameras:
     def __init__(self):
         self.left = None
         self.right = None
         self._recorder = None
+        self._last_recording_dir = None
+        self._last_recording_stats = {}
         self._cam_lock = threading.Lock()
         self._bg_stop = threading.Event()
         self._bg_thread = None
@@ -342,7 +577,7 @@ class StereoCameras:
         self._bg_thread.start()
 
         if RECORD_TRIAL and start_recorder:
-            _rprint("[VIDEO] RECORD_TRIAL=True — auto-starting recorder.")
+            _rprint("[REC] RECORD_TRIAL=True — auto-starting recorder.")
             self.start_recording()
 
     def set_resolution(self, width, height):
@@ -381,9 +616,11 @@ class StereoCameras:
                     if ret_l and ret_r and self._recorder is not None:
                         fl_f = self._flip_frame(fl)
                         fr_f = self._flip_frame(fr)
-                        # Drop frames whose size doesn't match the recording resolution
-                        # (happens during resolution switches for the HD survey burst).
-                        if fl_f.shape[1] == FRAME_WIDTH and fl_f.shape[0] == FRAME_HEIGHT:
+                        if isinstance(self._recorder, LiveVideoRecorder):
+                            # Legacy stitched video needs a fixed frame size.
+                            if fl_f.shape[1] == FRAME_WIDTH and fl_f.shape[0] == FRAME_HEIGHT:
+                                self._recorder.write(fl_f, fr_f)
+                        else:
                             self._recorder.write(fl_f, fr_f)
                 except Exception:
                     pass
@@ -420,9 +657,36 @@ class StereoCameras:
             self._recorder.write_overlay(None, None)
 
     def set_recording_status(self, lines):
-        """Burn status text into every recorded frame. Pass [] to clear."""
+        """Update recording status context. Legacy video burns it into frames."""
         if self._recorder is not None:
             self._recorder.set_status_lines(lines)
+
+    def set_recording_context(self, **context):
+        """Attach JSON-serializable state to future raw frame manifest records."""
+        if self._recorder is not None and hasattr(self._recorder, "set_context"):
+            self._recorder.set_context(**context)
+
+    def get_recording_dir(self):
+        if self._recorder is None:
+            return self._last_recording_dir
+        run_dir = getattr(self._recorder, "run_dir", None)
+        if run_dir is not None:
+            return Path(run_dir)
+        filepath = getattr(self._recorder, "filepath", None)
+        return Path(filepath).parent if filepath else None
+
+    def get_recording_stats(self):
+        if self._recorder is None or not hasattr(self._recorder, "stats"):
+            return dict(self._last_recording_stats)
+        stats = self._recorder.stats()
+        if isinstance(stats, tuple):
+            n, duration, actual_fps = stats
+            return {
+                "recording_frames_saved": n,
+                "recording_elapsed_s": round(duration, 3),
+                "recording_actual_fps": round(actual_fps, 3),
+            }
+        return dict(stats)
 
     # ------------------------------------------------------------------
     # Trial recording
@@ -430,34 +694,52 @@ class StereoCameras:
 
     def start_recording(self):
         """
-        Start the async frame queue and schedule MP4 encoding on stop.
+        Start trial recording.
+
+        Default: raw left/right image files plus manifest.jsonl.
+        Optional legacy path: stitched live MP4 when RECORD_RAW_FRAMES_ONLY=False
+        and RECORD_LIVE_VIDEO=True.
+
         No-ops if RECORD_TRIAL=False or a recorder is already active.
         Called automatically by open() when RECORD_TRIAL=True; also safe
         to call manually (e.g. to start recording only from survey confirm).
         """
         if not RECORD_TRIAL:
-            _rprint("[VIDEO] RECORD_TRIAL=False — recording skipped.")
+            _rprint("[REC] RECORD_TRIAL=False — recording skipped.")
             return
 
         if self._recorder is not None:
-            _rprint("[VIDEO] Recording already active — ignoring duplicate start_recording() call.")
+            _rprint("[REC] Recording already active — ignoring duplicate start_recording() call.")
             return
 
         TRIAL_RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
         idx       = _next_recording_index(TRIAL_RECORDINGS_DIR)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        path      = TRIAL_RECORDINGS_DIR / f"trial_{idx:03d}_{timestamp}.mp4"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self._recorder = TrialRecorder(
-            filepath=path,
-            fps=RECORD_VIDEO_FPS,
-            scale=RECORD_VIDEO_SCALE,
-        )
+        if RECORD_RAW_FRAMES_ONLY or not RECORD_LIVE_VIDEO:
+            run_dir = TRIAL_RECORDINGS_DIR / f"trial_{idx:03d}_{timestamp}"
+            self._recorder = RawFrameRecorder(
+                run_dir=run_dir,
+                fps=RECORD_VIDEO_FPS,
+                frame_format=RECORD_FRAME_FORMAT,
+                jpeg_quality=RECORD_JPEG_QUALITY,
+                every_n_frames=RECORD_EVERY_N_FRAMES,
+                min_interval_sec=RECORD_MIN_INTERVAL_SEC,
+            )
+        else:
+            path = TRIAL_RECORDINGS_DIR / f"trial_{idx:03d}_{timestamp}.mp4"
+            self._recorder = LiveVideoRecorder(
+                filepath=path,
+                fps=RECORD_VIDEO_FPS,
+                scale=RECORD_VIDEO_SCALE,
+            )
 
     def stop_recording(self):
-        """Encode and save the video. Safe to call even if not recording."""
+        """Flush and close the active recorder. Safe to call even if not recording."""
         if self._recorder is not None:
+            self._last_recording_dir = self.get_recording_dir()
             self._recorder.release()
+            self._last_recording_stats = self.get_recording_stats()
             self._recorder = None
 
     def close(self):

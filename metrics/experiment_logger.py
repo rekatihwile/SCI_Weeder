@@ -44,13 +44,25 @@ class ExperimentLogger:
             "num_weeds_missed": None,
             "num_false_positives": None,
             "survey_time_s": None,
+            "model_load_time_s": None,
+            "warmup_time_s": None,
+            "survey_camera_read_time_s": None,
+            "survey_yolo_time_s": None,
+            "survey_grouping_time_s": None,
             "detection_time_s": None,
             "stereo_matching_time_s": None,
             "triangulation_time_s": None,
             "planning_time_s": None,
             "total_travel_time_s": 0.0,
             "total_pd_time_s": 0.0,
+            "total_fine_align_reid_yolo_time_s": 0.0,
+            "total_fine_align_reid_time_s": 0.0,
+            "total_fine_align_pd_lk_time_s": 0.0,
+            "total_final_snap_time_s": 0.0,
             "total_fire_time_s": 0.0,
+            "recording_frame_save_time_s": 0.0,
+            "recording_frames_saved": 0,
+            "recording_frames_dropped": 0,
             "total_state_overhead_time_s": None,
             "total_run_time_s": None,
             "planned_path_length_mm": None,
@@ -189,6 +201,9 @@ class ExperimentLogger:
             "position_error_mm", "travel_distance_mm", "travel_time_s",
             "pd_time_s", "fire_time_s", "per_target_total_time_s",
             "pd_iterations", "pd_converged", "fired",
+            "fine_align_reid_yolo_time_s", "fine_align_reid_total_time_s",
+            "fine_align_pd_lk_time_s", "final_snap_time_s",
+            "fine_align_snap_used", "fine_align_snap_move_px",
             "hit_success", "false_positive", "missed", "status", "notes",
         ]
         tgt_exists = tgt_path.exists()
@@ -216,12 +231,21 @@ class ExperimentLogger:
         run_id = r.get("run_id", "?")
         total  = r.get("total_run_time_s") or 0.0
         survey = r.get("survey_time_s") or 0.0
+        model  = r.get("model_load_time_s") or 0.0
+        warmup = r.get("warmup_time_s") or 0.0
+        survey_read = r.get("survey_camera_read_time_s") or 0.0
+        survey_yolo = r.get("survey_yolo_time_s") or 0.0
+        survey_group = r.get("survey_grouping_time_s") or 0.0
         match  = r.get("stereo_matching_time_s") or 0.0
         tri    = r.get("triangulation_time_s") or 0.0
         plan   = r.get("planning_time_s") or 0.0
         travel = r.get("total_travel_time_s") or 0.0
         pd     = r.get("total_pd_time_s") or 0.0
+        reid_yolo = r.get("total_fine_align_reid_yolo_time_s") or 0.0
+        pd_lk = r.get("total_fine_align_pd_lk_time_s") or 0.0
+        snap = r.get("total_final_snap_time_s") or 0.0
         fire   = r.get("total_fire_time_s") or 0.0
+        rec_save = r.get("recording_frame_save_time_s") or 0.0
         rate   = r.get("area_rate_m2_per_min") or 0.0
         wpm    = r.get("weeds_per_min") or 0.0
         attempted = r.get("num_targets_attempted") or 0
@@ -231,13 +255,16 @@ class ExperimentLogger:
         print(f"  Run ID:        {run_id}")
         print(f"  Status:        {r.get('run_status', '?')}")
         print(f"  Total time:    {total:.2f} s")
-        print(f"  Survey:        {survey:.2f} s")
+        print(f"  Model load:    {model:.2f} s")
+        print(f"  Warmup:        {warmup:.2f} s")
+        print(f"  Survey:        {survey:.2f} s  (read {survey_read:.2f}, YOLO {survey_yolo:.2f}, group {survey_group:.2f})")
         print(f"  Matching:      {match:.2f} s")
         print(f"  Triangulation: {tri:.2f} s")
         print(f"  Planning:      {plan:.2f} s")
         print(f"  Travel:        {travel:.2f} s")
-        print(f"  PD align:      {pd:.2f} s")
+        print(f"  PD align:      {pd:.2f} s  (Re-ID YOLO {reid_yolo:.2f}, PD/LK {pd_lk:.2f}, snap {snap:.2f})")
         print(f"  Fire:          {fire:.2f} s")
+        print(f"  Recording:     save {rec_save:.2f} s, frames {r.get('recording_frames_saved') or 0}")
         print(f"  Area rate:     {rate:.4f} m²/min")
         print(f"  Weeds/min:     {wpm:.2f}")
         print(f"  Targets:       {fired}/{attempted} fired")

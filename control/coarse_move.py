@@ -242,9 +242,12 @@ class TriangulationCoarseMover:
         self, cameras=None, detector=None, detector_mode=None,
         burst_count=5, min_hits=3, cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
         survey_classes=None,  # int | list[int] | None — per-survey class override
+        point_mode="box_center",
     ):
         def _survey_debug(msg):
             print(f"[SURVEY DEBUG] {msg}", flush=True)
+
+        self.last_survey_timing = {}
 
         if detector_mode == "manual" and cameras:
             ptsL, ptsR = detector.detect_live(cameras)
@@ -267,7 +270,7 @@ class TriangulationCoarseMover:
         _survey_debug(
             f"start burst: frames={burst_count} min_hits={min_hits} "
             f"radius={cluster_radius_px:.1f}px classes={survey_classes} "
-            f"capture={capture_w}x{capture_h}"
+            f"capture={capture_w}x{capture_h} point_mode={point_mode}"
         )
 
         if use_hd:
@@ -280,11 +283,13 @@ class TriangulationCoarseMover:
         try:
             left_frames, right_frames = [], []
             attempts = 0
+            read_time_total = 0.0
             while len(left_frames) < burst_count and attempts < (burst_count * 3):
                 t_read = time.perf_counter()
                 fL, fR = cameras.read_pair()
                 attempts += 1
                 read_dt = time.perf_counter() - t_read
+                read_time_total += read_dt
                 if fL is None or fR is None:
                     _survey_debug(
                         f"capture attempt {attempts}: missing frame(s) "
@@ -347,16 +352,18 @@ class TriangulationCoarseMover:
                 classes_override=survey_classes,
                 debug_label=label,
                 imgsz=SURVEY_YOLO_IMGSZ,
-                heatmap_final=False,
+                heatmap_final=(point_mode != "box_center"),
+                point_mode=point_mode,
             )
-            return stable, time.perf_counter() - t_side
+            timing = getattr(core, "last_burst_timing", {})
+            return stable, time.perf_counter() - t_side, timing
 
         t_detect = time.perf_counter()
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="survey-burst") as pool:
             left_future = pool.submit(_stable_side, detector.cv_left, left_frames_yolo, "[SURVEY DEBUG] LEFT")
             right_future = pool.submit(_stable_side, detector.cv_right, right_frames_yolo, "[SURVEY DEBUG] RIGHT")
-            stable_left, left_dt = left_future.result()
-            stable_right, right_dt = right_future.result()
+            stable_left, left_dt, left_timing = left_future.result()
+            stable_right, right_dt, right_timing = right_future.result()
 
         # Translate crop-space points back to full-frame coordinates.
         if survey_crop_half is not None and not use_hd:
@@ -431,6 +438,26 @@ class TriangulationCoarseMover:
             self.last_survey_frameR = right_frames[-1]
 
         frame_prep_dt = time.perf_counter() - t_frame_prep
+        self.last_survey_timing = {
+            "survey_camera_read_time_s": round(read_time_total, 6),
+            "survey_capture_time_s": round(capture_dt, 6),
+            "survey_yolo_time_s": round(max(
+                float(left_timing.get("yolo_time_s", 0.0)),
+                float(right_timing.get("yolo_time_s", 0.0)),
+            ), 6),
+            "survey_grouping_time_s": round(max(
+                float(left_timing.get("grouping_time_s", 0.0)),
+                float(right_timing.get("grouping_time_s", 0.0)),
+            ), 6),
+            "survey_qpoint_time_s": round(max(
+                float(left_timing.get("qpoint_time_s", 0.0)),
+                float(right_timing.get("qpoint_time_s", 0.0)),
+            ), 6),
+            "survey_detection_wall_time_s": round(detect_dt, 6),
+            "survey_frame_prep_time_s": round(frame_prep_dt, 6),
+            "survey_point_mode": point_mode,
+            "survey_burst_count": int(burst_count),
+        }
         _survey_debug(f"debug frame prep took {frame_prep_dt:.2f}s")
         _survey_debug(
             f"survey total {time.perf_counter() - t_survey:.2f}s "

@@ -23,10 +23,19 @@ from config import (
     AI_IOM_THRESHOLD,
     AI_TARGET_CLASS,
     DEFAULT_MODEL,
+    DEFAULT_MODEL_PT,
+    DEFAULT_MODEL_ENGINE,
     DEFAULT_QPOINT_MODEL,
     MODEL_MAP,
     CV_WEIGHTS_DIR,
     QPOINT_DEBUG,
+    YOLO_BACKEND,
+    USE_TENSORRT_ENGINE,
+    YOLO_DEVICE,
+    YOLO_HALF,
+    YOLO_WARMUP,
+    YOLO_WARMUP_IMGSZ,
+    YOLO_WARMUP_ITERS,
 )
 
 
@@ -73,12 +82,83 @@ def _resolve_classes(target_class, override=None):
     return list(spec)
 
 
+def _resolve_weight_path(model_name_or_path):
+    if model_name_or_path is None:
+        return None
+    filename = MODEL_MAP.get(model_name_or_path, model_name_or_path)
+    path = Path(filename)
+    if not path.is_absolute():
+        path = CV_WEIGHTS_DIR / path
+    return path
+
+
+def _normalise_point_mode(point_mode, default="qpoint"):
+    mode = (point_mode or default or "box_center").strip().lower()
+    aliases = {
+        "center": "box_center",
+        "bbox_center": "box_center",
+        "heatmap": "qpoint",
+    }
+    mode = aliases.get(mode, mode)
+    if mode not in ("box_center", "qpoint"):
+        raise ValueError(f"Unknown point mode: {point_mode}")
+    return mode
+
+
+def _uses_qpoint(point_mode):
+    return _normalise_point_mode(point_mode) == "qpoint"
+
+
+def _is_cuda_device(device):
+    if isinstance(device, int):
+        return True
+    if device is None:
+        return torch.cuda.is_available()
+    return str(device).lower().startswith("cuda")
+
+
+def _resolve_yolo_device(device_spec):
+    if device_spec is None or str(device_spec).lower() in ("", "auto"):
+        return 0 if torch.cuda.is_available() else "cpu"
+    if _is_cuda_device(device_spec) and not torch.cuda.is_available():
+        print(f"[YOLO] Requested device {device_spec!r}, but CUDA is unavailable; using CPU.")
+        return "cpu"
+    return device_spec
+
+
+def _select_yolo_model_path(explicit_path=None):
+    if explicit_path is not None:
+        path = _resolve_weight_path(explicit_path)
+        backend = "engine" if path and path.suffix.lower() == ".engine" else "pt"
+        return path, backend
+
+    backend_cfg = str(YOLO_BACKEND or "auto").lower()
+    if backend_cfg not in ("pt", "engine", "auto"):
+        raise ValueError(f"Unknown YOLO_BACKEND: {YOLO_BACKEND}")
+
+    pt_path = _resolve_weight_path(DEFAULT_MODEL_PT or DEFAULT_MODEL)
+    engine_path = _resolve_weight_path(DEFAULT_MODEL_ENGINE)
+    want_engine = backend_cfg == "engine" or (backend_cfg == "auto" and USE_TENSORRT_ENGINE)
+
+    if want_engine and engine_path is not None and engine_path.exists():
+        return engine_path, "engine"
+
+    if want_engine:
+        print(f"[YOLO] TensorRT engine requested but not found: {engine_path}. Falling back to .pt.")
+
+    return pt_path, "pt"
+
+
 class _WeedCVCore:
     def __init__(self, yolo_path, qpoint_path=None, conf=AI_CONFIDENCE,
                  iom_thresh=AI_IOM_THRESHOLD, target_class=AI_TARGET_CLASS,
-                 class_conf=None, verbose=True):
+                 class_conf=None, verbose=True, yolo_backend=None,
+                 yolo_device=YOLO_DEVICE, yolo_half=YOLO_HALF):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.yolo_device = _resolve_yolo_device(yolo_device)
+        self.yolo_half = bool(yolo_half and _is_cuda_device(self.yolo_device))
         self.yolo_path = Path(yolo_path)
+        self.yolo_backend = yolo_backend or ("engine" if self.yolo_path.suffix.lower() == ".engine" else "pt")
         self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else None
         self.verbose = verbose
 
@@ -89,6 +169,10 @@ class _WeedCVCore:
         self.yolo = YOLO(str(self.yolo_path), task='segment')
 
         if verbose:
+            print(
+                f"[YOLO] backend={self.yolo_backend} model={self.yolo_path} "
+                f"device={self.yolo_device} half={self.yolo_half}"
+            )
             if self.yolo.names:
                 print(f"[INFO] Model classes: {self.yolo.names}")
             resolved = _resolve_classes(self.target_class)
@@ -269,6 +353,14 @@ class _WeedCVCore:
         h, w = frame.shape[:2]
         return (h, w)
 
+    def _yolo_predict_kwargs(self):
+        kwargs = {}
+        if self.yolo_device is not None:
+            kwargs["device"] = self.yolo_device
+        if self.yolo_half:
+            kwargs["half"] = True
+        return kwargs
+
     def _filter_yolo_result(self, result, conf_override=None):
         boxes = getattr(result, "boxes", None)
         masks = getattr(result, "masks", None)
@@ -316,6 +408,7 @@ class _WeedCVCore:
             conf=self._effective_yolo_conf(conf_override),
             retina_masks=True,
             classes=classes_arg,
+            **self._yolo_predict_kwargs(),
         )
 
         result = results[0] if results else None
@@ -339,6 +432,7 @@ class _WeedCVCore:
             conf=self._effective_yolo_conf(conf_override),
             retina_masks=True,
             classes=classes_arg,
+            **self._yolo_predict_kwargs(),
         )
         if results is None:
             results = []
@@ -362,17 +456,43 @@ class _WeedCVCore:
         results = self.yolo(
             frame, imgsz=1280, verbose=False,
             conf=conf_override, retina_masks=False, classes=classes_arg,
+            **self._yolo_predict_kwargs(),
         )
         if not results or len(results[0].boxes) == 0:
             return 0
         return int(len(results[0].boxes))
 
-    def detect_points(self, frame, classes_override=None):
+    def warmup(self, imgsz=YOLO_WARMUP_IMGSZ, iters=YOLO_WARMUP_ITERS):
+        iters = max(0, int(iters or 0))
+        if iters == 0:
+            return 0.0
+        if isinstance(imgsz, (tuple, list)):
+            h, w = int(imgsz[0]), int(imgsz[1])
+            run_imgsz = (h, w)
+        else:
+            h = w = int(imgsz or 640)
+            run_imgsz = int(imgsz or 640)
+        dummy = np.zeros((h, w, 3), dtype=np.uint8)
+        t0 = time.perf_counter()
+        for _ in range(iters):
+            self.yolo(
+                dummy,
+                imgsz=run_imgsz,
+                verbose=False,
+                conf=self._effective_yolo_conf(None),
+                retina_masks=True,
+                classes=_resolve_classes(self.target_class),
+                **self._yolo_predict_kwargs(),
+            )
+        return time.perf_counter() - t0
+
+    def detect_points(self, frame, classes_override=None, point_mode=None):
         boxes, masks = self._get_filtered_results(frame, classes_override=classes_override)
         if not boxes:
             return []
 
-        if self.qpoint_model is None:
+        mode = _normalise_point_mode(point_mode, default="qpoint")
+        if self.qpoint_model is None or mode == "box_center":
             return [
                 (
                     int((b.xyxy[0][0] + b.xyxy[0][2]) / 2),
@@ -397,13 +517,14 @@ class _WeedCVCore:
             coords.append((gx, gy))
         return coords
 
-    def detect_rich_points(self, frame, classes_override=None):
+    def detect_rich_points(self, frame, classes_override=None, point_mode=None):
         """Returns [{"point": (gx,gy), "cls": cls_id, "conf": yolo_conf}, ...]."""
         boxes, masks = self._get_filtered_results(frame, classes_override=classes_override)
         if not boxes:
             return []
 
-        if self.qpoint_model is None:
+        mode = _normalise_point_mode(point_mode, default="qpoint")
+        if self.qpoint_model is None or mode == "box_center":
             return [
                 {
                     "point": (
@@ -551,8 +672,11 @@ class _WeedCVCore:
         debug_label=None,
         imgsz=1280,
         heatmap_final=True,
+        point_mode=None,
     ):
         t_total = time.perf_counter()
+        mode = _normalise_point_mode(point_mode, default="qpoint")
+        self.last_burst_timing = {}
 
         def _debug(msg):
             if debug_label:
@@ -572,7 +696,10 @@ class _WeedCVCore:
         yolo_dt = time.perf_counter() - t_yolo
         box_counts = [len(boxes) for boxes, _ in batched_results]
         run_imgsz = self._resolve_imgsz(frames, imgsz)
-        _debug(f"YOLO batch {len(frames)} frame(s) imgsz={run_imgsz}: boxes={box_counts} in {yolo_dt:.2f}s")
+        _debug(
+            f"YOLO batch {len(frames)} frame(s) imgsz={run_imgsz} "
+            f"point_mode={mode}: boxes={box_counts} in {yolo_dt:.2f}s"
+        )
 
         all_detections = []
         last_boxes = None
@@ -642,30 +769,46 @@ class _WeedCVCore:
                 "views": g["views"],
                 "cls":   modal_cls,
                 "conf":  mean_conf,
+                "point_source": "box_center",
             })
 
         stable.sort(key=lambda d: d["box"][0])
+        group_dt = time.perf_counter() - t_group
         _debug(
             f"grouped {sum(len(d) for d in all_detections)} detection(s) "
-            f"into {len(stable)} stable target(s) in {time.perf_counter() - t_group:.2f}s"
+            f"into {len(stable)} stable target(s) in {group_dt:.2f}s"
         )
 
         # Merge all burst frames into one image (averaging reduces noise, sharpens plant signal).
         t_merge = time.perf_counter()
-        merged = np.mean(np.stack(frames), axis=0).astype(np.uint8) if len(frames) > 1 else frames[0].copy()
+        need_qpoint_image = heatmap_final and _uses_qpoint(mode) and self.qpoint_model is not None
+        if need_qpoint_image and len(frames) > 1:
+            merged = np.mean(np.stack(frames), axis=0).astype(np.uint8)
+        else:
+            merged = frames[-1].copy()
         self._last_burst_merged = merged
         self._last_boxes = last_boxes
         self._last_masks = last_masks
-        _debug(f"merged {len(frames)} frame(s) in {time.perf_counter() - t_merge:.2f}s")
+        merge_dt = time.perf_counter() - t_merge
+        _debug(f"prepared final burst image from {len(frames)} frame(s) in {merge_dt:.2f}s")
 
         # One heatmap pass on the merged image using last-frame masks (scene is stationary).
         # Skip when heatmap_final=False — caller will run heatmap on the one winning detection.
-        if heatmap_final and self.qpoint_model is not None and stable and last_boxes and last_masks:
+        qpoint_dt = 0.0
+        if (
+            heatmap_final
+            and _uses_qpoint(mode)
+            and self.qpoint_model is not None
+            and stable
+            and last_boxes
+            and last_masks
+        ):
             t_qpoint = time.perf_counter()
             qpoints = self._run_qpoints_batch(merged, last_boxes, last_masks)
+            qpoint_dt = time.perf_counter() - t_qpoint
             _debug(
                 f"qpoint pass: {len(qpoints)} point(s) "
-                f"in {time.perf_counter() - t_qpoint:.2f}s"
+                f"in {qpoint_dt:.2f}s"
             )
             qpoint_map = {box_idx: (gx, gy) for gx, gy, box_idx, _ in qpoints}
             for s in stable:
@@ -679,8 +822,19 @@ class _WeedCVCore:
                         best_i = i
                 if best_i is not None and best_i in qpoint_map:
                     s["point"] = qpoint_map[best_i]
+                    s["point_source"] = "qpoint"
 
-        _debug(f"burst stable total: {time.perf_counter() - t_total:.2f}s")
+        total_dt = time.perf_counter() - t_total
+        self.last_burst_timing = {
+            "yolo_time_s": round(yolo_dt, 6),
+            "grouping_time_s": round(group_dt, 6),
+            "merge_time_s": round(merge_dt, 6),
+            "qpoint_time_s": round(qpoint_dt, 6),
+            "total_time_s": round(total_dt, 6),
+            "point_mode": mode,
+            "heatmap_final": bool(heatmap_final and _uses_qpoint(mode)),
+        }
+        _debug(f"burst stable total: {total_dt:.2f}s")
         return stable
 
 
@@ -696,26 +850,13 @@ class AIDetector:
         iom_thresh=AI_IOM_THRESHOLD,
         target_class=AI_TARGET_CLASS,
     ):
-        params_dir = CV_WEIGHTS_DIR
-
-        if yolo_path is not None:
-            self.yolo_path = Path(yolo_path)
-        else:
-            filename = MODEL_MAP.get(DEFAULT_MODEL, DEFAULT_MODEL)
-            self.yolo_path = Path(filename)
-        if not self.yolo_path.is_absolute():
-            self.yolo_path = params_dir / self.yolo_path
+        self.yolo_path, self.yolo_backend = _select_yolo_model_path(yolo_path)
 
         # Resolve qpoint path: explicit arg > DEFAULT_QPOINT_MODEL config > None (disabled)
         if qpoint_path is not None:
-            self.qpoint_path = Path(qpoint_path)
-            if not self.qpoint_path.is_absolute():
-                self.qpoint_path = params_dir / self.qpoint_path
+            self.qpoint_path = _resolve_weight_path(qpoint_path)
         elif DEFAULT_QPOINT_MODEL is not None:
-            filename = MODEL_MAP.get(DEFAULT_QPOINT_MODEL, DEFAULT_QPOINT_MODEL)
-            self.qpoint_path = Path(filename)
-            if not self.qpoint_path.is_absolute():
-                self.qpoint_path = params_dir / self.qpoint_path
+            self.qpoint_path = _resolve_weight_path(DEFAULT_QPOINT_MODEL)
         else:
             self.qpoint_path = None
 
@@ -725,10 +866,37 @@ class AIDetector:
         self.target_class = target_class
         self.window_name = "AI Detector - Stereo Pair"
 
-        core_kwargs = dict(conf=conf, iom_thresh=iom_thresh, target_class=target_class)
+        core_kwargs = dict(
+            conf=conf,
+            iom_thresh=iom_thresh,
+            target_class=target_class,
+            yolo_backend=self.yolo_backend,
+            yolo_device=YOLO_DEVICE,
+            yolo_half=YOLO_HALF,
+        )
         self.cv_left  = _WeedCVCore(self.yolo_path, self.qpoint_path, verbose=True,  **core_kwargs)
         self.cv_right = _WeedCVCore(self.yolo_path, self.qpoint_path, verbose=False, **core_kwargs)
         # AI_CLASS_CONFIDENCE is loaded inside _WeedCVCore.__init__ automatically.
+
+    def warmup(self, imgsz=YOLO_WARMUP_IMGSZ, iters=YOLO_WARMUP_ITERS, enabled=YOLO_WARMUP):
+        if not enabled:
+            print("[YOLO] Warmup disabled.")
+            return {"enabled": False, "warmup_time_s": 0.0}
+
+        print(f"[YOLO] Warmup start: imgsz={imgsz} iters={iters}")
+        t0 = time.perf_counter()
+        left_dt = self.cv_left.warmup(imgsz=imgsz, iters=iters)
+        right_dt = self.cv_right.warmup(imgsz=imgsz, iters=iters)
+        total_dt = time.perf_counter() - t0
+        print(f"[YOLO] Warmup done in {total_dt:.3f}s (left={left_dt:.3f}s right={right_dt:.3f}s)")
+        return {
+            "enabled": True,
+            "warmup_time_s": round(total_dt, 6),
+            "warmup_left_time_s": round(left_dt, 6),
+            "warmup_right_time_s": round(right_dt, 6),
+            "warmup_imgsz": imgsz,
+            "warmup_iters": iters,
+        }
 
     def _collect_burst(self, cameras):
         left_frames, right_frames = [], []
@@ -779,12 +947,14 @@ class AIDetector:
                 left_frames,
                 min_stable_views=self.min_stable_views,
                 classes_override=classes_override,
+                point_mode="qpoint",
             )
             right_future = pool.submit(
                 self.cv_right.return_burst_stable,
                 right_frames,
                 min_stable_views=self.min_stable_views,
                 classes_override=classes_override,
+                point_mode="qpoint",
             )
             stable_left = left_future.result()
             stable_right = right_future.result()

@@ -57,7 +57,8 @@ FIRE = False
 # Used by control/strike.py. Keep False for dry runs; True actually pulses laser.
 
 RECORD_TRIAL = True
-# Used by main.py/hardware/cameras.py. False disables MP4 trial recording.
+# Used by main.py/hardware/cameras.py. False disables trial recording.
+# When True, the default path records lightweight raw stereo frames plus a manifest.
 
 TRIANGULATION_ONLY_MODE = False
 # Used by main.py. True skips fine-align/strike and logs coarse triangulation results only.
@@ -77,14 +78,70 @@ DETECTOR_MODE = "ai"
 # =============================================================================
 
 _runtime_cfg = _hardware_cfg.get("runtime", {})
-_default_has_display = bool(
-    os.environ.get("DISPLAY")
-    or os.environ.get("WAYLAND_DISPLAY")
-    or sys.platform.startswith("win")
-)
 
-HAS_DISPLAY = bool(_runtime_cfg.get("has_display", _default_has_display))
+
+def _probe_display():
+    """Return True only when a graphical display is set AND actually reachable.
+
+    Checking the env var alone isn't enough: SSH sessions on the Jetson inherit
+    DISPLAY=:1 from .bashrc even when no X11 forwarding is active.  We probe the
+    X socket so that cv2/Qt GUI code is only enabled when the server truly answers.
+    """
+    import re as _re
+    import socket as _socket
+
+    if sys.platform.startswith("win"):
+        return True
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return True
+
+    display = os.environ.get("DISPLAY", "")
+    if not display:
+        return False
+
+    # Local Unix-socket display  e.g. ":0"  ":1"  ":0.0"
+    m = _re.match(r"^:(\d+)", display)
+    if m:
+        sock_path = f"/tmp/.X11-unix/X{m.group(1)}"
+        try:
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(sock_path)
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    # TCP display — covers X11 forwarding ("localhost:10.0") and remote X
+    m = _re.match(r"^([^:]+):(\d+)", display)
+    if m:
+        host, num = m.group(1), int(m.group(2))
+        try:
+            s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect((host, 6000 + num))
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    return False
+
+
+_env_has_display = _probe_display()
+
+# Respect the JSON config, but only if the display probe succeeded.
+# This prevents Qt from crashing when has_display=true is set for local use but
+# the process is launched over SSH without X11 forwarding.
+HAS_DISPLAY = bool(_runtime_cfg.get("has_display", _env_has_display)) and _env_has_display
 # Used by UI/OpenCV windows. False for headless Jetson/SSH sessions.
+
+# When headless, suppress any stray cv2 GUI call before it reaches Qt.
+# Note: this cv2 build only ships libqxcb.so (no offscreen plugin), so the env
+# var alone cannot save us — the real guard is HAS_DISPLAY=False throughout the
+# codebase.  Setting it anyway silences secondary Qt warnings on other systems.
+if not HAS_DISPLAY and "QT_QPA_PLATFORM" not in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 SHOW_TRIANGULATION_PLOT = False
 # Used by main.py. False skips the workspace overview plot after survey.
@@ -155,9 +212,28 @@ MODEL_MAP = {
 # You can also set DEFAULT_MODEL/DEFAULT_QPOINT_MODEL directly to a filename.
 
 DEFAULT_MODEL = "plastic_nano"
+DEFAULT_MODEL_PT = DEFAULT_MODEL
+DEFAULT_MODEL_ENGINE = None
 DEFAULT_QPOINT_MODEL = "targeting_tall_plastic"
 
-AI_CONFIDENCE = 0.80
+YOLO_BACKEND = "auto"
+# Used by AIDetector. Options: "pt", "engine", or "auto".
+
+USE_TENSORRT_ENGINE = False
+# Used by AIDetector. True prefers DEFAULT_MODEL_ENGINE when that file exists.
+
+YOLO_DEVICE = "cuda:0"
+# Used by AIDetector YOLO inference. Use 0, "cuda:0", "cpu", or "auto".
+
+YOLO_HALF = True
+# Used by AIDetector YOLO inference on CUDA.
+
+YOLO_WARMUP = True
+YOLO_WARMUP_IMGSZ = 640
+YOLO_WARMUP_ITERS = 3
+# Used by main.py/AIDetector before live survey timing starts.
+
+AI_CONFIDENCE = 0.60
 # Used by AIDetector. Turn UP for fewer false positives; DOWN if plants are missed.
 
 AI_CLASS_CONFIDENCE = {0: 0.10, 1: 0.10, 2: 0.10}
@@ -167,7 +243,7 @@ AI_CLASS_CONFIDENCE = {0: 0.10, 1: 0.10, 2: 0.10}
 AI_IOM_THRESHOLD = 0.80
 # Used by AIDetector. Turn UP to merge only very-overlapping masks; DOWN to merge more.
 
-AI_TARGET_CLASS = None
+AI_TARGET_CLASS = 1
 # Used by AIDetector for default class filtering.
 # None = all classes, int = one class, list[int] = several classes.
 
@@ -177,6 +253,24 @@ MANUAL_DISPLAY_SCALE = 0.75
 
 QPOINT_DEBUG = True
 # Used by AIDetector. False quiets per-detection qpoint debug logs.
+
+
+# =============================================================================
+# State-Specific CV Selection
+# =============================================================================
+
+OVERRIDE_BURST_NUMBER = True
+OVERRIDE_BURST_COUNT = 1
+# Used by main.py/fine_align.py. True forces every state to use OVERRIDE_BURST_COUNT.
+
+OVERRIDE_POINT_MODE = False
+OVERRIDE_POINT_MODE_VALUE = "box_center"
+# Options: "box_center", "qpoint", "heatmap". True forces every CV state to this mode.
+
+SURVEY_POINT_MODE = "box_center"
+FINE_ALIGN_REID_POINT_MODE = "box_center"
+FINAL_SNAP_POINT_MODE = "qpoint"
+# Survey/Re-ID defaults stay fast. Final snap may use qpoint only when snap is enabled.
 
 
 # =============================================================================
@@ -192,7 +286,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 2
+SURVEY_BURST_COUNT = 5
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1
@@ -205,7 +299,7 @@ SURVEY_YOLO_IMGSZ = None
 # Used by coarse_move.py survey burst. None = use actual frame size, no requested upscaling.
 # Set an int/tuple only if you intentionally want YOLO resizing.
 
-SURVEY_CROP_HALF_PX = 350
+SURVEY_CROP_HALF_PX = 352
 # Used by coarse_move.py. If set (int), survey frames are cropped to a centred square of
 # 2*SURVEY_CROP_HALF_PX before YOLO — same approach as re-ID, much faster than full-frame.
 # E.g. 350 → 700×700 crop. None = full frame (default, safe, but slow).
@@ -251,19 +345,24 @@ FINE_ALIGN_CROP_SCALE = 1.0
 FINE_ALIGN_BURST_COUNT = 1
 # Used by fine_align.py Re-ID. Turn UP for more stable Re-ID; slower.
 
+FINE_ALIGN_REID_BURST_COUNT = FINE_ALIGN_BURST_COUNT
+# Used by fine_align.py Re-ID. Preferred state-specific name; old name remains as an alias.
+
+FINAL_SNAP_BURST_COUNT = 1
+# Used by fine_align.py final snap. Values >1 average snap crops before qpoint.
+
 FINE_ALIGN_MIN_HITS = 1
 # Used by fine_align.py Re-ID. Turn UP to require repeat detections across burst frames.
 
 FINE_ALIGN_CLUSTER_RADIUS_PX = 35.0
 # Used by fine_align.py Re-ID. Turn UP if Re-ID detections jitter between burst frames.
 
-FINE_ALIGN_REID_CROP_HALF_PX = 120
+FINE_ALIGN_REID_CROP_HALF_PX = 128
 # Used by fine_align.py Re-ID burst crop. Turn UP to search a wider center square.
 
-FINE_ALIGN_REID_STEREO_DISP_PX = 200
-# Used by fine_align.py Re-ID burst crop. The right-camera crop is extended LEFT by this
-# many pixels so that stereo pairs are always in view regardless of horizontal crop edge.
-# Set to ~10% above your observed disparity (survey matches show ~110-115px).
+FINE_ALIGN_REID_STEREO_DISP_PX = 0
+# Historical alias for the old asymmetric Re-ID crop. Re-ID now uses the same
+# centered crop in both cameras, so this remains 0 for compatibility.
 
 FINE_ALIGN_REID_YOLO_IMGSZ = None
 # Used by fine_align.py Re-ID YOLO. None = use actual Re-ID crop size, no requested upscaling.
@@ -276,7 +375,7 @@ FINE_ALIGN_REID_MIN_DISPARITY_PX = 10.0
 FINE_ALIGN_REID_MAX_DISPARITY_PX = 500.0
 # Used by fine_align.py after matching.py. Widen only if valid stereo pairs are rejected.
 
-FINE_ALIGN_REID_MAX_PD_ERROR_PX = 130.0
+FINE_ALIGN_REID_MAX_PD_ERROR_PX = 150.0
 # Used by fine_align.py candidate ranking. This is for a LEFT+RIGHT stereo pair average,
 # not individual points. Turn DOWN to require less fine-align travel.
 
@@ -304,7 +403,7 @@ FINE_ALIGN_KD_Y = 2.5
 FINE_ALIGN_STEP_MM = 0.001
 # Used by fine_align.py. Pixel-error to mm jog scale. Turn UP for larger jogs per pixel.
 
-FINE_ALIGN_DEADZONE_PX = 3.0
+FINE_ALIGN_DEADZONE_PX = 2.5
 # Used by fine_align.py. Turn UP to accept looser locks; DOWN for tighter locks.
 
 FINE_ALIGN_MAX_JOG_MM = 10.0
@@ -322,6 +421,18 @@ FINE_ALIGN_SETTLE_FRAMES = 10
 FINE_ALIGN_SNAP_SETTLE_FRAMES = 4
 # Used by fine_align.py. Settle frames for the final snap re-lock pass (after qpoint snap).
 # Shorter than FINE_ALIGN_SETTLE_FRAMES since the snap corrects drift and LK just confirms.
+
+FINE_ALIGN_ENABLE_SNAP = False
+# Used by fine_align.py. False skips the final qpoint heatmap snap and fires from LK/PD lock.
+
+FINE_ALIGN_SNAP_MODE = "qpoint"
+# Used by fine_align.py. Options: "qpoint" or "none".
+
+FINE_ALIGN_SNAP_ON_DEADZONE = True
+# Used by fine_align.py. True runs the snap only after the deadzone settle count is reached.
+
+FINE_ALIGN_SNAP_CROP_HALF_PX = None
+# Used by fine_align.py. None keeps the existing bbox-scaled snap crop; int forces a half-size.
 
 
 # =============================================================================
@@ -341,8 +452,30 @@ LASER_ARM_DELAY_SEC = 0.01
 # Trial Recording
 # =============================================================================
 
+RECORD_RAW_FRAMES_ONLY = True
+# Used by hardware/cameras.py. Default live path saves raw left/right images plus JSONL manifest.
+
+RECORD_FRAME_FORMAT = "jpg"
+# Used by hardware/cameras.py. Options are "jpg", "jpeg", or "png".
+
+RECORD_JPEG_QUALITY = 90
+# Used by hardware/cameras.py when RECORD_FRAME_FORMAT is jpg/jpeg.
+
+RECORD_EVERY_N_FRAMES = 1
+# Used by hardware/cameras.py. 1 records every frame pair sent to the recorder.
+
+RECORD_MAX_FPS = None
+RECORD_MIN_INTERVAL_SEC = 0.0
+# Used by hardware/cameras.py. RECORD_MAX_FPS, when set, takes precedence over min interval.
+
+RECORD_LIVE_VIDEO = False
+# Used by hardware/cameras.py. True enables the old live stitched-video recorder path.
+
+RECORD_LIVE_OVERLAYS = False
+# Used by hardware/cameras.py. True lets old live video consume detector/tracker overlays.
+
 RECORD_VIDEO_FPS = 15.0
-# Used by hardware/cameras.py. Turn UP for smoother video; more memory/CPU.
+# Used by hardware/cameras.py. Raw-recorder sampling and optional legacy video FPS.
 
 RECORD_VIDEO_SCALE = 0.5
 # Used by hardware/cameras.py. 0.5 records half-size; 1.0 records full-size.
@@ -350,8 +483,8 @@ RECORD_VIDEO_SCALE = 0.5
 RECORD_VIDEO_TIMESTAMP = True
 # Used by hardware/cameras.py. Burns elapsed time and wall clock into videos.
 
-RECORD_VIDEO_OVERLAY = True
-# Used by hardware/cameras.py. Records detector/tracker overlays when available.
+RECORD_VIDEO_OVERLAY = RECORD_LIVE_OVERLAYS
+# Backward-compatible alias for the optional legacy live video path.
 
 RECORD_VIDEO_DEBUG = False
 # Used by hardware/cameras.py. True prints recorder heartbeat/stats.
