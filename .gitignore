@@ -39,3 +39,12 @@ __pycache__/
 
 # Triangulation Matrix files
 *.npz
+
+# Virtual Environment
+venv/
+.venv/
+*/venv/
+*/.venv/
+*.env/
+.env/
+*/.env/
