@@ -25,3 +25,17 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .DS_Store
+
+# Yolo model files
+*.pt
+*.pth
+*.onnx
+*.yaml
+*.cfg
+
+# Training Photos
+*.png
+*.jpg
+
+# Triangulation Matrix files
+*.npz

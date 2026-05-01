@@ -67,10 +67,10 @@ FIRE = False
 RECORD_TRIAL = True
 # Record raw stereo frame pairs and a JSONL manifest each run.
 
-AUTO_RENDER_TRIAL = False
+AUTO_RENDER_TRIAL = True
 # Post-render an annotated video after the run completes. Requires RECORD_TRIAL=True.
 
-AUTO_RENDER_DELETE_RAW = True
+AUTO_RENDER_DELETE_RAW = False
 # Delete raw left/right frame folders after render. Requires AUTO_RENDER_TRIAL=True.
 
 TRIANGULATION_ONLY_MODE = False
@@ -305,9 +305,9 @@ SURVEY_FRAME_HEIGHT = None
 # Camera resolution during survey. None = use FRAME_WIDTH/HEIGHT.
 # Set higher (e.g. 1920x1080) to improve detection range at the cost of settle time.
 
-SURVEY_BURST_COUNT = 75
+SURVEY_BURST_COUNT = 30
 # Frames captured per survey. Turn UP for more stable detections; slower.
-# 75: reliable direct detection of all 16 plants in dark lab without triggering repair.
+# 30: tuned for good lighting to reduce cycle time while keeping stable detections.
 # Repair mechanism can synthesize ghost targets from marginal edge detections — avoid relying on it.
 
 SURVEY_MIN_HITS = 1
@@ -386,7 +386,7 @@ FINE_ALIGN_CROP_SCALE = 1
 # LK/PD tracking window scale relative to full frame. 1.0 = full frame; lower = centered sub-region.
 # Re-ID candidates are rejected if their pixel position falls outside this window.
 
-FINE_ALIGN_REID_BURST_COUNT = 20
+FINE_ALIGN_REID_BURST_COUNT = 2
 # Frames captured per Re-ID burst. Turn UP for more stable re-detection; slower.
 # 20: min_hits=1 + epipolar/tri_dist/geo_score ranking guards against mismatches.
 
