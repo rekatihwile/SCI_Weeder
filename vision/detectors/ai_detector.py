@@ -164,7 +164,7 @@ class _WeedCVCore:
 
         self.target_class = target_class
         # Per-class confidence thresholds: {class_id: conf}. Falls back to self.conf.
-        self.class_conf = dict(class_conf) if class_conf is not None else dict(AI_CLASS_CONFIDENCE)
+        self.class_conf = dict(class_conf or AI_CLASS_CONFIDENCE or {})
 
         self.yolo = YOLO(str(self.yolo_path), task='segment')
 

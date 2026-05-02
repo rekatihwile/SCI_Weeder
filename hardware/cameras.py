@@ -533,10 +533,33 @@ class StereoCameras:
                     if hw["cameras"].get("right") and "device" in hw["cameras"]["right"]:
                         self.dev_paths["right"] = hw["cameras"]["right"]["device"]
 
+    def _release_caps(self, settle_s=0.5):
+        if self.left is not None:
+            self.left.release()
+        if self.right is not None:
+            self.right.release()
+        self.left = None
+        self.right = None
+        if settle_s > 0:
+            time.sleep(settle_s)
+
     def open(self, start_recorder=True):
         _rprint("\n=== OPENING CAMERAS ===")
         _rprint(f"Opening Left : {LEFT_CAMERA_INDEX}")
         _rprint(f"Opening Right: {RIGHT_CAMERA_INDEX}")
+
+        self._bg_stop.set()
+        if self._bg_thread is not None:
+            if self._bg_thread.is_alive():
+                self._bg_thread.join(timeout=2.0)
+            if self._bg_thread.is_alive():
+                _rprint("[CAM OPEN] WARNING: previous background camera thread is still alive.")
+            else:
+                self._bg_thread = None
+        if self._recorder is not None:
+            self.stop_recording()
+        if self.left is not None or self.right is not None:
+            self._release_caps(settle_s=0.5)
 
         def _fourcc_str(val):
             try:
@@ -618,12 +641,7 @@ class StereoCameras:
             else:
                 # Failed validation - release and retry
                 _rprint(f"[CAM OPEN] Cameras invalid after 5s drain on attempt {attempt}/{max_attempts}.")
-                if self.left is not None:
-                    self.left.release()
-                    self.left = None
-                if self.right is not None:
-                    self.right.release()
-                    self.right = None
+                self._release_caps(settle_s=0.0)
 
                 if attempt < max_attempts:
                     _rprint("[CAM OPEN] Releasing cameras, waiting 1s, will retry...")
@@ -847,16 +865,31 @@ class StereoCameras:
             self._last_recording_stats = self.get_recording_stats()
             self._recorder = None
 
+    def recover(self):
+        _rprint("[CAM RECOVER] Releasing and reopening cameras...")
+        self.close()
+        time.sleep(1.0)
+        self.open(start_recorder=False)
+
     def close(self):
         self._bg_stop.set()
         if self._bg_thread is not None:
-            self._bg_thread.join(timeout=2.0)
-            self._bg_thread = None
+            if self._bg_thread.is_alive():
+                self._bg_thread.join(timeout=2.0)
+            if self._bg_thread.is_alive():
+                _rprint("[CAM CLOSE] WARNING: background camera thread still alive after join timeout.")
+            else:
+                self._bg_thread = None
         self.stop_recording()
-        if self.left is not None:
-            self.left.release()
-        if self.right is not None:
-            self.right.release()
+        self._release_caps(settle_s=0.75)
+        for attr in ("_latest_l", "_latest_r", "_latest_overlay_l", "_latest_overlay_r"):
+            if hasattr(self, attr):
+                setattr(self, attr, None)
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+        _rprint("[CAM CLOSE] Cameras released.")
 
 # -----------------------------------------------------------------------------
 # Standalone camera utility

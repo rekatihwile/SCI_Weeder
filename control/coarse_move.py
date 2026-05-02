@@ -183,8 +183,9 @@ class TriangulationCoarseMover:
     # ── triangulation ────────────────────────────────────────────────────────
 
     def _solve_geometry(self, target):
-        xl, yl = target["left_px"]
-        xr, yr = target["right_px"]
+   
+        xl, yl = target['left_px']
+        xr, yr = target['right_px']
 
         if CALIBRATION_EXPECTS_UNFLIPPED:
             xl, yl = _unflip_point_180(xl, yl, FRAME_WIDTH, FRAME_HEIGHT)

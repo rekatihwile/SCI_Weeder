@@ -33,7 +33,12 @@ def main():
 
     # Build detector first
     print("\n--- Building AIDetector ---")
-    detector = AIDetector()
+    from config import AI_DISPLAY_SCALE, AI_CONFIDENCE
+
+    detector = AIDetector(
+        display_scale=AI_DISPLAY_SCALE,
+        conf=AI_CONFIDENCE,
+    )
 
     # Warmup BEFORE opening cameras
     print("\n--- Detector Warmup ---")

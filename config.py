@@ -238,10 +238,10 @@ YOLO_WARMUP_IMGSZ = 640
 YOLO_WARMUP_ITERS = 3
 # Used by main.py/AIDetector before live survey timing starts.
 
-AI_CONFIDENCE = 0.60
+AI_CONFIDENCE = 0.40
 # Used by AIDetector. Turn UP for fewer false positives; DOWN if plants are missed.
 
-AI_CLASS_CONFIDENCE = {0: 0.10, 1: 0.10, 2: 0.10}
+AI_CLASS_CONFIDENCE = None
 # Used by AIDetector. Per-class overrides beat AI_CONFIDENCE.
 # Turn a class UP to be stricter for that class only.
 
@@ -291,7 +291,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 5
+SURVEY_BURST_COUNT = 10
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1

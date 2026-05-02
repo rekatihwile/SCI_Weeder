@@ -132,8 +132,9 @@ def main():
     # ── STEP 7: MATCH ─────────────────────────────────────────────────────────
     step("MATCH")
     if left_dets and right_dets:
-        matched_targets = match_points_constellation(left_dets, right_dets)
+        matched_targets, unmatched_left, unmatched_right = match_points_constellation(left_dets, right_dets)
         print(f"  Matched pairs: {len(matched_targets)}")
+        print(f"  Unmatched left: {len(unmatched_left)}  Unmatched right: {len(unmatched_right)}")
     else:
         matched_targets = []
         print("  No detections to match.")

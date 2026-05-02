@@ -105,10 +105,36 @@ def main():
             print(f"  fit_epipolar skipped: {e}")
 
     print("\n--- Matching points ---")
-    matched_targets = match_points_constellation(left_dets, right_dets)
+    matched_targets, unmatched_left, unmatched_right = match_points_constellation(left_dets, right_dets)
     print(f"  Matched pairs: {len(matched_targets)}")
-    for i, t in enumerate(matched_targets):
-        print(f"    [{i}] left={t.get('left_px')}  right={t.get('right_px')}")
+    print(f"  Unmatched left: {len(unmatched_left)}  Unmatched right: {len(unmatched_right)}")
+
+    def normalize_match(match):
+        if isinstance(match, dict):
+            return match
+
+        if isinstance(match, (list, tuple)) and len(match) >= 2:
+            left_px = tuple(match[0])
+            right_px = tuple(match[1])
+
+            out = {
+                "left_px": left_px,
+                "right_px": right_px,
+                "score": 1.0,
+            }
+
+            if len(match) >= 3:
+                try:
+                    out["score"] = float(match[2])
+                except (TypeError, ValueError):
+                    pass
+
+            return out
+
+        raise ValueError(f"Unknown match format: {type(match)} {match}")
+
+
+    matched_targets = [normalize_match(m) for m in matched_targets]
 
     print("\n--- Triangulating (solve_all_from_pose) ---")
     solved = coarse_mover.solve_all_from_pose(matched_targets, SURVEY_POS_X, SURVEY_POS_Y)
