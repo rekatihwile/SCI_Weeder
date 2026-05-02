@@ -5,6 +5,7 @@ from datetime import datetime
 
 from config import (
     HOMING,
+    MOCK_GANTRY,
     DETECTOR_MODE,
     GRBL_PORT,
     SURVEY_POS_X,
@@ -51,6 +52,7 @@ from control.fine_align import (
 from control.strike import fire_target
 from hardware.cameras import StereoCameras
 from hardware.gantry import Gantry
+from hardware.mock_gantry import MockGantry
 from planning.target_planner import plan_targets
 from ui.terminal import (
     clear_current_target_line,
@@ -259,7 +261,10 @@ def main():
     try:
         while state != "DONE":
             if state == "INIT":
-                gantry = Gantry(GRBL_PORT)
+                if MOCK_GANTRY:
+                    gantry = MockGantry()
+                else:
+                    gantry = Gantry(GRBL_PORT)
                 cameras = StereoCameras()
                 t_model = time.perf_counter()
                 detector = build_detector()

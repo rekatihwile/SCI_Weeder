@@ -56,6 +56,11 @@ HOMING = False
 FIRE = False
 # Used by control/strike.py. Keep False for dry runs; True actually pulses laser.
 
+MOCK_GANTRY = False
+# Used by main.py. True replaces Gantry with MockGantry so the full pipeline runs
+# without opening serial, homing, or physically moving hardware.
+# Set True for offline testing; always False in production.
+
 RECORD_TRIAL = True
 # Used by main.py/hardware/cameras.py. False disables trial recording.
 # When True, the default path records lightweight raw stereo frames plus a manifest.
