@@ -1,0 +1,322 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Cached Matching Debug</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .content {
+        padding: 12px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 380px 1fr;
+        gap: 16px;
+        height: calc(100vh - 24px - 42px);
+      }
+
+      .sidebar {
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .viewer {
+        overflow: hidden;
+      }
+
+      .image-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        height: 100%;
+      }
+
+      img {
+        width: 100%;
+        border: 1px solid #555;
+        background: #222;
+      }
+
+      button {
+        font-size: 15px;
+        padding: 6px 10px;
+        margin: 4px 0;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        max-height: 50vh;
+        overflow: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      .metrics {
+        background: #1b1b1b;
+        border: 1px solid #444;
+        padding: 10px;
+        margin: 10px 0;
+        font-size: 14px;
+      }
+
+      .metric-row {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid #333;
+        padding: 4px 0;
+      }
+
+      .metric-row:last-child {
+        border-bottom: none;
+      }
+
+      .metric-label {
+        color: #ccc;
+      }
+
+      .metric-value {
+        font-family: Consolas, monospace;
+        color: #fff;
+      }
+
+      .note {
+        color: #bbb;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      a {
+        color: #8ecbff;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+
+    <div class="content">
+      <div class="layout">
+        <div class="sidebar">
+          <h2>Cached Matching Debug</h2>
+
+          <p>
+            This page runs matching on the most recent cached scan from
+            <b>Scan / Save Points</b>.
+          </p>
+
+          <p class="note">
+            Rectification is controlled during the scan. To compare raw vs
+            rectified, rescan once with <b>Rectified OFF</b>, match, then rescan
+            with <b>Rectified ON</b>, match again.
+          </p>
+
+          <button onclick="runMatch()">Run Match on Cached Scan</button>
+          <button onclick="closeCameras()">Close Cameras</button>
+
+          <div class="metrics">
+            <h3>Match Metrics</h3>
+
+            <div class="metric-row">
+              <span class="metric-label">Frame mode</span>
+              <span id="metric_frame_mode" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Left / Right detections</span>
+              <span id="metric_counts" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Matched count</span>
+              <span id="metric_matched" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Mean match score</span>
+              <span id="metric_mean_score" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Mean |y diff| px</span>
+              <span id="metric_mean_y" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Max |y diff| px</span>
+              <span id="metric_max_y" class="metric-value">—</span>
+            </div>
+
+            <div class="metric-row">
+              <span class="metric-label">Mean |x diff| px</span>
+              <span id="metric_mean_x" class="metric-value">—</span>
+            </div>
+          </div>
+
+          <pre id="summary">No match run yet.</pre>
+        </div>
+
+        <div class="viewer">
+          <div class="image-row">
+            <div>
+              <h3>Left matched overlay</h3>
+              <img id="left_img" />
+            </div>
+
+            <div>
+              <h3>Right matched overlay</h3>
+              <img id="right_img" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function mean(values) {
+        if (!values || values.length === 0) return null;
+        return values.reduce((a, b) => a + b, 0) / values.length;
+      }
+
+      function maxAbs(values) {
+        if (!values || values.length === 0) return null;
+        return Math.max(...values.map((v) => Math.abs(v)));
+      }
+
+      function fmt(value, digits = 3) {
+        if (value === null || value === undefined || Number.isNaN(value)) {
+          return "—";
+        }
+        return Number(value).toFixed(digits);
+      }
+
+      function extractMatchMetrics(data) {
+        const matches = data.matches || [];
+
+        const scores = [];
+        const yDiffs = [];
+        const xDiffs = [];
+
+        for (const m of matches) {
+          if (typeof m.score === "number") {
+            scores.push(m.score);
+          }
+
+          if (typeof m.y_diff_px === "number") {
+            yDiffs.push(m.y_diff_px);
+          } else if (typeof m.dy_px === "number") {
+            yDiffs.push(m.dy_px);
+          }
+
+          if (typeof m.x_diff_px === "number") {
+            xDiffs.push(m.x_diff_px);
+          } else if (typeof m.dx_px === "number") {
+            xDiffs.push(m.dx_px);
+          }
+        }
+
+        return {
+          mean_score: mean(scores),
+          mean_abs_y_diff_px: mean(yDiffs.map((v) => Math.abs(v))),
+          max_abs_y_diff_px: maxAbs(yDiffs),
+          mean_abs_x_diff_px: mean(xDiffs.map((v) => Math.abs(v))),
+        };
+      }
+
+      function renderMetrics(data) {
+        const metrics = extractMatchMetrics(data);
+
+        document.getElementById("metric_frame_mode").innerText =
+          data.frame_mode || "unknown";
+
+        document.getElementById("metric_counts").innerText =
+          `${data.left_count ?? "?"} / ${data.right_count ?? "?"}`;
+
+        document.getElementById("metric_matched").innerText =
+          data.matched_count ?? "—";
+
+        document.getElementById("metric_mean_score").innerText = fmt(
+          metrics.mean_score,
+          4,
+        );
+
+        document.getElementById("metric_mean_y").innerText = fmt(
+          metrics.mean_abs_y_diff_px,
+          2,
+        );
+
+        document.getElementById("metric_max_y").innerText = fmt(
+          metrics.max_abs_y_diff_px,
+          2,
+        );
+
+        document.getElementById("metric_mean_x").innerText = fmt(
+          metrics.mean_abs_x_diff_px,
+          2,
+        );
+      }
+
+      async function runMatch() {
+        document.getElementById("summary").innerText = "Running matching...";
+
+        const res = await fetch("/api/run_match", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("summary").innerText = data.error;
+          return;
+        }
+
+        document.getElementById("left_img").src =
+          "data:image/jpeg;base64," + data.left_image;
+
+        document.getElementById("right_img").src =
+          "data:image/jpeg;base64," + data.right_image;
+
+        renderMetrics(data);
+
+        document.getElementById("summary").innerText = JSON.stringify(
+          {
+            frame_mode: data.frame_mode,
+            scan_timestamp: data.scan_timestamp,
+            left_count: data.left_count,
+            right_count: data.right_count,
+            matched_count: data.matched_count,
+            match_s: data.match_s,
+            metrics: extractMatchMetrics(data),
+            matches: data.matches,
+            model_classes: data.class_names,
+          },
+          null,
+          2,
+        );
+      }
+
+      async function closeCameras() {
+        const res = await fetch("/api/close_cameras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+        document.getElementById("summary").innerText = data.ok
+          ? "Cameras closed."
+          : data.error;
+      }
+    </script>
+  </body>
+</html>

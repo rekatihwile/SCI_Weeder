@@ -41,8 +41,7 @@ def main():
     from hardware.cameras import StereoCameras
     from hardware.mock_gantry import MockGantry
     from control.coarse_move import TriangulationCoarseMover
-    from vision.matching import match_points_constellation
-    from planning.target_planner import plan_targets
+    from pipeline.steps.match_plan import run_match_and_plan
 
     print("=" * 60)
     print("BRINGUP 07 — Match + Plan Only (no gantry movement)")
@@ -96,82 +95,25 @@ def main():
         print(f"  Saved: {plan_path}")
         sys.exit(0)
 
-    print("\n--- Fitting epipolar (if available) ---")
-    if hasattr(coarse_mover, "fit_epipolar") and left_dets and right_dets:
-        try:
-            coarse_mover.fit_epipolar(left_dets, right_dets)
-            print("  fit_epipolar done.")
-        except Exception as e:
-            print(f"  fit_epipolar skipped: {e}")
-
-    print("\n--- Matching points ---")
-    matched_targets, unmatched_left, unmatched_right = match_points_constellation(left_dets, right_dets)
+    plan_path = LOGS_DIR / "07_plan.json"
+    print("\n--- Matching + triangulating + planning ---")
+    matched_targets, solved, planned = run_match_and_plan(
+        left_dets,
+        right_dets,
+        coarse_mover,
+        start_xy=(SURVEY_POS_X, SURVEY_POS_Y),
+        output_path=plan_path,
+    )
     print(f"  Matched pairs: {len(matched_targets)}")
-    print(f"  Unmatched left: {len(unmatched_left)}  Unmatched right: {len(unmatched_right)}")
-
-    def normalize_match(match):
-        if isinstance(match, dict):
-            return match
-
-        if isinstance(match, (list, tuple)) and len(match) >= 2:
-            left_px = tuple(match[0])
-            right_px = tuple(match[1])
-
-            out = {
-                "left_px": left_px,
-                "right_px": right_px,
-                "score": 1.0,
-            }
-
-            if len(match) >= 3:
-                try:
-                    out["score"] = float(match[2])
-                except (TypeError, ValueError):
-                    pass
-
-            return out
-
-        raise ValueError(f"Unknown match format: {type(match)} {match}")
-
-
-    matched_targets = [normalize_match(m) for m in matched_targets]
-
-    print("\n--- Triangulating (solve_all_from_pose) ---")
-    solved = coarse_mover.solve_all_from_pose(matched_targets, SURVEY_POS_X, SURVEY_POS_Y)
     print(f"  Solved targets: {len(solved)}")
     for i, s in enumerate(solved):
         xy = s.get("target_xy_mm")
         print(f"    [{i}] target_xy_mm={xy}")
 
-    print("\n--- Planning ---")
-    planned = plan_targets(solved, start_xy=(SURVEY_POS_X, SURVEY_POS_Y))
     print(f"  Planned targets: {len(planned)}")
     for i, p in enumerate(planned):
         xy = p.get("target_xy_mm")
         print(f"    [{i}] target_xy_mm={xy}")
-
-    # Save plan JSON
-    def _json_safe(obj):
-        import numpy as np
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, (np.floating,)):
-            return float(obj)
-        if isinstance(obj, dict):
-            return {k: _json_safe(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_json_safe(v) for v in obj]
-        return obj
-
-    plan_path = LOGS_DIR / "07_plan.json"
-    plan_data = {
-        "matched_targets": _json_safe(matched_targets),
-        "solved_targets":  _json_safe(solved),
-        "planned_targets": _json_safe(planned),
-    }
-    plan_path.write_text(json.dumps(plan_data, indent=2))
     print(f"\n  Saved: {plan_path}")
 
     print("\n" + "=" * 60)

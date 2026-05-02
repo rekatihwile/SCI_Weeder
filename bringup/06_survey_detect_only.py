@@ -38,6 +38,7 @@ def main():
     from vision.detectors.ai_detector import AIDetector
     from hardware.cameras import StereoCameras
     from control.coarse_move import TriangulationCoarseMover
+    from pipeline.steps.survey import run_survey_detection
 
     print("=" * 60)
     print("BRINGUP 06 — Survey Detection Only")
@@ -60,24 +61,11 @@ def main():
     cameras = StereoCameras()
     cameras.open(start_recorder=False)
 
-    print(f"\n--- Flushing {FLUSH_FRAMES} frames ---")
-    for _ in range(FLUSH_FRAMES):
-        cameras.read_pair()
-
     print("\n--- Building coarse_mover ---")
     coarse_mover = TriangulationCoarseMover()
 
-    print("\n--- Running detect_stable_points() ---")
-    left_dets, right_dets = coarse_mover.detect_stable_points(
-        cameras=cameras,
-        detector=detector,
-        detector_mode=DETECTOR_MODE,
-        burst_count=SURVEY_BURST_COUNT,
-        min_hits=SURVEY_MIN_HITS,
-        cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
-        survey_classes=SURVEY_TARGET_CLASSES,
-        point_mode=SURVEY_POINT_MODE,
-    )
+    print(f"\n--- Running survey detection (flush={FLUSH_FRAMES}) ---")
+    left_dets, right_dets = run_survey_detection(cameras, detector, coarse_mover)
 
     print(f"\n  Left  detections: {len(left_dets)}")
     for i, d in enumerate(left_dets):

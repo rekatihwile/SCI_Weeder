@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 def main():
     from config import GRBL_PORT
-    from hardware.gantry import Gantry
+    from pipeline.steps.gantry_setup import home_gantry, open_gantry
 
     print("=" * 60)
     print("BRINGUP 04 — Gantry Home")
@@ -30,16 +30,14 @@ def main():
         sys.exit(1)
 
     print("\n--- Instantiating Gantry ---")
-    gantry = Gantry(GRBL_PORT)
+    gantry = open_gantry(use_mock=False)
     print("  Gantry opened.")
 
     pos_before = gantry.get_position()
     print(f"  Position before home: {pos_before}")
 
     print("\n--- Homing ---")
-    gantry.home()
-
-    pos_after = gantry.get_position()
+    pos_after = home_gantry(gantry)
     print(f"\n  Position after home: {pos_after}")
 
     gantry.serial.close()

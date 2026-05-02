@@ -19,7 +19,7 @@ PASS_THRESHOLD_MM = 5.0
 
 def main():
     from config import GRBL_PORT, SURVEY_POS_X, SURVEY_POS_Y
-    from hardware.gantry import Gantry
+    from pipeline.steps.gantry_setup import move_to_survey, open_gantry
 
     print("=" * 60)
     print("BRINGUP 05 — Gantry Move to Survey Position")
@@ -35,16 +35,14 @@ def main():
         sys.exit(1)
 
     print("\n--- Instantiating Gantry ---")
-    gantry = Gantry(GRBL_PORT)
+    gantry = open_gantry(use_mock=False)
     print("  Gantry opened.")
 
     pos_before = gantry.get_position()
     print(f"  Current position: {pos_before}")
 
     print(f"\n--- Moving to ({SURVEY_POS_X}, {SURVEY_POS_Y}) ---")
-    gantry.move_absolute(SURVEY_POS_X, SURVEY_POS_Y)
-
-    pos_after = gantry.get_position()
+    pos_after = move_to_survey(gantry)
     print(f"\n  Final position: {pos_after}")
 
     gantry.serial.close()

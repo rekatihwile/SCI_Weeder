@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <title>LaserWeeder Remote Debug</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+      }
+
+      .content {
+        padding: 20px;
+      }
+
+      a {
+        color: #8ecbff;
+        font-size: 20px;
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .card {
+        background: #222;
+        border: 1px solid #444;
+        padding: 16px;
+        margin: 14px 0;
+        max-width: 760px;
+      }
+
+      .small {
+        color: #aaa;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+    <div class="content">
+    <h1>LaserWeeder Remote Debug</h1>
+
+    <div class="card">
+      <a href="/camera">Live camera view</a>
+      <p class="small">
+        Continuous MJPEG stereo stream. Optional rectified view. No YOLO.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/survey">Survey YOLO debug</a>
+      <p class="small">
+        Tune global survey crop, confidence, class filters, burst settings, and
+        save cached detections.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/fine">Fine Align / Re-ID YOLO debug</a>
+      <p class="small">
+        Same YOLO/crop debug UI with smaller defaults for local fine
+        alignment/re-ID.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/match">Cached matching debug</a>
+      <p class="small">
+        Run matching on the last saved scan and compare raw vs rectified
+        matching behavior.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/rectify">Rectification check</a>
+      <p class="small">
+        Raw vs rectified stereo views with horizontal epipolar guide lines.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/gantry">Gantry + camera feedback</a>
+      <p class="small">
+        LaserGRBL-lite style gantry control with live camera feedback.
+      </p>
+    </div>
+
+    <div class="card">
+      <a href="/workspace3d">Workspace 3D reprojection</a>
+      <p class="small">
+        Project real gantry/workspace grid coordinates into both stereo camera
+        images.
+      </p>
+    </div>
+    </div>
+  </body>
+</html>

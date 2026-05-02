@@ -13,42 +13,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Patch broken torchvision C++ ops BEFORE importing ultralytics
-import importlib.util as _ilu
-_patch_path = Path(__file__).resolve().parent / "_nms_patch.py"
-_spec = _ilu.spec_from_file_location("_nms_patch", _patch_path)
-_mod  = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_mod)
-
 LOGS_DIR = Path(__file__).resolve().parent / "logs"
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def main():
-    from vision.detectors.ai_detector import AIDetector
-    from hardware.cameras import StereoCameras
+    from pipeline.steps.camera_setup import close_cameras, open_cameras
+    from pipeline.steps.detector_setup import build_and_warm_detector
 
     print("=" * 60)
     print("BRINGUP 02 — YOLO Detection")
     print("=" * 60)
 
-    # Build detector first
-    print("\n--- Building AIDetector ---")
-    from config import AI_DISPLAY_SCALE, AI_CONFIDENCE
-
-    detector = AIDetector(
-        display_scale=AI_DISPLAY_SCALE,
-        conf=AI_CONFIDENCE,
-    )
-
-    # Warmup BEFORE opening cameras
-    print("\n--- Detector Warmup ---")
-    warmup_info = detector.warmup()
+    print("\n--- Building + warming AIDetector ---")
+    detector, warmup_info, _model_load_time_s = build_and_warm_detector()
     print(f"  warmup result: {warmup_info}")
 
     # Open cameras after warmup
     print("\n--- Opening cameras (start_recorder=False) ---")
-    cameras = StereoCameras()
-    cameras.open(start_recorder=False)
+    cameras = open_cameras(start_recorder=False)
 
     # Read one valid stereo pair
     print("\n--- Reading stereo pair ---")
@@ -60,7 +43,7 @@ def main():
             break
     else:
         print("  ERROR: could not get a valid stereo pair after 10 attempts")
-        cameras.close()
+        close_cameras(cameras)
         sys.exit(1)
 
     # Run detection
@@ -102,7 +85,7 @@ def main():
     print(f"\n  Saved: {left_path}")
     print(f"  Saved: {right_path}")
 
-    cameras.close()
+    close_cameras(cameras)
     print("  Cameras closed.")
 
     # PASS = script completed and printed detection counts (0 is okay)

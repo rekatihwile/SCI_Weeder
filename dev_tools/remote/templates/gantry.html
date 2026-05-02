@@ -1,0 +1,428 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gantry + Camera Dashboard</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0f0f0f;
+        color: #f2f2f2;
+        font-family: Arial, sans-serif;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 14px;
+        padding: 14px;
+        box-sizing: border-box;
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel {
+        background: #171717;
+        border: 1px solid #333;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .panel h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+
+      .row label {
+        min-width: 72px;
+      }
+
+      input,
+      select,
+      button,
+      textarea {
+        background: #232323;
+        color: #f2f2f2;
+        border: 1px solid #555;
+        padding: 6px 8px;
+        box-sizing: border-box;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #2e2e2e;
+      }
+
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .viewer {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .cams {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .cam-box {
+        background: #171717;
+        border: 1px solid #333;
+        padding: 10px;
+      }
+
+      .cam-box img {
+        width: 100%;
+        height: auto;
+        background: #000;
+        border: 1px solid #444;
+      }
+
+      .status-box {
+        background: #111;
+        border: 1px solid #444;
+        padding: 10px;
+        white-space: pre-wrap;
+        overflow: auto;
+        min-height: 260px;
+        max-height: 42vh;
+        font-family: Consolas, monospace;
+        font-size: 13px;
+      }
+
+      .small {
+        color: #bdbdbd;
+        font-size: 13px;
+      }
+
+      .jog-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 64px);
+        gap: 8px;
+        justify-content: start;
+        align-items: center;
+      }
+
+      .wide {
+        width: 100%;
+      }
+
+      .camera-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .danger {
+        border-color: #aa4444;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+
+    <div class="layout">
+      <div class="sidebar">
+        <div class="panel">
+          <h3>Connection</h3>
+          <div class="btn-row">
+            <button onclick="openGantry()">Open</button>
+            <button onclick="getStatus()">Status</button>
+            <button onclick="getPosition()">Get Position</button>
+            <button onclick="closeGantry()">Close</button>
+          </div>
+
+          <div class="btn-row" style="margin-top: 8px">
+            <button onclick="unlockGantry()">Unlock ($X)</button>
+            <button onclick="resetGantry()">Soft Reset</button>
+            <button onclick="stopGantry()" class="danger">Stop</button>
+          </div>
+
+          <p class="small">
+            Uses the real <code>hardware/gantry.py</code> Gantry class.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h3>Homing</h3>
+          <div class="btn-row">
+            <button onclick="homeGantry()">Home</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Jog</h3>
+
+          <div class="row">
+            <label>Step mm</label>
+            <input id="jog_step" type="number" step="0.1" value="5" />
+          </div>
+
+          <div class="row">
+            <label>Feed</label>
+            <input id="jog_feed" type="number" step="1" value="1000" />
+          </div>
+
+          <div class="jog-grid">
+            <div></div>
+            <button onclick="jog(0, -getJogStep())">Y-</button>
+            <div></div>
+
+            <button onclick="jog(-getJogStep(), 0)">X-</button>
+            <button onclick="getStatus()">●</button>
+            <button onclick="jog(getJogStep(), 0)">X+</button>
+
+            <div></div>
+            <button onclick="jog(0, getJogStep())">Y+</button>
+            <div></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Move Absolute</h3>
+
+          <div class="row">
+            <label>X mm</label>
+            <input id="abs_x" type="number" step="0.1" value="200" />
+          </div>
+
+          <div class="row">
+            <label>Y mm</label>
+            <input id="abs_y" type="number" step="0.1" value="200" />
+          </div>
+
+          <div class="row">
+            <label>Feed</label>
+            <input id="abs_feed" type="number" step="1" value="2000" />
+          </div>
+
+          <div class="btn-row">
+            <button onclick="moveAbsolute()">Move Absolute</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Raw G-code / GRBL</h3>
+
+          <textarea
+            id="raw_cmd"
+            class="wide"
+            rows="3"
+            placeholder="$G or G0 X100 Y100"
+          ></textarea>
+
+          <div class="btn-row" style="margin-top: 8px">
+            <button onclick="sendRaw()">Send Raw</button>
+            <button onclick="setRaw('$G')">$G</button>
+            <button onclick="setRaw('$$')">$$</button>
+            <button onclick="setRaw('$#')">$#</button>
+            <button onclick="setRaw('?')">?</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="viewer">
+        <div class="panel">
+          <h3>Camera Feedback</h3>
+
+          <div class="camera-controls">
+            <label
+              ><input id="rectified_toggle" type="checkbox" /> Rectified
+              stream</label
+            >
+            <button onclick="refreshStreams()">Refresh Streams</button>
+            <button onclick="resetCameras()">Reset Cameras</button>
+            <button onclick="closeCameras()">Close Cameras</button>
+            <span class="small">If one side gets stuck, reset cameras.</span>
+          </div>
+
+          <div class="cams">
+            <div class="cam-box">
+              <h4>Left</h4>
+              <img
+                id="left_stream"
+                src="/stream/left?rectified=0"
+                alt="Left stream"
+              />
+            </div>
+
+            <div class="cam-box">
+              <h4>Right</h4>
+              <img
+                id="right_stream"
+                src="/stream/right?rectified=0"
+                alt="Right stream"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Gantry Output</h3>
+          <div id="status_box" class="status-box">
+            No gantry command sent yet.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function getJogStep() {
+        return parseFloat(document.getElementById("jog_step").value || "0");
+      }
+
+      function getJogFeed() {
+        return parseFloat(document.getElementById("jog_feed").value || "0");
+      }
+
+      function getAbsFeed() {
+        return parseFloat(document.getElementById("abs_feed").value || "0");
+      }
+
+      function renderResult(data) {
+        document.getElementById("status_box").innerText = JSON.stringify(
+          data,
+          null,
+          2,
+        );
+      }
+
+      async function postJSON(url, payload = {}) {
+        renderResult({
+          running: url,
+          payload: payload,
+        });
+
+        try {
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const data = await res.json();
+          renderResult(data);
+          return data;
+        } catch (err) {
+          const data = {
+            ok: false,
+            error: String(err),
+          };
+          renderResult(data);
+          return data;
+        }
+      }
+
+      function streamRectifiedFlag() {
+        return document.getElementById("rectified_toggle").checked ? "1" : "0";
+      }
+
+      function refreshStreams() {
+        const q = "rectified=" + streamRectifiedFlag() + "&t=" + Date.now();
+        document.getElementById("left_stream").src = "/stream/left?" + q;
+        document.getElementById("right_stream").src = "/stream/right?" + q;
+      }
+
+      async function resetCameras() {
+        await postJSON("/api/reset_cameras", {});
+        refreshStreams();
+      }
+
+      async function closeCameras() {
+        await postJSON("/api/close_cameras", {});
+        refreshStreams();
+      }
+
+      async function openGantry() {
+        await postJSON("/api/gantry/open", {});
+      }
+
+      async function getStatus() {
+        await postJSON("/api/gantry/status", {});
+      }
+      async function getPosition() {
+        await postJSON("/api/gantry/position", {});
+      }
+      async function closeGantry() {
+        await postJSON("/api/gantry/close", {});
+      }
+
+      async function unlockGantry() {
+        await postJSON("/api/gantry/unlock", {});
+      }
+
+      async function resetGantry() {
+        await postJSON("/api/gantry/reset", {});
+      }
+
+      async function stopGantry() {
+        await postJSON("/api/gantry/stop", {});
+      }
+
+      async function homeGantry() {
+        await postJSON("/api/gantry/home", {});
+      }
+
+      async function jog(dx, dy) {
+        await postJSON("/api/gantry/jog", {
+          dx: dx,
+          dy: dy,
+          feed: getJogFeed(),
+        });
+      }
+
+      async function moveAbsolute() {
+        const x = parseFloat(document.getElementById("abs_x").value || "0");
+        const y = parseFloat(document.getElementById("abs_y").value || "0");
+
+        await postJSON("/api/gantry/move_absolute", {
+          x: x,
+          y: y,
+          feed: getAbsFeed(),
+        });
+      }
+
+      function setRaw(cmd) {
+        document.getElementById("raw_cmd").value = cmd;
+      }
+
+      async function sendRaw() {
+        const cmd = document.getElementById("raw_cmd").value;
+        await postJSON("/api/gantry/raw", { cmd: cmd });
+      }
+
+      document
+        .getElementById("rectified_toggle")
+        .addEventListener("change", refreshStreams);
+
+      window.addEventListener("load", () => {
+        refreshStreams();
+        getStatus();
+      });
+    </script>
+  </body>
+</html>

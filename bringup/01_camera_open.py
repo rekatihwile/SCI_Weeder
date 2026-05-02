@@ -21,15 +21,14 @@ TOTAL_PAIRS = 30
 
 
 def main():
-    from hardware.cameras import StereoCameras
+    from pipeline.steps.camera_setup import close_cameras, open_cameras
 
     print("=" * 60)
     print("BRINGUP 01 — Camera Open")
     print("=" * 60)
 
-    cameras = StereoCameras()
     print("\n--- Opening cameras (start_recorder=False) ---")
-    cameras.open(start_recorder=False)
+    cameras = open_cameras(start_recorder=False)
 
     print("\n--- Camera Properties ---")
     for name, cap in [("Left", cameras.left), ("Right", cameras.right)]:
@@ -76,7 +75,7 @@ def main():
     else:
         print("  No valid frames — nothing saved.")
 
-    cameras.close()
+    close_cameras(cameras)
     print("  Cameras closed.")
 
     passed = valid == TOTAL_PAIRS

@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Rectification Check</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+      }
+
+      .content {
+        padding: 12px;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      button {
+        font-size: 16px;
+        padding: 6px 12px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .panel {
+        min-width: 0;
+      }
+
+      img {
+        width: 100%;
+        border: 1px solid #555;
+        background: #222;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        overflow: auto;
+        max-height: 180px;
+      }
+
+      a {
+        color: #8ecbff;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+    <div class="content">
+    <div class="top">
+      <h2>Stereo Rectification Check</h2>
+      <button onclick="refreshRectify()">Refresh Rectified Pair</button>
+      <button onclick="closeCameras()">Close Cameras</button>
+    </div>
+
+    <p>
+      Raw images show original camera geometry. Rectified images should make
+      corresponding physical points land closer to the same horizontal line.
+    </p>
+
+    <pre id="status">Idle.</pre>
+
+    <h3>Raw cameras with horizontal guide lines</h3>
+    <div class="grid">
+      <div class="panel">
+        <h4>Left raw</h4>
+        <img id="left_raw" />
+      </div>
+      <div class="panel">
+        <h4>Right raw</h4>
+        <img id="right_raw" />
+      </div>
+    </div>
+
+    <h3>Rectified cameras with horizontal guide lines</h3>
+    <div class="grid">
+      <div class="panel">
+        <h4>Left rectified</h4>
+        <img id="left_rect" />
+      </div>
+      <div class="panel">
+        <h4>Right rectified</h4>
+        <img id="right_rect" />
+      </div>
+    </div>
+
+    <script>
+      async function refreshRectify() {
+        document.getElementById("status").innerText =
+          "Capturing and rectifying...";
+
+        const res = await fetch("/api/rectify_preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = data.error;
+          return;
+        }
+
+        document.getElementById("left_raw").src =
+          "data:image/jpeg;base64," + data.left_raw;
+        document.getElementById("right_raw").src =
+          "data:image/jpeg;base64," + data.right_raw;
+        document.getElementById("left_rect").src =
+          "data:image/jpeg;base64," + data.left_rect;
+        document.getElementById("right_rect").src =
+          "data:image/jpeg;base64," + data.right_rect;
+
+        document.getElementById("status").innerText = JSON.stringify(
+          {
+            rect_npz_path: data.rect_npz_path,
+            map_keys: data.map_keys,
+          },
+          null,
+          2,
+        );
+      }
+
+      async function closeCameras() {
+        const res = await fetch("/api/close_cameras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+        document.getElementById("status").innerText = data.ok
+          ? "Cameras closed."
+          : data.error;
+      }
+
+      refreshRectify();
+    </script>
+    </div>
+  </body>
+</html>

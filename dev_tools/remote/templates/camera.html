@@ -1,0 +1,290 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Live Stereo Camera View</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+      }
+
+      .content {
+        padding: 12px;
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        font-size: 15px;
+        padding: 5px 10px;
+      }
+
+      input,
+      select {
+        font-size: 15px;
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      img {
+        width: 100%;
+        border: 1px solid #555;
+        background: #222;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        max-height: 180px;
+        overflow: auto;
+        font-size: 12px;
+      }
+
+      #status {
+        font-weight: bold;
+        color: #ddd;
+      }
+
+      a {
+        color: #8ecbff;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+    <div class="content">
+    <div class="top">
+      <h2>Live Stereo Camera View</h2>
+
+      <label>
+        <input id="rectified" type="checkbox" />
+        Rectified view
+      </label>
+
+      <label>
+        Refresh:
+        <select id="period_ms" onchange="restartLoop()">
+          <option value="250">250 ms</option>
+          <option value="500" selected>500 ms</option>
+          <option value="1000">1 s</option>
+          <option value="2000">2 s</option>
+        </select>
+      </label>
+
+      <button onclick="refreshOnce()">Refresh Once</button>
+      <button onclick="resetCameras()">Camera Reset</button>
+      <button onclick="toggleLive()" id="liveBtn">Pause Live</button>
+      <button onclick="closeCameras()">Close Cameras</button>
+
+      <span id="status">Starting...</span>
+    </div>
+
+    <p>
+      Polling stereo preview. One request grabs one synchronized left/right
+      pair. Use Camera Reset if one side gets stuck or stale.
+    </p>
+
+    <pre id="diagnostics">No diagnostics yet.</pre>
+
+    <div class="row">
+      <div>
+        <h3>Left</h3>
+        <img id="left_img" />
+      </div>
+      <div>
+        <h3>Right</h3>
+        <img id="right_img" />
+      </div>
+    </div>
+
+    <script>
+      let live = true;
+      let timer = null;
+      let busy = false;
+
+      function periodMs() {
+        return parseInt(document.getElementById("period_ms").value);
+      }
+
+      function rectifiedFlag() {
+        return document.getElementById("rectified").checked ? "1" : "0";
+      }
+
+      function showImages(data) {
+        document.getElementById("left_img").src =
+          "data:image/jpeg;base64," + data.left_image;
+        document.getElementById("right_img").src =
+          "data:image/jpeg;base64," + data.right_image;
+      }
+
+      async function refreshOnce() {
+        if (busy) return;
+        busy = true;
+
+        document.getElementById("status").innerText = "Reading stereo pair...";
+
+        try {
+          const res = await fetch("/api/preview_frame", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "full",
+              crop_w: 1280,
+              crop_h: 720,
+              left_offset_x: 0,
+              left_offset_y: 0,
+              right_offset_x: 0,
+              right_offset_y: 0,
+              rectified: rectifiedFlag(),
+            }),
+          });
+
+          const data = await res.json();
+
+          if (!data.ok) {
+            document.getElementById("status").innerText = "Preview error.";
+            document.getElementById("diagnostics").innerText = data.error;
+            busy = false;
+            return;
+          }
+
+          showImages(data);
+
+          document.getElementById("status").innerText =
+            "Live preview OK. Mode: " + (data.frame_mode || "raw");
+        } catch (err) {
+          document.getElementById("status").innerText = "Fetch error.";
+          document.getElementById("diagnostics").innerText = String(err);
+        }
+
+        busy = false;
+      }
+
+      async function resetCameras() {
+        if (timer) clearTimeout(timer);
+        live = false;
+        busy = true;
+
+        document.getElementById("liveBtn").innerText = "Resume Live";
+        document.getElementById("status").innerText =
+          "Resetting cameras: close → flush left → flush right → reopen stereo...";
+        document.getElementById("diagnostics").innerText =
+          "Reset running. Wait...";
+
+        try {
+          const res = await fetch("/api/reset_cameras", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+
+          const data = await res.json();
+
+          if (!data.ok) {
+            document.getElementById("status").innerText = "Camera reset error.";
+            document.getElementById("diagnostics").innerText = data.error;
+            busy = false;
+            return;
+          }
+
+          showImages(data);
+
+          document.getElementById("status").innerText =
+            "Camera reset OK. Stereo pair reopened and verified.";
+
+          document.getElementById("diagnostics").innerText = JSON.stringify(
+            {
+              left_index: data.left_index,
+              right_index: data.right_index,
+              left_flush: data.left_flush,
+              right_flush: data.right_flush,
+            },
+            null,
+            2,
+          );
+        } catch (err) {
+          document.getElementById("status").innerText =
+            "Camera reset fetch error.";
+          document.getElementById("diagnostics").innerText = String(err);
+        }
+
+        busy = false;
+      }
+
+      function loopTick() {
+        if (!live) return;
+        refreshOnce();
+        timer = setTimeout(loopTick, periodMs());
+      }
+
+      function restartLoop() {
+        if (timer) clearTimeout(timer);
+        if (live) loopTick();
+      }
+
+      function toggleLive() {
+        live = !live;
+        document.getElementById("liveBtn").innerText = live
+          ? "Pause Live"
+          : "Resume Live";
+
+        if (timer) clearTimeout(timer);
+
+        if (live) {
+          loopTick();
+        } else {
+          document.getElementById("status").innerText = "Paused.";
+        }
+      }
+
+      async function closeCameras() {
+        live = false;
+        busy = true;
+        document.getElementById("liveBtn").innerText = "Resume Live";
+
+        if (timer) clearTimeout(timer);
+
+        document.getElementById("status").innerText = "Closing cameras...";
+
+        const res = await fetch("/api/close_cameras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        document.getElementById("status").innerText = data.ok
+          ? "Cameras closed."
+          : data.error;
+
+        document.getElementById("diagnostics").innerText = data.ok
+          ? data.message
+          : data.error;
+
+        busy = false;
+      }
+
+      document
+        .getElementById("rectified")
+        .addEventListener("change", refreshOnce);
+
+      loopTick();
+    </script>
+    </div>
+  </body>
+</html>

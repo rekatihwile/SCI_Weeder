@@ -1,0 +1,728 @@
+<!doctype html>
+<html>
+  <head>
+    <title>{{ title }}</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 390px 1fr;
+        gap: 16px;
+        height: calc(100vh - 42px);
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .sidebar {
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .viewer {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow: hidden;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 145px 1fr 58px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .side-controls {
+        display: grid;
+        grid-template-columns: 90px 1fr 55px;
+        gap: 6px;
+        align-items: center;
+        margin-top: 8px;
+        padding: 8px;
+        background: #1d1d1d;
+        border: 1px solid #444;
+      }
+
+      input,
+      select,
+      button {
+        font-size: 14px;
+      }
+
+      select,
+      input[type="number"],
+      input[type="text"] {
+        width: 100%;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 5px 10px;
+      }
+
+      .status {
+        margin: 10px 0;
+        font-weight: bold;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        max-height: 310px;
+        overflow: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      .image-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        height: 100%;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .panel h3 {
+        margin: 0 0 6px 0;
+      }
+
+      canvas {
+        width: 100%;
+        height: auto;
+        border: 1px solid #555;
+        background: #222;
+      }
+
+      .hint {
+        color: #bbb;
+        font-size: 13px;
+      }
+
+      a {
+        color: #8ecbff;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+    <div class="layout">
+      <div class="sidebar">
+        <h2>{{ title }}</h2>
+
+        <div class="controls">
+          <label>Crop mode</label>
+          <select id="mode">
+            <option value="center">center</option>
+            <option value="center_facing">center_facing</option>
+            <option value="full">full</option>
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="top">top</option>
+            <option value="bottom">bottom</option>
+          </select>
+          <span></span>
+
+          <label>Crop width px</label>
+          <input
+            id="crop_w"
+            type="range"
+            min="64"
+            max="1280"
+            value="{{ default_crop_w }}"
+            step="4"
+          />
+          <span id="wLabel">{{ default_crop_w }}</span>
+
+          <label>Crop height px</label>
+          <input
+            id="crop_h"
+            type="range"
+            min="64"
+            max="720"
+            value="{{ default_crop_h }}"
+            step="4"
+          />
+          <span id="hLabel">{{ default_crop_h }}</span>
+
+          <label>Burst count</label>
+          <input
+            id="burst_count"
+            type="number"
+            value="{{ default_burst }}"
+            min="1"
+            max="30"
+          />
+          <span></span>
+
+          <label>Min hits</label>
+          <input
+            id="min_hits"
+            type="number"
+            value="{{ default_min_hits }}"
+            min="1"
+            max="30"
+          />
+          <span></span>
+
+          <label>Point mode</label>
+          <select id="point_mode">
+            <option value="box_center">box_center</option>
+            <option value="qpoint">qpoint</option>
+          </select>
+          <span></span>
+
+          <label>Classes</label>
+          <input id="classes" type="text" value="" placeholder="all or 0,1,2" />
+          <span></span>
+
+          <label>Confidence</label>
+          <input id="conf" type="text" value="" placeholder="blank=config" />
+          <span></span>
+
+          <label>YOLO imgsz</label>
+          <select id="imgsz_mode">
+            <option value="snap_crop">snap crop W/H</option>
+            <option value="config">use config</option>
+          </select>
+          <span></span>
+
+          <label>Rectified</label>
+          <label>
+            <input id="rectified" type="checkbox" />
+            use rectified frames
+          </label>
+          <span></span>
+        </div>
+
+        <button onclick="refreshPreview()">Refresh Preview</button>
+        <button onclick="snapCrop()">Snap Crop to 32</button>
+        <button onclick="runScan()">Scan / Save Points</button>
+        <button onclick="runMatch()">Match Cached Scan</button>
+        <button onclick="closeCameras()">Close Cameras</button>
+
+        <div class="status" id="status">Loading preview...</div>
+
+        <p class="hint">
+          center_facing = left camera crops right side, right camera crops left
+          side. Left/right offsets are independent and are applied in full-frame
+          pixel coordinates.
+        </p>
+
+        <h3>Model classes / current test config</h3>
+        <pre id="summary"></pre>
+      </div>
+
+      <div class="viewer">
+        <div class="image-row">
+          <div class="panel">
+            <h3>Left</h3>
+            <canvas id="left_canvas"></canvas>
+
+            <div class="side-controls">
+              <label>Offset X</label>
+              <input
+                id="left_offset_x"
+                type="range"
+                min="-500"
+                max="500"
+                value="0"
+                step="4"
+              />
+              <span id="leftXLabel">0</span>
+
+              <label>Offset Y</label>
+              <input
+                id="left_offset_y"
+                type="range"
+                min="-300"
+                max="300"
+                value="0"
+                step="4"
+              />
+              <span id="leftYLabel">0</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3>Right</h3>
+            <canvas id="right_canvas"></canvas>
+
+            <div class="side-controls">
+              <label>Offset X</label>
+              <input
+                id="right_offset_x"
+                type="range"
+                min="-500"
+                max="500"
+                value="0"
+                step="4"
+              />
+              <span id="rightXLabel">0</span>
+
+              <label>Offset Y</label>
+              <input
+                id="right_offset_y"
+                type="range"
+                min="-300"
+                max="300"
+                value="0"
+                step="4"
+              />
+              <span id="rightYLabel">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const PAGE_KIND = "{{ kind }}";
+      const DEFAULT_MODE = "{{ default_mode }}";
+
+      let latestLeft = null;
+      let latestRight = null;
+      let latestLeftCrop = null;
+      let latestRightCrop = null;
+      let frameW = 1280;
+      let frameH = 720;
+      let modeLabel = "preview";
+      let classNames = {};
+
+      function val(id) {
+        return document.getElementById(id).value;
+      }
+
+      function setVal(id, value) {
+        document.getElementById(id).value = value;
+      }
+
+      function snap32(v) {
+        return Math.max(32, Math.round(parseInt(v) / 32) * 32);
+      }
+
+      function getParams() {
+        return {
+          page_kind: PAGE_KIND,
+          mode: val("mode"),
+          crop_w: val("crop_w"),
+          crop_h: val("crop_h"),
+
+          left_offset_x: val("left_offset_x"),
+          left_offset_y: val("left_offset_y"),
+          right_offset_x: val("right_offset_x"),
+          right_offset_y: val("right_offset_y"),
+
+          burst_count: val("burst_count"),
+          min_hits: val("min_hits"),
+          point_mode: val("point_mode"),
+          classes: val("classes"),
+          conf: val("conf"),
+          imgsz_mode: val("imgsz_mode"),
+          rectified: document.getElementById("rectified").checked ? "1" : "0",
+        };
+      }
+
+      function updateLabels() {
+        document.getElementById("wLabel").innerText = val("crop_w");
+        document.getElementById("hLabel").innerText = val("crop_h");
+
+        document.getElementById("leftXLabel").innerText = val("left_offset_x");
+        document.getElementById("leftYLabel").innerText = val("left_offset_y");
+        document.getElementById("rightXLabel").innerText =
+          val("right_offset_x");
+        document.getElementById("rightYLabel").innerText =
+          val("right_offset_y");
+      }
+
+      function cropForSide(side) {
+        const mode = val("mode");
+        let cropW = Math.max(32, Math.min(frameW, parseInt(val("crop_w"))));
+        let cropH = Math.max(32, Math.min(frameH, parseInt(val("crop_h"))));
+
+        const ox =
+          side === "left"
+            ? parseInt(val("left_offset_x"))
+            : parseInt(val("right_offset_x"));
+
+        const oy =
+          side === "left"
+            ? parseInt(val("left_offset_y"))
+            : parseInt(val("right_offset_y"));
+
+        if (mode === "full") {
+          return { x0: 0, y0: 0, x1: frameW, y1: frameH };
+        }
+
+        let cx = Math.floor(frameW / 2) + ox;
+        let cy = Math.floor(frameH / 2) + oy;
+
+        if (mode === "center_facing") {
+          if (side === "left") {
+            cx = Math.floor((3 * frameW) / 4) + ox;
+          } else {
+            cx = Math.floor(frameW / 4) + ox;
+          }
+        } else if (mode === "left") {
+          cx = Math.floor(frameW / 4) + ox;
+        } else if (mode === "right") {
+          cx = Math.floor((3 * frameW) / 4) + ox;
+        } else if (mode === "top") {
+          cy = Math.floor(frameH / 4) + oy;
+        } else if (mode === "bottom") {
+          cy = Math.floor((3 * frameH) / 4) + oy;
+        }
+
+        let x0 = Math.max(
+          0,
+          Math.min(frameW - cropW, Math.floor(cx - cropW / 2)),
+        );
+        let y0 = Math.max(
+          0,
+          Math.min(frameH - cropH, Math.floor(cy - cropH / 2)),
+        );
+
+        return { x0: x0, y0: y0, x1: x0 + cropW, y1: y0 + cropH };
+      }
+
+      function drawCanvas(canvasId, img, crop, sideName) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext("2d");
+
+        canvas.width = frameW;
+        canvas.height = frameH;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (img) {
+          ctx.drawImage(img, 0, 0, frameW, frameH);
+        }
+
+        if (crop) {
+          const x = crop.x0;
+          const y = crop.y0;
+          const w = crop.x1 - crop.x0;
+          const h = crop.y1 - crop.y0;
+
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = "rgb(255, 210, 0)";
+          ctx.strokeRect(x, y, w, h);
+
+          ctx.fillStyle = "rgba(255, 210, 0, 0.18)";
+          ctx.fillRect(x, y, w, h);
+
+          ctx.font = "24px sans-serif";
+          ctx.fillStyle = "rgb(255, 255, 255)";
+          ctx.strokeStyle = "rgb(0, 0, 0)";
+          ctx.lineWidth = 4;
+
+          const label = `${sideName} crop x=${x}:${crop.x1} y=${y}:${crop.y1}`;
+          ctx.strokeText(label, x + 10, Math.max(28, y - 10));
+          ctx.fillText(label, x + 10, Math.max(28, y - 10));
+        }
+      }
+
+      function redrawOnlyCrop() {
+        updateLabels();
+
+        latestLeftCrop = cropForSide("left");
+        latestRightCrop = cropForSide("right");
+
+        drawCanvas("left_canvas", latestLeft, latestLeftCrop, "left");
+        drawCanvas("right_canvas", latestRight, latestRightCrop, "right");
+
+        updateSuggestedConfigPreview();
+      }
+
+      function loadImageFromBase64(b64) {
+        return new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.src = "data:image/jpeg;base64," + b64;
+        });
+      }
+
+      async function refreshPreview() {
+        updateLabels();
+        modeLabel = "preview";
+        document.getElementById("status").innerText =
+          "Refreshing preview frame...";
+
+        const res = await fetch("/api/preview_frame", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getParams()),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = "Preview error.";
+          document.getElementById("summary").innerText = data.error;
+          return;
+        }
+
+        frameW = data.frame.width;
+        frameH = data.frame.height;
+
+        latestLeftCrop = data.left_crop;
+        latestRightCrop = data.right_crop;
+
+        latestLeft = await loadImageFromBase64(data.left_image);
+        latestRight = await loadImageFromBase64(data.right_image);
+
+        drawCanvas("left_canvas", latestLeft, latestLeftCrop, "left");
+        drawCanvas("right_canvas", latestRight, latestRightCrop, "right");
+
+        document.getElementById("status").innerText =
+          "Preview loaded. Sliders update crop live. Preview will NOT auto-refresh.";
+
+        updateSuggestedConfigPreview();
+      }
+
+      function updateSuggestedConfigPreview() {
+        const leftCrop = cropForSide("left");
+        const rightCrop = cropForSide("right");
+
+        const cropW = parseInt(val("crop_w"));
+        const cropH = parseInt(val("crop_h"));
+
+        const preview = {
+          mode: modeLabel,
+          page_kind: PAGE_KIND,
+          rectified: document.getElementById("rectified").checked,
+
+          model_classes: classNames,
+
+          left_crop_full_frame: leftCrop,
+          right_crop_full_frame: rightCrop,
+
+          yolo_imgsz_if_snap_crop: [snap32(cropH), snap32(cropW)],
+
+          requested_classes: val("classes") || "all",
+          confidence_override: val("conf") || "config default",
+
+          suggested_debug_values: {
+            crop_mode: val("mode"),
+            crop_w: cropW,
+            crop_h: cropH,
+
+            left_offset_x: parseInt(val("left_offset_x")),
+            left_offset_y: parseInt(val("left_offset_y")),
+            right_offset_x: parseInt(val("right_offset_x")),
+            right_offset_y: parseInt(val("right_offset_y")),
+
+            burst_count: parseInt(val("burst_count")),
+            min_hits: parseInt(val("min_hits")),
+            point_mode: val("point_mode"),
+            imgsz_mode: val("imgsz_mode"),
+            rectified: document.getElementById("rectified").checked,
+          },
+        };
+
+        document.getElementById("summary").innerText = JSON.stringify(
+          preview,
+          null,
+          2,
+        );
+      }
+
+      function snapCrop() {
+        setVal("crop_w", snap32(val("crop_w")));
+        setVal("crop_h", snap32(val("crop_h")));
+        redrawOnlyCrop();
+      }
+
+      async function runScan() {
+        updateLabels();
+        modeLabel = "scan_result";
+
+        document.getElementById("status").innerText =
+          "Running scan / saving detections...";
+        document.getElementById("summary").innerText = "Running YOLO. Wait...";
+
+        const res = await fetch("/api/run_scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getParams()),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = "YOLO scan error.";
+          document.getElementById("summary").innerText = data.error;
+          return;
+        }
+
+        frameW = 1280;
+        frameH = 720;
+
+        latestLeft = await loadImageFromBase64(data.left_image);
+        latestRight = await loadImageFromBase64(data.right_image);
+
+        latestLeftCrop = data.left_crop;
+        latestRightCrop = data.right_crop;
+        classNames = data.class_names || classNames;
+
+        drawCanvas("left_canvas", latestLeft, latestLeftCrop, "left");
+        drawCanvas("right_canvas", latestRight, latestRightCrop, "right");
+
+        document.getElementById("status").innerText =
+          "Scan saved. You can now run matching here or open /match.";
+
+        document.getElementById("summary").innerText = JSON.stringify(
+          {
+            mode: modeLabel,
+            page_kind: PAGE_KIND,
+            frame_mode: data.frame_mode,
+            cached: data.cached,
+
+            model_classes: classNames,
+
+            left_count: data.left_count,
+            right_count: data.right_count,
+
+            capture_s: data.capture_s,
+            yolo_s: data.yolo_s,
+
+            requested_classes: data.requested_classes,
+            confidence_override: data.confidence_override,
+            yolo_imgsz_used: data.imgsz,
+
+            left_crop_full_frame: data.left_crop,
+            right_crop_full_frame: data.right_crop,
+
+            suggested_config: data.suggested_config,
+          },
+          null,
+          2,
+        );
+      }
+
+      async function runMatch() {
+        document.getElementById("status").innerText =
+          "Running matching on cached scan...";
+        document.getElementById("summary").innerText =
+          "Matching cached detections. Wait...";
+
+        const res = await fetch("/api/run_match", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = "Matching error.";
+          document.getElementById("summary").innerText = data.error;
+          return;
+        }
+
+        frameW = 1280;
+        frameH = 720;
+
+        latestLeft = await loadImageFromBase64(data.left_image);
+        latestRight = await loadImageFromBase64(data.right_image);
+
+        drawCanvas("left_canvas", latestLeft, null, "left");
+        drawCanvas("right_canvas", latestRight, null, "right");
+
+        document.getElementById("status").innerText =
+          "Matching done. Magenta labels/lines show matched pairs.";
+
+        document.getElementById("summary").innerText = JSON.stringify(
+          {
+            mode: "match_result",
+            frame_mode: data.frame_mode,
+            scan_timestamp: data.scan_timestamp,
+
+            left_count: data.left_count,
+            right_count: data.right_count,
+            matched_count: data.matched_count,
+
+            match_s: data.match_s,
+            matches: data.matches,
+            model_classes: data.class_names,
+          },
+          null,
+          2,
+        );
+      }
+
+      async function closeCameras() {
+        document.getElementById("status").innerText = "Closing cameras...";
+
+        const res = await fetch("/api/close_cameras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        latestLeft = null;
+        latestRight = null;
+        latestLeftCrop = null;
+        latestRightCrop = null;
+
+        drawCanvas("left_canvas", null, null, "left");
+        drawCanvas("right_canvas", null, null, "right");
+
+        document.getElementById("status").innerText = data.ok
+          ? "Cameras closed."
+          : data.error;
+      }
+
+      ["crop_w", "crop_h", "mode"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", redrawOnlyCrop);
+        document.getElementById(id).addEventListener("change", redrawOnlyCrop);
+      });
+
+      [
+        "left_offset_x",
+        "left_offset_y",
+        "right_offset_x",
+        "right_offset_y",
+      ].forEach((id) => {
+        document.getElementById(id).addEventListener("input", redrawOnlyCrop);
+        document.getElementById(id).addEventListener("change", redrawOnlyCrop);
+      });
+
+      [
+        "burst_count",
+        "min_hits",
+        "point_mode",
+        "classes",
+        "conf",
+        "imgsz_mode",
+        "rectified",
+      ].forEach((id) => {
+        document
+          .getElementById(id)
+          .addEventListener("input", updateSuggestedConfigPreview);
+        document
+          .getElementById(id)
+          .addEventListener("change", updateSuggestedConfigPreview);
+      });
+
+      document.getElementById("mode").value = DEFAULT_MODE;
+
+      refreshPreview();
+    </script>
+  </body>
+</html>
