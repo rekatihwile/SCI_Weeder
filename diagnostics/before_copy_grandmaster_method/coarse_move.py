@@ -1,7 +1,7 @@
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import time
+from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 from control.calibration_correction import AffineXYCorrection
@@ -359,9 +359,11 @@ class TriangulationCoarseMover:
             return stable, time.perf_counter() - t_side, timing
 
         t_detect = time.perf_counter()
-        # Sequential execution avoids cuDNN thread contention on shared GPU.
-        stable_left,  left_dt,  left_timing  = _stable_side(detector.cv_left,  left_frames_yolo,  "[SURVEY DEBUG] LEFT")
-        stable_right, right_dt, right_timing = _stable_side(detector.cv_right, right_frames_yolo, "[SURVEY DEBUG] RIGHT")
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="survey-burst") as pool:
+            left_future = pool.submit(_stable_side, detector.cv_left, left_frames_yolo, "[SURVEY DEBUG] LEFT")
+            right_future = pool.submit(_stable_side, detector.cv_right, right_frames_yolo, "[SURVEY DEBUG] RIGHT")
+            stable_left, left_dt, left_timing = left_future.result()
+            stable_right, right_dt, right_timing = right_future.result()
 
         # Translate crop-space points back to full-frame coordinates.
         if survey_crop_half is not None and not use_hd:

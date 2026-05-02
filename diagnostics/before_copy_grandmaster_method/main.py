@@ -1,14 +1,3 @@
-import importlib.util as _ilu
-import os as _os
-
-# Apply pure-PyTorch NMS patch before any ultralytics import.
-# torchvision C++ extensions are broken in this venv.
-_nms_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "bringup", "_nms_patch.py")
-if _os.path.exists(_nms_path):
-    _spec = _ilu.spec_from_file_location("_nms_patch", _nms_path)
-    _mod = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_mod)
-
 import json
 import math
 import time
@@ -297,12 +286,12 @@ def main():
                 state = "HOME"
 
             elif state == "HOME":
-                if DETECTOR_MODE == "ai" and hasattr(detector, "warmup"):
-                    warmup_info = detector.warmup()
                 cameras.open()
                 _update_recording_context(cameras, "HOME", gantry, target_queue, None, None, actual_hits, logger)
                 if HOMING:
                     gantry.home()
+                if DETECTOR_MODE == "ai" and hasattr(detector, "warmup"):
+                    warmup_info = detector.warmup()
                 if logger is not None:
                     logger.start_run(run_metadata={
                         "model_load_time_s": model_load_time_s,

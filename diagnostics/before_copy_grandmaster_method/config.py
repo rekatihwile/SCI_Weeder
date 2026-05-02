@@ -248,7 +248,7 @@ AI_CLASS_CONFIDENCE = {0: 0.10, 1: 0.10, 2: 0.10}
 AI_IOM_THRESHOLD = 0.80
 # Used by AIDetector. Turn UP to merge only very-overlapping masks; DOWN to merge more.
 
-AI_TARGET_CLASS = 1
+AI_TARGET_CLASS = 2
 # Used by AIDetector for default class filtering.
 # None = all classes, int = one class, list[int] = several classes.
 
@@ -264,7 +264,7 @@ QPOINT_DEBUG = True
 # State-Specific CV Selection
 # =============================================================================
 
-OVERRIDE_BURST_NUMBER = False
+OVERRIDE_BURST_NUMBER = True
 OVERRIDE_BURST_COUNT = 1
 # Used by main.py/fine_align.py. True forces every state to use OVERRIDE_BURST_COUNT.
 

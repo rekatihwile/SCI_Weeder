@@ -538,102 +538,39 @@ class StereoCameras:
         _rprint(f"Opening Left : {LEFT_CAMERA_INDEX}")
         _rprint(f"Opening Right: {RIGHT_CAMERA_INDEX}")
 
-        def _fourcc_str(val):
-            try:
-                return "".join([chr((int(val) >> (8 * i)) & 0xFF) for i in range(4)])
-            except Exception:
-                return str(val)
+        self.left = cv2.VideoCapture(LEFT_CAMERA_INDEX, BACKEND)
+        self.right = cv2.VideoCapture(RIGHT_CAMERA_INDEX, BACKEND)
 
-        # Retry logic: try up to 3 times to get valid cameras
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
-            _rprint(f"[CAM OPEN] Attempt {attempt}/{max_attempts}")
+        for name, cap in [("Left", self.left), ("Right", self.right)]:
+            if not cap.isOpened():
+                raise RuntimeError(f"Failed to open {name} camera.")
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
 
-            # Open cameras
-            self.left = cv2.VideoCapture(LEFT_CAMERA_INDEX, BACKEND)
-            self.right = cv2.VideoCapture(RIGHT_CAMERA_INDEX, BACKEND)
+        time.sleep(0.5)
 
-            mjpg_fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-            for name, cap in [("Left", self.left), ("Right", self.right)]:
-                if not cap.isOpened():
-                    raise RuntimeError(f"Failed to open {name} camera.")
-                # FOURCC must be set before width/height so V4L2 negotiates MJPG mode,
-                # not YUYV. Right camera (/dev/video2) fails 0/30 reads in YUYV default.
-                cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-                cap.set(cv2.CAP_PROP_FPS, 30.0)
+        apply_camera_settings(self.left, CAMERA_SETTINGS.get("left"), self.dev_paths["left"])
+        apply_camera_settings(self.right, CAMERA_SETTINGS.get("right"), self.dev_paths["right"])
 
-            time.sleep(0.5)
-
-            for name, cap in [("Left", self.left), ("Right", self.right)]:
-                w   = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                h   = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                fcc = cap.get(cv2.CAP_PROP_FOURCC)
-                _rprint(
-                    f"[CAM OPEN] {name}: isOpened={cap.isOpened()} "
-                    f"W={w} H={h} FPS={fps} FOURCC={int(fcc)}({_fourcc_str(fcc)})"
-                )
-
-            apply_camera_settings(self.left, CAMERA_SETTINGS.get("left"), self.dev_paths["left"])
-            apply_camera_settings(self.right, CAMERA_SETTINGS.get("right"), self.dev_paths["right"])
-
-            if AUTO_MODE:
-                if os.name == "nt":
-                    self.left.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-                    self.left.set(cv2.CAP_PROP_AUTO_WB, 1)
-                    self.right.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-                    self.right.set(cv2.CAP_PROP_AUTO_WB, 1)
-                else:
-                    for side in ["left", "right"]:
-                        dev = self.dev_paths[side]
-                        if dev:
-                            os.system(f"v4l2-ctl -d {dev} -c exposure_auto=3 > /dev/null 2>&1")
-                            os.system(f"v4l2-ctl -d {dev} -c white_balance_temperature_auto=1 > /dev/null 2>&1")
-
-            # Drain stale/invalid frames; wait up to 5s for both cameras to give valid data.
-            # After GPU warmup on Jetson, retrieve() may return (True, None) until the USB
-            # pipeline stabilises. Breaks as soon as one valid pair is confirmed.
-            _valid = False
-            for _i in range(150):
-                self.left.grab()
-                self.right.grab()
-                _r_l, _f_l = self.left.retrieve()
-                _r_r, _f_r = self.right.retrieve()
-                # Check both ret flags, frame not None, and valid shape
-                if (_r_l and _r_r and
-                    _f_l is not None and _f_r is not None and
-                    hasattr(_f_l, 'shape') and hasattr(_f_r, 'shape') and
-                    len(_f_l.shape) == 3 and len(_f_r.shape) == 3):
-                    _rprint(f"[CAM OPEN] Both cameras valid after {_i + 1} drain iteration(s).")
-                    _valid = True
-                    break
-                time.sleep(0.033)
-
-            if _valid:
-                # Success - cameras are working
-                _rprint("Stereo cameras opened.")
-                break
+        if AUTO_MODE:
+            if os.name == "nt":
+                self.left.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                self.left.set(cv2.CAP_PROP_AUTO_WB, 1)
+                self.right.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                self.right.set(cv2.CAP_PROP_AUTO_WB, 1)
             else:
-                # Failed validation - release and retry
-                _rprint(f"[CAM OPEN] Cameras invalid after 5s drain on attempt {attempt}/{max_attempts}.")
-                if self.left is not None:
-                    self.left.release()
-                    self.left = None
-                if self.right is not None:
-                    self.right.release()
-                    self.right = None
+                for side in ["left", "right"]:
+                    dev = self.dev_paths[side]
+                    if dev:
+                        os.system(f"v4l2-ctl -d {dev} -c exposure_auto=3 > /dev/null 2>&1")
+                        os.system(f"v4l2-ctl -d {dev} -c white_balance_temperature_auto=1 > /dev/null 2>&1")
 
-                if attempt < max_attempts:
-                    _rprint("[CAM OPEN] Releasing cameras, waiting 1s, will retry...")
-                    time.sleep(1.0)
-                else:
-                    # All attempts exhausted
-                    raise RuntimeError(
-                        f"Failed to get valid stereo cameras after {max_attempts} attempts. "
-                        "Both cameras must return valid frames (ret=True, frame not None, valid shape)."
-                    )
+        for _ in range(5):
+            self.left.grab()
+            self.right.grab()
+
+        _rprint("Stereo cameras opened.")
 
         self._bg_stop.clear()
         self._bg_thread = threading.Thread(target=self._bg_grab_loop, daemon=True)
@@ -647,14 +584,10 @@ class StereoCameras:
         """Switch capture resolution on both cameras. Flushes stale frames after switch."""
         # Keep the bg thread backed off for the entire duration of the switch.
         self._last_read_time = time.time()
-        mjpg_fourcc = cv2.VideoWriter_fourcc(*"MJPG")
         with self._cam_lock:
             for cap in (self.left, self.right):
-                # Reassert FOURCC/FPS so a resolution change never falls back to YUYV.
-                cap.set(cv2.CAP_PROP_FOURCC, mjpg_fourcc)
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-                cap.set(cv2.CAP_PROP_FPS, 30.0)
         # V4L2 needs a few frames to flush the old-resolution buffer.
         time.sleep(0.1)
         for _ in range(5):
@@ -705,7 +638,7 @@ class StereoCameras:
                 ret_l, frame_l = self.left.retrieve()
                 ret_r, frame_r = self.right.retrieve()
 
-            if ret_l and ret_r and frame_l is not None and frame_r is not None:
+            if ret_l and ret_r:
                 self._last_read_time = time.time()
                 fl = self._flip_frame(frame_l)
                 fr = self._flip_frame(frame_r)
@@ -713,48 +646,10 @@ class StereoCameras:
                     self._recorder.write(fl, fr)
                 return fl, fr
 
-            self._read_fail_count = getattr(self, "_read_fail_count", 0) + 1
-            if self._read_fail_count <= 10:
-                shape_l = frame_l.shape if frame_l is not None else None
-                shape_r = frame_r.shape if frame_r is not None else None
-                w_l = self.left.get(cv2.CAP_PROP_FRAME_WIDTH)
-                h_l = self.left.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                fps_l = self.left.get(cv2.CAP_PROP_FPS)
-                fcc_l = int(self.left.get(cv2.CAP_PROP_FOURCC))
-                w_r = self.right.get(cv2.CAP_PROP_FRAME_WIDTH)
-                h_r = self.right.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                fps_r = self.right.get(cv2.CAP_PROP_FPS)
-                fcc_r = int(self.right.get(cv2.CAP_PROP_FOURCC))
-                _rprint(
-                    f"[READ FAIL #{self._read_fail_count}] attempt={attempt+1}/{retries} "
-                    f"ret_l={ret_l} ret_r={ret_r} "
-                    f"L_None={frame_l is None} R_None={frame_r is None} "
-                    f"L_shape={shape_l} R_shape={shape_r} "
-                    f"L_props=({w_l}x{h_l} fps={fps_l} fcc={fcc_l}) "
-                    f"R_props=({w_r}x{h_r} fps={fps_r} fcc={fcc_r})"
-                )
-            else:
-                _rprint(f"[WARN] Frame dropped by USB bus (attempt {attempt+1}/{retries}). Retrying...")
+            _rprint(f"[WARN] Frame dropped by USB bus (attempt {attempt+1}/{retries}). Retrying...")
             time.sleep(0.05)
 
         raise RuntimeError("Failed to read stereo pair after multiple retries.")
-
-    def camera_health_check(self, n=10):
-        """Try n read_pair() calls and report pass/fail count. Call after open()."""
-        ok = 0
-        fail = 0
-        for i in range(n):
-            try:
-                fl, fr = self.read_pair()
-                if fl is not None and fr is not None:
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception as e:
-                fail += 1
-                _rprint(f"[HEALTH] read {i+1} exception: {e}")
-        _rprint(f"[HEALTH CHECK] {ok}/{n} stereo pairs OK, {fail} failed")
-        return ok, fail
 
     def clear_overlay(self):
         """Reset the recording overlay so raw frames are shown until the next CV annotation."""
