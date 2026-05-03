@@ -10,8 +10,8 @@
             "node": "LEFT_CAM"
         },
         "right": {
-            "index": 2,
-            "device": "/dev/video2",
+            "index": 3,
+            "device": "/dev/video3",
             "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.4:1.0-video-index0",
             "node": "RIGHT_CAM"
         }

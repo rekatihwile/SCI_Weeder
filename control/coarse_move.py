@@ -24,11 +24,55 @@ from config import (
     TRI_Y_GAIN,
     SURVEY_CLUSTER_RADIUS_PX,
     SURVEY_CROP_HALF_PX,
+    SURVEY_CROP_MODE,
+    SURVEY_CROP_W,
+    SURVEY_CROP_H,
+    SURVEY_LEFT_OFFSET_X,
+    SURVEY_LEFT_OFFSET_Y,
+    SURVEY_RIGHT_OFFSET_X,
+    SURVEY_RIGHT_OFFSET_Y,
+    SURVEY_CONFIDENCE_OVERRIDE,
     WORKSPACE_X_MIN,
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
     WORKSPACE_Y_MAX,
 )
+
+
+# ── survey crop-box helper — mirrors the dashboard JS crop logic exactly ──────
+
+def _survey_crop_box(mode, crop_w, crop_h, offset_x, offset_y,
+                     frame_w=FRAME_WIDTH, frame_h=FRAME_HEIGHT, side="left"):
+    """Return {x0, y0, x1, y1} crop box for one camera.
+
+    Matches the cropForSide() logic in yolo_debug.html so the runtime uses the
+    exact same window the dev-tools dashboard tuned against.
+    """
+    if mode == "full":
+        return {"x0": 0, "y0": 0, "x1": frame_w, "y1": frame_h}
+
+    cx = frame_w // 2 + offset_x
+    cy = frame_h // 2 + offset_y
+
+    if mode == "center_facing":
+        if side == "left":
+            cx = (3 * frame_w) // 4 + offset_x
+        else:
+            cx = frame_w // 4 + offset_x
+    elif mode == "left":
+        cx = frame_w // 4 + offset_x
+    elif mode == "right":
+        cx = (3 * frame_w) // 4 + offset_x
+    elif mode == "top":
+        cy = frame_h // 4 + offset_y
+    elif mode == "bottom":
+        cy = (3 * frame_h) // 4 + offset_y
+    # "center" uses the default cx/cy above
+
+    x0 = max(0, min(frame_w - crop_w, cx - crop_w // 2))
+    y0 = max(0, min(frame_h - crop_h, cy - crop_h // 2))
+    return {"x0": x0, "y0": y0, "x1": x0 + crop_w, "y1": y0 + crop_h}
+
 
 # ── workspace bounds helpers (exported so main.py can import them) ────────────
 
@@ -324,25 +368,51 @@ class TriangulationCoarseMover:
         # Scale the cluster radius if we captured at HD (groups are physically bigger in HD pixels).
         burst_radius = cluster_radius_px * (SURVEY_FRAME_WIDTH / FRAME_WIDTH) if use_hd else cluster_radius_px
 
-        # Optional centre-crop before YOLO — mirrors the re-ID crop approach for speed.
-        survey_crop_half = SURVEY_CROP_HALF_PX
-        if survey_crop_half is not None and not use_hd:
+        # ── crop frames before YOLO ───────────────────────────────────────────
+        # Priority: SURVEY_CROP_MODE (dashboard-style) > SURVEY_CROP_HALF_PX (legacy) > full frame
+        _left_ox = _left_oy = _right_ox = _right_oy = 0
+        _crop_applied = False
+
+        if SURVEY_CROP_MODE is not None and not use_hd:
+            lc = _survey_crop_box(
+                SURVEY_CROP_MODE, SURVEY_CROP_W, SURVEY_CROP_H,
+                SURVEY_LEFT_OFFSET_X, SURVEY_LEFT_OFFSET_Y,
+                frame_w=capture_w, frame_h=capture_h, side="left",
+            )
+            rc = _survey_crop_box(
+                SURVEY_CROP_MODE, SURVEY_CROP_W, SURVEY_CROP_H,
+                SURVEY_RIGHT_OFFSET_X, SURVEY_RIGHT_OFFSET_Y,
+                frame_w=capture_w, frame_h=capture_h, side="right",
+            )
+            left_frames_yolo  = [f[lc["y0"]:lc["y1"], lc["x0"]:lc["x1"]] for f in left_frames]
+            right_frames_yolo = [f[rc["y0"]:rc["y1"], rc["x0"]:rc["x1"]] for f in right_frames]
+            _left_ox,  _left_oy  = lc["x0"], lc["y0"]
+            _right_ox, _right_oy = rc["x0"], rc["y0"]
+            _crop_applied = True
+            _survey_debug(
+                f"survey crop ({SURVEY_CROP_MODE}): "
+                f"L x={lc['x0']}:{lc['x1']} y={lc['y0']}:{lc['y1']} "
+                f"R x={rc['x0']}:{rc['x1']} y={rc['y0']}:{rc['y1']}"
+            )
+        elif SURVEY_CROP_HALF_PX is not None and not use_hd:
             cw, ch = capture_w, capture_h
             cx, cy = cw // 2, ch // 2
-            scx0 = max(0, cx - survey_crop_half)
-            scx1 = min(cw, cx + survey_crop_half)
-            scy0 = max(0, cy - survey_crop_half)
-            scy1 = min(ch, cy + survey_crop_half)
+            scx0 = max(0, cx - SURVEY_CROP_HALF_PX)
+            scx1 = min(cw, cx + SURVEY_CROP_HALF_PX)
+            scy0 = max(0, cy - SURVEY_CROP_HALF_PX)
+            scy1 = min(ch, cy + SURVEY_CROP_HALF_PX)
             left_frames_yolo  = [f[scy0:scy1, scx0:scx1] for f in left_frames]
             right_frames_yolo = [f[scy0:scy1, scx0:scx1] for f in right_frames]
+            _left_ox = _right_ox = scx0
+            _left_oy = _right_oy = scy0
+            _crop_applied = True
             _survey_debug(
-                f"survey crop: x={scx0}:{scx1} y={scy0}:{scy1} "
-                f"half={survey_crop_half}px → {scx1-scx0}×{scy1-scy0}"
+                f"survey crop (half={SURVEY_CROP_HALF_PX}px): "
+                f"x={scx0}:{scx1} y={scy0}:{scy1} → {scx1-scx0}×{scy1-scy0}"
             )
         else:
             left_frames_yolo  = left_frames
             right_frames_yolo = right_frames
-            scx0 = scy0 = 0
 
         def _stable_side(core, frames, label):
             t_side = time.perf_counter()
@@ -360,25 +430,37 @@ class TriangulationCoarseMover:
             return stable, time.perf_counter() - t_side, timing
 
         t_detect = time.perf_counter()
-        # Sequential execution avoids cuDNN thread contention on shared GPU.
-        stable_left,  left_dt,  left_timing  = _stable_side(detector.cv_left,  left_frames_yolo,  "[SURVEY DEBUG] LEFT")
-        stable_right, right_dt, right_timing = _stable_side(detector.cv_right, right_frames_yolo, "[SURVEY DEBUG] RIGHT")
+        # Apply per-survey confidence override without touching the detector's default.
+        if SURVEY_CONFIDENCE_OVERRIDE is not None:
+            _orig_left_conf  = detector.cv_left.conf
+            _orig_right_conf = detector.cv_right.conf
+            detector.cv_left.conf  = SURVEY_CONFIDENCE_OVERRIDE
+            detector.cv_right.conf = SURVEY_CONFIDENCE_OVERRIDE
+            _survey_debug(f"confidence override: {SURVEY_CONFIDENCE_OVERRIDE}")
+        try:
+            # Sequential execution avoids cuDNN thread contention on shared GPU.
+            stable_left,  left_dt,  left_timing  = _stable_side(detector.cv_left,  left_frames_yolo,  "[SURVEY DEBUG] LEFT")
+            stable_right, right_dt, right_timing = _stable_side(detector.cv_right, right_frames_yolo, "[SURVEY DEBUG] RIGHT")
+        finally:
+            if SURVEY_CONFIDENCE_OVERRIDE is not None:
+                detector.cv_left.conf  = _orig_left_conf
+                detector.cv_right.conf = _orig_right_conf
 
         # Translate crop-space points back to full-frame coordinates.
-        if survey_crop_half is not None and not use_hd:
-            def _to_full_survey(stable_list):
+        if _crop_applied:
+            def _to_full(stable_list, ox, oy):
                 out = []
                 for s in stable_list:
-                    px = s["point"][0] + scx0
-                    py = s["point"][1] + scy0
-                    x1 = s["box"][0] + scx0
-                    y1 = s["box"][1] + scy0
-                    x2 = s["box"][2] + scx0
-                    y2 = s["box"][3] + scy0
+                    px = s["point"][0] + ox
+                    py = s["point"][1] + oy
+                    x1 = s["box"][0] + ox
+                    y1 = s["box"][1] + oy
+                    x2 = s["box"][2] + ox
+                    y2 = s["box"][3] + oy
                     out.append({**s, "point": (int(round(px)), int(round(py))), "box": (x1, y1, x2, y2)})
                 return out
-            stable_left  = _to_full_survey(stable_left)
-            stable_right = _to_full_survey(stable_right)
+            stable_left  = _to_full(stable_left,  _left_ox,  _left_oy)
+            stable_right = _to_full(stable_right, _right_ox, _right_oy)
 
         detect_dt = time.perf_counter() - t_detect
         _survey_debug(

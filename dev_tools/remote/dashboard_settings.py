@@ -1,9 +1,12 @@
 """Persistent local settings for dashboard pages.
 
-This stores debug/dev UI state only. It does not write config.py or params/*.json.
+Dashboard UI state is stored in dashboard_settings.json (auto-saved on every change).
+Survey runtime parameters are written to config.py only when the user presses
+"Save Config Settings" — nothing is overwritten automatically.
 """
 
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
@@ -97,3 +100,89 @@ def update_page_settings(page_name: str, values: dict) -> dict:
     all_settings[key] = current
     save_dashboard_settings(all_settings)
     return dict(current)
+
+
+# =============================================================================
+# config.py writer — "Save Config Settings"
+# =============================================================================
+
+_CONFIG_PY_PATH = BASE_DIR / "config.py"
+_config_write_lock = Lock()
+
+# Maps suggested_config keys (from run_debug_scan) → config.py variable names.
+# Only keys listed here are ever touched; everything else in config.py is left alone.
+_SURVEY_CONFIG_MAP = {
+    "BURST_COUNT":      "SURVEY_BURST_COUNT",
+    "MIN_HITS":         "SURVEY_MIN_HITS",
+    "POINT_MODE":       "SURVEY_POINT_MODE",
+    "TARGET_CLASSES":   "SURVEY_TARGET_CLASSES",
+    "YOLO_IMGSZ_USED":  "SURVEY_YOLO_IMGSZ",
+    "CONFIDENCE_OVERRIDE": "SURVEY_CONFIDENCE_OVERRIDE",
+    "CROP_MODE":        "SURVEY_CROP_MODE",
+    "CROP_W":           "SURVEY_CROP_W",
+    "CROP_H":           "SURVEY_CROP_H",
+    "LEFT_OFFSET_X":    "SURVEY_LEFT_OFFSET_X",
+    "LEFT_OFFSET_Y":    "SURVEY_LEFT_OFFSET_Y",
+    "RIGHT_OFFSET_X":   "SURVEY_RIGHT_OFFSET_X",
+    "RIGHT_OFFSET_Y":   "SURVEY_RIGHT_OFFSET_Y",
+}
+
+
+def _fmt_config_val(v) -> str:
+    """Format a Python value as a config.py literal (single line)."""
+    if v is None:
+        return "None"
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, str):
+        return repr(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_fmt_config_val(x) for x in v) + "]"
+    if isinstance(v, dict):
+        pairs = ", ".join(f'"{k}": {_fmt_config_val(vv)}' for k, vv in v.items())
+        return "{" + pairs + "}"
+    return repr(v)
+
+
+def save_survey_config_to_config_py(suggested_config: dict) -> list:
+    """Write survey tuning values from suggested_config into config.py in-place.
+
+    Only the variables listed in _SURVEY_CONFIG_MAP are touched — all other
+    config.py content (comments, formatting, unrelated vars) is preserved.
+
+    Returns a list of {"var": name, "value": repr} dicts for each updated var.
+    """
+    with _config_write_lock:
+        content = _CONFIG_PY_PATH.read_text()
+        updated = []
+
+        for sc_key, cfg_var in _SURVEY_CONFIG_MAP.items():
+            if sc_key not in suggested_config:
+                continue
+
+            new_val = suggested_config[sc_key]
+            val_repr = _fmt_config_val(new_val)
+
+            # Match the exact assignment line: VAR_NAME = <anything to end of line>
+            pattern = re.compile(
+                r"^(" + re.escape(cfg_var) + r"\s*=\s*).*$",
+                re.MULTILINE,
+            )
+            new_content, n = pattern.subn(lambda m, vr=val_repr: m.group(1) + vr, content)
+
+            if n == 0:
+                continue  # var not found — skip rather than append a stray line
+
+            content = new_content
+            updated.append({"var": cfg_var, "value": val_repr})
+
+        # Atomic write: write to .tmp then rename so a crash mid-write can't corrupt config.py
+        tmp = _CONFIG_PY_PATH.with_suffix(".py.tmp")
+        tmp.write_text(content)
+        tmp.replace(_CONFIG_PY_PATH)
+
+        return updated

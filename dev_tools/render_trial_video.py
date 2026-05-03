@@ -2,9 +2,11 @@
 """Render an annotated video from a raw trial recording folder."""
 
 import argparse
-import importlib.util
+from concurrent.futures import ThreadPoolExecutor
 import json
 import sys
+import subprocess
+import time
 from pathlib import Path
 
 import cv2
@@ -13,15 +15,13 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-# Apply pure-PyTorch NMS patch before any YOLO/AIDetector imports.
-_NMS_PATCH_PATH = REPO_ROOT / "bringup" / "_nms_patch.py"
-if _NMS_PATCH_PATH.exists():
-    _spec = importlib.util.spec_from_file_location("_nms_patch", _NMS_PATCH_PATH)
-    if _spec and _spec.loader:
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-else:
-    print(f"[WARN] NMS patch not found: {_NMS_PATCH_PATH}")
+# Patch broken Jetson torchvision NMS before any ultralytics import.
+import importlib.util as _ilu
+_nms_patch = REPO_ROOT / "bringup" / "_nms_patch.py"
+if _nms_patch.exists():
+    _spec = _ilu.spec_from_file_location("_nms_patch", _nms_patch)
+    _mod = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
 
 from config import (  # noqa: E402
     AI_CONFIDENCE,
@@ -30,6 +30,29 @@ from config import (  # noqa: E402
     FINE_ALIGN_CROP_SCALE,
     FINE_ALIGN_REID_CROP_HALF_PX,
     LASER_FIRE_DURATION_SEC,
+    CALIB_NPZ_PATH,
+    RECT_NPZ_PATH,
+    CALIBRATION_EXPECTS_UNFLIPPED,
+    TRI_SIGN_X,
+    TRI_SIGN_Y,
+    TRI_X_GAIN,
+    TRI_Y_GAIN,
+    LASER_OFFSET_X_MM,
+    LASER_OFFSET_Y_MM,
+    SURVEY_POS_X,
+    SURVEY_POS_Y,
+    WORKSPACE_X_MIN,
+    WORKSPACE_X_MAX,
+    WORKSPACE_Y_MIN,
+    WORKSPACE_Y_MAX,
+    SURVEY_CROP_MODE,
+    SURVEY_CROP_W,
+    SURVEY_CROP_H,
+    SURVEY_CROP_HALF_PX,
+    SURVEY_LEFT_OFFSET_X,
+    SURVEY_LEFT_OFFSET_Y,
+    SURVEY_RIGHT_OFFSET_X,
+    SURVEY_RIGHT_OFFSET_Y,
 )
 
 
@@ -41,23 +64,34 @@ from config import (  # noqa: E402
 #   python dev_tools/render_trial_video.py
 #
 # Example: TRIAL_NUMBER = 7 matches trial_recordings/trial_007_*
-TRIAL_NUMBER = 16
+TRIAL_NUMBER = None  # None = auto-pick the latest trial_recordings/trial_NNN_* folder
 
 # Optional fallback if you prefer a path instead of a number.
 TRIAL_RUN_DIR = None
 
 # Output can be a folder or a full .mp4/.avi path.
-# Default saves into REPO_ROOT/Rendered_Videos/.
-OUTPUT_PATH = "Rendered_Videos"
+# Default saves into REPO_ROOT/rendered_videos/.
+OUTPUT_PATH = "rendered_videos"
 
 RUN_YOLO = True
+# Offline YOLO is only used for RE-ID visualization, not every rendered frame.
 YOLO_MODEL = None
 YOLO_IMGSZ = 640
 YOLO_CONF = AI_CONFIDENCE
 
+# Precompute expensive RE-ID crop detections before the video write loop.
+REID_PRECOMPUTE = True
+# Keep this at 1 by default; batched per-side inference is already fast, and
+# parallel model execution is less reliable on this CPU-only machine.
+REID_PRECOMPUTE_SIDE_WORKERS = 1
+
+# Render independent/re-ID chunks in parallel, but keep LK/lock/fire chunks ordered.
+PARALLEL_RENDER = True
+PARALLEL_FRAME_WORKERS = 4
+PARALLEL_MIN_CHUNK_FRAMES = 8
+
 OUTPUT_FPS = None
 MAX_FRAMES = None
-KEEP_VIDEOS = 5
 
 PD_FLOW_OVERLAY = True
 PD_FLOW_TRAIL_LEN = 28
@@ -106,6 +140,68 @@ _STATE_COLORS = {
     'FAILED_FINE_ALIGN': ( 30, 100, 220),
 }
 _DEFAULT_STATE_COLOR = (50, 50, 50)
+
+_SURVEY_CROP_OVERLAY_CACHE = {}
+
+
+def _compute_render_crop_box(mode, crop_w, crop_h, offset_x, offset_y, frame_w, frame_h, side):
+    """Mirrors _survey_crop_box() in coarse_move.py and cropForSide() in the dashboard JS.
+
+    Returns (x0, y0, x1, y1) in full-frame pixels.
+    """
+    if mode == "full":
+        return (0, 0, frame_w, frame_h)
+    cx = frame_w // 2 + offset_x
+    cy = frame_h // 2 + offset_y
+    if mode == "center_facing":
+        cx = (3 * frame_w) // 4 + offset_x if side == "left" else frame_w // 4 + offset_x
+    elif mode == "left":
+        cx = frame_w // 4 + offset_x
+    elif mode == "right":
+        cx = (3 * frame_w) // 4 + offset_x
+    elif mode == "top":
+        cy = frame_h // 4 + offset_y
+    elif mode == "bottom":
+        cy = (3 * frame_h) // 4 + offset_y
+    x0 = max(0, min(frame_w - crop_w, cx - crop_w // 2))
+    y0 = max(0, min(frame_h - crop_h, cy - crop_h // 2))
+    return (x0, y0, x0 + crop_w, y0 + crop_h)
+
+
+def _get_survey_crop_overlay_rects(frame_w, frame_h):
+    """Return per-camera survey crop rectangles matching the runtime config exactly."""
+    key = (int(frame_w), int(frame_h))
+    cached = _SURVEY_CROP_OVERLAY_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    out = {"mode": "none", "left_rect": None, "right_rect": None}
+
+    if SURVEY_CROP_MODE is not None:
+        out["left_rect"] = _compute_render_crop_box(
+            SURVEY_CROP_MODE, SURVEY_CROP_W, SURVEY_CROP_H,
+            SURVEY_LEFT_OFFSET_X, SURVEY_LEFT_OFFSET_Y,
+            frame_w, frame_h, side="left",
+        )
+        out["right_rect"] = _compute_render_crop_box(
+            SURVEY_CROP_MODE, SURVEY_CROP_W, SURVEY_CROP_H,
+            SURVEY_RIGHT_OFFSET_X, SURVEY_RIGHT_OFFSET_Y,
+            frame_w, frame_h, side="right",
+        )
+        out["mode"] = SURVEY_CROP_MODE
+    elif SURVEY_CROP_HALF_PX is not None:
+        cx, cy = frame_w // 2, frame_h // 2
+        x0 = max(0, cx - SURVEY_CROP_HALF_PX)
+        x1 = min(frame_w, cx + SURVEY_CROP_HALF_PX)
+        y0 = max(0, cy - SURVEY_CROP_HALF_PX)
+        y1 = min(frame_h, cy + SURVEY_CROP_HALF_PX)
+        if x1 > x0 and y1 > y0:
+            out["mode"] = "centered"
+            out["left_rect"] = (x0, y0, x1, y1)
+            out["right_rect"] = (x0, y0, x1, y1)
+
+    _SURVEY_CROP_OVERLAY_CACHE[key] = out
+    return out
 
 
 # =============================================================================
@@ -157,48 +253,9 @@ def _resolve_output_path(output_spec, run_dir):
     return output_dir / f"{run_dir.name}_annotated.mp4"
 
 
-def _latest_trial_dir():
-    recordings_dir = REPO_ROOT / "trial_recordings"
-    matches = sorted(p for p in recordings_dir.glob("trial_*") if p.is_dir())
-    if not matches:
-        raise FileNotFoundError(f"No trial_* folders found in {recordings_dir}")
-    return matches[-1]
-
-
-def prune_old_rendered_videos(output_dir, keep=5):
-    """Delete older rendered videos in output_dir, keeping the newest `keep` files."""
-    try:
-        keep_n = int(keep)
-    except (TypeError, ValueError):
-        keep_n = 5
-    if keep_n <= 0:
-        return 0
-
-    root = (REPO_ROOT / "Rendered_Videos").resolve()
-    out = Path(output_dir).resolve()
-    if out != root:
-        return 0
-
-    videos = []
-    for ext in ("*.mp4", "*.avi"):
-        videos.extend(out.glob(ext))
-    videos = [p for p in videos if p.is_file()]
-    videos.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-    pruned = 0
-    for old_path in videos[keep_n:]:
-        try:
-            old_path.unlink()
-            pruned += 1
-        except OSError as exc:
-            print(f"[render] prune warning: could not delete {old_path}: {exc}")
-    return pruned
-
-
 def _load_records(run_dir):
     jsonl_path = run_dir / "manifest.jsonl"
     if jsonl_path.exists():
-        print(f"[render] Using manifest: {jsonl_path}")
         records = []
         with open(jsonl_path, "r") as f:
             for line in f:
@@ -281,10 +338,36 @@ def _float_pt(value):
 
 
 def _collect_pd_seed_points(records):
-    """Map target id to the recorded re-ID box center used to seed PD/LK."""
+    """Map planned target id to the recorded re-ID box center used to seed PD/LK."""
     seeds = {}
+    prev_hit_count = 0
     for record in records:
-        for hit in record.get("hit_targets_so_far") or []:
+        hits = record.get("hit_targets_so_far") or []
+        hit_count = len(hits)
+
+        # Preferred path: explicitly tagged target id from main.py.
+        for hit in hits:
+            tid = _target_id(hit.get("target_id"))
+            if tid is None or tid in seeds:
+                continue
+            left_pt = _float_pt(hit.get("left_px"))
+            right_pt = _float_pt(hit.get("right_px"))
+            if left_pt is not None and right_pt is not None:
+                seeds[tid] = {"left": left_pt, "right": right_pt}
+
+        # Legacy fallback: if a new hit appears while a target is active,
+        # attribute that new hit to the active planned target id.
+        active_id = _target_id(record.get("current_target_id"))
+        if active_id is not None and hit_count > prev_hit_count and active_id not in seeds:
+            newest = hits[-1] if hits else None
+            if newest is not None:
+                left_pt = _float_pt(newest.get("left_px"))
+                right_pt = _float_pt(newest.get("right_px"))
+                if left_pt is not None and right_pt is not None:
+                    seeds[active_id] = {"left": left_pt, "right": right_pt}
+
+        # Last-resort fallback for very old manifests where id happened to match.
+        for hit in hits:
             tid = _target_id(hit.get("id"))
             if tid is None or tid in seeds:
                 continue
@@ -292,6 +375,8 @@ def _collect_pd_seed_points(records):
             right_pt = _float_pt(hit.get("right_px"))
             if left_pt is not None and right_pt is not None:
                 seeds[tid] = {"left": left_pt, "right": right_pt}
+
+        prev_hit_count = max(prev_hit_count, hit_count)
     return seeds
 
 
@@ -377,6 +462,113 @@ def _collect_fire_start_times(records):
         if tid is not None:
             starts.setdefault(tid, float(ts))
     return starts
+
+
+def _reid_segment_key(target_id, timestamp):
+    tid = _target_id(target_id)
+    if tid is None or timestamp is None:
+        return None
+    return (tid, round(float(timestamp), 6))
+
+
+def _collect_reid_segment_starts(records, seed_points):
+    segments = []
+    prev_state = None
+    prev_tid = None
+    for record in records:
+        state = record.get("state_name")
+        tid = _target_id(record.get("current_target_id"))
+        ts = record.get("timestamp_monotonic")
+        is_segment_start = state == "FINE_ALIGN" and tid is not None and (prev_state != "FINE_ALIGN" or prev_tid != tid)
+        if is_segment_start:
+            key = _reid_segment_key(tid, ts)
+            seed = seed_points.get(tid)
+            if key is not None and seed is not None:
+                segments.append({
+                    "key": key,
+                    "record": record,
+                    "target_id": tid,
+                    "seed": seed,
+                })
+        prev_state = state
+        prev_tid = tid if state == "FINE_ALIGN" else None
+    return segments
+
+
+def _build_render_plan(records, reid_delays):
+    plan = []
+    counts = {"independent": 0, "reid": 0, "lk": 0}
+    prev_state = None
+    prev_tid = None
+    segment_start_ts = None
+    dependent_states = {"FINE_ALIGN", "LOCKED", "FIRE", "FIRED"}
+
+    for record in records:
+        state = record.get("state_name") or "?"
+        tid = _target_id(record.get("current_target_id"))
+        ts = record.get("timestamp_monotonic")
+
+        if state in dependent_states and tid is not None:
+            if state == "FINE_ALIGN" and (prev_state not in dependent_states or prev_tid != tid):
+                segment_start_ts = float(ts) if ts is not None else None
+            elif segment_start_ts is None:
+                segment_start_ts = float(ts) if ts is not None else None
+
+            if state == "FINE_ALIGN":
+                delay_s = float(reid_delays.get(tid, 0.0))
+                elapsed_s = 0.0 if (segment_start_ts is None or ts is None) else max(0.0, float(ts) - float(segment_start_ts))
+                has_pd = record.get("pd_error_x_px") is not None and record.get("pd_error_y_px") is not None
+                mode = "lk" if has_pd and elapsed_s > (delay_s + REID_CV_FLASH_SEC) else "reid"
+            else:
+                mode = "lk"
+        else:
+            segment_start_ts = None
+            mode = "independent"
+
+        plan.append({
+            "mode": mode,
+            "target_id": tid,
+            "segment_start_ts": segment_start_ts,
+        })
+        counts[mode] += 1
+        prev_state = state
+        prev_tid = tid if state in dependent_states else None
+
+    return plan, counts
+
+
+def _chunk_render_plan(plan):
+    if not plan:
+        return []
+
+    chunks = []
+    start = 0
+
+    def _chunk_key(entry):
+        if entry["mode"] == "lk":
+            return (entry["mode"], entry.get("target_id"), entry.get("segment_start_ts"))
+        if entry["mode"] == "reid":
+            return (entry["mode"], entry.get("target_id"), entry.get("segment_start_ts"))
+        return (entry["mode"],)
+
+    current_key = _chunk_key(plan[0])
+    for i in range(1, len(plan)):
+        key = _chunk_key(plan[i])
+        if key != current_key:
+            chunks.append({
+                "mode": plan[start]["mode"],
+                "start": start,
+                "end": i,
+            })
+            start = i
+            current_key = key
+
+    chunks.append({
+        "mode": plan[start]["mode"],
+        "start": start,
+        "end": len(plan),
+    })
+    return chunks
 
 
 # =============================================================================
@@ -479,10 +671,40 @@ def _planned_side_candidates(planned_targets, px_key):
 def _hit_for_target(hits, active_id):
     if active_id is None:
         return None
+    # Preferred path: explicit target id stored in each hit.
+    for hit in hits or []:
+        if _target_id(hit.get("target_id")) == active_id:
+            return hit
+
+    # Legacy path: id used to mean planned target id.
     for hit in hits or []:
         if _target_id(hit.get("id")) == active_id:
             return hit
+
+    # Fallback for legacy runs with skipped targets where hit ids were compacted.
+    if hits:
+        return hits[-1]
     return None
+
+
+def _planned_target_for_id(record, active_id):
+    if active_id is None:
+        return None
+    for target in record.get("planned_target_list") or []:
+        if _target_id(target.get("id")) == active_id:
+            return target
+    return None
+
+
+def _active_target_class_id(record, active_id):
+    target = _planned_target_for_id(record, active_id)
+    if target is None:
+        return None
+    cls = target.get("class_id")
+    try:
+        return int(cls) if cls is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _draw_strike_marker(frame, pt, label, color=(0, 0, 235), fallback_center=False):
@@ -671,6 +893,64 @@ def _draw_flow_tracker(frame, trail, pt, label, color, flash=False, phase=0):
     _put_text(frame, f"LK {label}", (p[0] + 12, min(frame.shape[0] - 12, p[1] + 24)), scale=0.46, color=color)
 
 
+def _draw_pd_target_marker(frame, label=None, color=(255, 60, 0)):
+    h, w = frame.shape[:2]
+    cx, cy = w // 2, h // 2
+    arm = 18
+    gap = 7
+    cv2.circle(frame, (cx, cy), 8, color, 2, cv2.LINE_AA)
+    cv2.line(frame, (cx - arm - gap, cy), (cx - gap, cy), color, 2, cv2.LINE_AA)
+    cv2.line(frame, (cx + gap, cy), (cx + arm + gap, cy), color, 2, cv2.LINE_AA)
+    cv2.line(frame, (cx, cy - arm - gap), (cx, cy - gap), color, 2, cv2.LINE_AA)
+    cv2.line(frame, (cx, cy + gap), (cx, cy + arm + gap), color, 2, cv2.LINE_AA)
+    if label:
+        _put_text(frame, label, _label_origin_near(frame, (cx, cy), dx=20, dy=-16), scale=0.44, color=color)
+    return (cx, cy)
+
+
+def _draw_target_drive_arrow(frame, current_pt, target_pt, color=(255, 60, 0)):
+    p = _as_int_pt(current_pt)
+    t = _as_int_pt(target_pt)
+    if p is None or t is None:
+        return
+    if abs(p[0] - t[0]) + abs(p[1] - t[1]) < 3:
+        return
+    cv2.arrowedLine(frame, p, t, color, 2, cv2.LINE_AA, tipLength=0.18)
+
+
+def _draw_continuous_stereo_guides(video_row, left_width, record):
+    state = record.get("state_name") or "?"
+    if state not in ("FINE_ALIGN", "LOCKED", "FIRE", "FIRED"):
+        return
+
+    h, w = video_row.shape[:2]
+    right_offset_x = int(left_width)
+    pd_y = h // 2
+    pd_color = (255, 60, 0)
+
+    # This is the actual PD target row used by the controller: frame center in both cameras.
+    cv2.line(video_row, (0, pd_y), (w - 1, pd_y), pd_color, 1, cv2.LINE_AA)
+    cv2.drawMarker(video_row, (left_width // 2, pd_y), pd_color, cv2.MARKER_TILTED_CROSS, 14, 1, cv2.LINE_AA)
+    cv2.drawMarker(video_row, (right_offset_x + (w - right_offset_x) // 2, pd_y), pd_color, cv2.MARKER_TILTED_CROSS, 14, 1, cv2.LINE_AA)
+    _put_text(video_row, "PD target row", (12, max(24, pd_y - 10)), scale=0.42, color=pd_color)
+
+    # Also connect the planned survey/reference point continuously across both views.
+    active_id = _target_id(record.get("current_target_id"))
+    planned = _planned_target_for_id(record, active_id)
+    left_ref = _as_int_pt((planned or {}).get("left_px"))
+    right_ref = _as_int_pt((planned or {}).get("right_px"))
+    ref_color = (0, 165, 255)
+    if left_ref is not None and right_ref is not None:
+        lp = left_ref
+        rp = (right_offset_x + right_ref[0], right_ref[1])
+        cv2.line(video_row, (0, lp[1]), lp, ref_color, 1, cv2.LINE_AA)
+        cv2.line(video_row, lp, rp, ref_color, 2, cv2.LINE_AA)
+        cv2.line(video_row, rp, (w - 1, rp[1]), ref_color, 1, cv2.LINE_AA)
+        cv2.drawMarker(video_row, lp, ref_color, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
+        cv2.drawMarker(video_row, rp, ref_color, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
+        _put_text(video_row, "survey ref", (12, max(44, min(lp[1], rp[1]) - 8)), scale=0.42, color=ref_color)
+
+
 def _reid_crop_boxes():
     cx, cy = FRAME_WIDTH // 2, FRAME_HEIGHT // 2
     half = max(1, int(FINE_ALIGN_REID_CROP_HALF_PX))
@@ -749,16 +1029,21 @@ def _draw_reid_crop_view(frame, raw_frame, crop_box, seed_pt, title, color, cand
     frame[oy:oy + inset_h, ox:ox + inset_w] = inset
 
 
-def _yolo_detections_in_box(core, raw_frame, crop_box, conf):
+def _yolo_detections_in_box(core, raw_frame, crop_box, conf, class_filter=None):
     """Run YOLO on the crop region; return full-frame detection dicts {center, box, conf}.
 
-    Uses classes=None so every plant class is shown as a candidate, regardless of
-    what target_class the detector was configured for.
+    Uses the active target class when available so re-ID visuals match live behavior.
     """
     bx0, by0, bx1, by1 = crop_box
     crop = raw_frame[by0:by1, bx0:bx1]
     if crop.size == 0:
         return []
+    classes_arg = None
+    if class_filter is not None:
+        try:
+            classes_arg = [int(class_filter)]
+        except (TypeError, ValueError):
+            classes_arg = None
     try:
         results = core.yolo(
             crop,
@@ -766,7 +1051,7 @@ def _yolo_detections_in_box(core, raw_frame, crop_box, conf):
             verbose=False,
             conf=conf,
             retina_masks=False,
-            classes=None,
+            classes=classes_arg,
             **core._yolo_predict_kwargs(),
         )
         raw_boxes = results[0].boxes if results and results[0].boxes is not None else []
@@ -781,12 +1066,204 @@ def _yolo_detections_in_box(core, raw_frame, crop_box, conf):
             "center": ((x1 + x2) // 2, (y1 + y2) // 2),
             "box": (x1, y1, x2, y2),
             "conf": float(b.conf[0]),
+            "cls": int(b.cls[0]) if getattr(b, "cls", None) is not None else None,
         })
     return dets
 
 
+def _filtered_boxes_to_full_frame_dets(filtered_boxes, crop_box):
+    bx0, by0, _, _ = crop_box
+    dets = []
+    for b in filtered_boxes or []:
+        xyxy = b.xyxy[0].cpu().numpy()
+        x1 = int(round(float(xyxy[0]))) + bx0
+        y1 = int(round(float(xyxy[1]))) + by0
+        x2 = int(round(float(xyxy[2]))) + bx0
+        y2 = int(round(float(xyxy[3]))) + by0
+        dets.append({
+            "center": ((x1 + x2) // 2, (y1 + y2) // 2),
+            "box": (x1, y1, x2, y2),
+            "conf": float(b.conf[0]),
+            "cls": int(b.cls[0]) if getattr(b, "cls", None) is not None else None,
+        })
+    return dets
+
+
+def _winner_idx_from_seed(dets, seed_pt):
+    sp = _as_int_pt(seed_pt)
+    if not dets or sp is None:
+        return None
+    return min(
+        range(len(dets)),
+        key=lambda i: (dets[i]["center"][0] - sp[0]) ** 2 + (dets[i]["center"][1] - sp[1]) ** 2,
+    )
+
+
+def _precompute_reid_overlay_cache(run_dir, records, seed_points, detector, imgsz, conf):
+    segments = _collect_reid_segment_starts(records, seed_points)
+    if detector is None or not segments:
+        return {}
+
+    left_box, right_box = _reid_crop_boxes()
+    left_jobs = []
+    right_jobs = []
+    skipped = 0
+    for seg in segments:
+        record = seg["record"]
+        raw_left = cv2.imread(str(run_dir / record["left_image_path"]))
+        raw_right = cv2.imread(str(run_dir / record["right_image_path"]))
+        if raw_left is None or raw_right is None:
+            skipped += 1
+            continue
+        lx0, ly0, lx1, ly1 = left_box
+        rx0, ry0, rx1, ry1 = right_box
+        class_filter = _active_target_class_id(record, seg["target_id"])
+        left_jobs.append({
+            "key": seg["key"],
+            "crop": raw_left[ly0:ly1, lx0:lx1].copy(),
+            "crop_box": left_box,
+            "seed": seg["seed"].get("left"),
+            "class_filter": class_filter,
+        })
+        right_jobs.append({
+            "key": seg["key"],
+            "crop": raw_right[ry0:ry1, rx0:rx1].copy(),
+            "crop_box": right_box,
+            "seed": seg["seed"].get("right"),
+            "class_filter": class_filter,
+        })
+
+    def _run_side_jobs(side_name, core, jobs):
+        side_results = {}
+        grouped = {}
+        total = len(jobs)
+        for job in jobs:
+            grouped.setdefault(job["class_filter"], []).append(job)
+
+        done = 0
+        for class_filter, bucket in grouped.items():
+            crops = [job["crop"] for job in bucket]
+            batched = core._get_filtered_results_batch(
+                crops,
+                classes_override=class_filter,
+                conf_override=conf,
+                imgsz=imgsz,
+            )
+            for job, (boxes, _masks) in zip(bucket, batched):
+                dets = _filtered_boxes_to_full_frame_dets(boxes, job["crop_box"])
+                side_results[job["key"]] = {
+                    "dets": dets,
+                    "winner_idx": _winner_idx_from_seed(dets, job["seed"]),
+                }
+                done += 1
+            class_label = "all" if class_filter is None else str(class_filter)
+            print(f"[render prep] {side_name} class={class_label} {done}/{total} segment(s)")
+        return side_results
+
+    started = time.perf_counter()
+    workers = max(1, int(REID_PRECOMPUTE_SIDE_WORKERS or 1))
+    if workers > 1:
+        with ThreadPoolExecutor(max_workers=min(2, workers), thread_name_prefix="render-reid") as pool:
+            fut_left = pool.submit(_run_side_jobs, "left", detector.cv_left, left_jobs)
+            fut_right = pool.submit(_run_side_jobs, "right", detector.cv_right, right_jobs)
+            left_results = fut_left.result()
+            right_results = fut_right.result()
+    else:
+        left_results = _run_side_jobs("left", detector.cv_left, left_jobs)
+        right_results = _run_side_jobs("right", detector.cv_right, right_jobs)
+
+    cache = {}
+    for seg in segments:
+        key = seg["key"]
+        cache[key] = {
+            "reid_dets_left": (left_results.get(key) or {}).get("dets", []),
+            "reid_winner_idx_left": (left_results.get(key) or {}).get("winner_idx"),
+            "reid_dets_right": (right_results.get(key) or {}).get("dets", []),
+            "reid_winner_idx_right": (right_results.get(key) or {}).get("winner_idx"),
+        }
+
+    print(
+        f"[render prep] cached RE-ID detections for {len(cache)}/{len(segments)} segment(s) "
+        f"in {time.perf_counter() - started:.2f}s"
+        + (f" ({skipped} skipped missing frame)" if skipped else "")
+    )
+    return cache
+
+
+def _load_frame_pair(run_dir, record):
+    left = cv2.imread(str(run_dir / record["left_image_path"]))
+    right = cv2.imread(str(run_dir / record["right_image_path"]))
+    if left is None or right is None:
+        return None, None, None, None
+    return left, right, left.copy(), right.copy()
+
+
+def _compose_rendered_frame(run_dir, record, plan_entry, ctx, pd_flow_state=None):
+    left, right, raw_left, raw_right = _load_frame_pair(run_dir, record)
+    if left is None or right is None:
+        return None
+
+    lk_pt_left = pd_flow_state.get("pt_left") if pd_flow_state is not None else None
+    lk_pt_right = pd_flow_state.get("pt_right") if pd_flow_state is not None else None
+    _draw_manifest_overlays(
+        left,
+        right,
+        record,
+        ctx["first_ts"],
+        survey_flash_start_ts=ctx["survey_flash_start_ts"],
+        fire_start_times=ctx["fire_start_times"],
+        lk_pt_left=lk_pt_left,
+        lk_pt_right=lk_pt_right,
+    )
+
+    if ctx["pd_flow_overlay"] and (pd_flow_state is not None or plan_entry.get("mode") == "reid"):
+        state = pd_flow_state
+        if state is None:
+            state = _new_pd_flow_state()
+            state["target_id"] = plan_entry.get("target_id")
+            state["segment_start_ts"] = plan_entry.get("segment_start_ts")
+        _draw_pd_flow_overlay(
+            left,
+            right,
+            raw_left,
+            raw_right,
+            record,
+            ctx["pd_seed_points"],
+            ctx["pd_reid_delays"],
+            state,
+            detector=ctx["detector"],
+            yolo_conf=ctx["yolo_conf"],
+            reid_overlay_cache=ctx["reid_overlay_cache"],
+        )
+
+    if left.shape[0] != right.shape[0]:
+        right = cv2.resize(right, (right.shape[1], left.shape[0]))
+    video_row = np.hstack([left, right])
+    _draw_continuous_stereo_guides(video_row, left.shape[1], record)
+
+    header = np.zeros((HEADER_H, video_row.shape[1], 3), dtype=np.uint8)
+    combined = np.vstack([header, video_row])
+
+    elapsed = 0.0
+    if record.get("timestamp_monotonic") is not None:
+        elapsed = float(record["timestamp_monotonic"]) - float(ctx["first_ts"])
+    n_hits = len(record.get("hit_targets_so_far") or [])
+    state_name = record.get("state_name") or "?"
+    _draw_progress_header(
+        combined,
+        elapsed,
+        ctx["total_duration"],
+        n_hits,
+        ctx["total_targets"],
+        state_name,
+        ctx["timeline_segments"],
+    )
+    return combined
+
+
 def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed,
-                       segment_elapsed, reid_delay, detector=None, yolo_conf=None, state=None):
+                       segment_elapsed, reid_delay, detector=None, yolo_conf=None, state=None,
+                       precomputed=None):
     left_box, right_box = _reid_crop_boxes()
     left_seed  = seed.get("left")  if seed else None
     right_seed = seed.get("right") if seed else None
@@ -807,25 +1284,28 @@ def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed
 
     # Detect once on the first RE-ID frame; cache for the whole segment.
     if not state.get("reid_detected"):
-        conf = yolo_conf if yolo_conf is not None else YOLO_CONF
+        if precomputed is not None:
+            state["reid_dets_left"] = list(precomputed.get("reid_dets_left") or [])
+            state["reid_winner_idx_left"] = precomputed.get("reid_winner_idx_left")
+            state["reid_dets_right"] = list(precomputed.get("reid_dets_right") or [])
+            state["reid_winner_idx_right"] = precomputed.get("reid_winner_idx_right")
+        else:
+            conf = yolo_conf if yolo_conf is not None else YOLO_CONF
 
-        def _detect_side(core, raw_frame, box, seed_pt):
-            dets = _yolo_detections_in_box(core, raw_frame, box, conf)
-            winner_idx = None
-            if dets and seed_pt is not None:
-                sp = _as_int_pt(seed_pt)
-                if sp is not None:
-                    winner_idx = min(
-                        range(len(dets)),
-                        key=lambda i: (dets[i]["center"][0] - sp[0]) ** 2
-                                     + (dets[i]["center"][1] - sp[1]) ** 2,
-                    )
-            return dets, winner_idx
+            def _detect_side(core, raw_frame, box, seed_pt):
+                dets = _yolo_detections_in_box(
+                    core,
+                    raw_frame,
+                    box,
+                    conf,
+                    class_filter=_active_target_class_id(record, active_id),
+                )
+                return dets, _winner_idx_from_seed(dets, seed_pt)
 
-        state["reid_dets_left"],  state["reid_winner_idx_left"]  = _detect_side(
-            detector.cv_left,  raw_left,  left_box,  left_seed)
-        state["reid_dets_right"], state["reid_winner_idx_right"] = _detect_side(
-            detector.cv_right, raw_right, right_box, right_seed)
+            state["reid_dets_left"],  state["reid_winner_idx_left"]  = _detect_side(
+                detector.cv_left,  raw_left,  left_box,  left_seed)
+            state["reid_dets_right"], state["reid_winner_idx_right"] = _detect_side(
+                detector.cv_right, raw_right, right_box, right_seed)
         state["reid_detected"] = True
 
     # Draw all detections: winner in green, losers in red.
@@ -842,12 +1322,15 @@ def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3 if is_winner else 2, cv2.LINE_AA)
             cx, cy = det["center"]
             cv2.drawMarker(frame, (cx, cy), color, cv2.MARKER_CROSS, 16, 2, cv2.LINE_AA)
-            tag = f"{'winner' if is_winner else 'loser'} {det['conf']:.2f}"
+            cls_tag = ""
+            if det.get("cls") is not None:
+                cls_tag = f" c{int(det['cls'])}"
+            tag = f"{'winner' if is_winner else 'loser'} {det['conf']:.2f}{cls_tag}"
             _put_text(frame, tag, (x1, max(14, y1 - 4)), scale=0.42, color=color)
 
 
 def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points, reid_delays, state,
-                          detector=None, yolo_conf=None):
+                          detector=None, yolo_conf=None, reid_overlay_cache=None):
     active_id = _target_id(record.get("current_target_id"))
     timestamp = record.get("timestamp_monotonic")
 
@@ -876,11 +1359,16 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
     segment_start = state.get("segment_start_ts")
     segment_elapsed = 0.0 if segment_start is None else max(0.0, timestamp - float(segment_start))
     reid_delay = float(reid_delays.get(active_id, 0.0))
+    pd_target_left = _draw_pd_target_marker(left, label="PD target")
+    pd_target_right = _draw_pd_target_marker(right, label="PD target")
 
     # RE-ID phase + brief flash after it ends.
     if segment_elapsed <= reid_delay + REID_CV_FLASH_SEC:
+        cache_key = _reid_segment_key(active_id, state.get("segment_start_ts"))
+        precomputed = (reid_overlay_cache or {}).get(cache_key) if cache_key is not None else None
         _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed,
-                           segment_elapsed, reid_delay, detector=detector, yolo_conf=yolo_conf, state=state)
+                           segment_elapsed, reid_delay, detector=detector, yolo_conf=yolo_conf,
+                           state=state, precomputed=precomputed)
         if segment_elapsed < reid_delay:
             return  # still in RE-ID, skip PD display
 
@@ -939,6 +1427,8 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
     color_l = (120, 255, 120) if pd_locked else (0, 255, 255)
     color_r = (120, 255, 180) if pd_locked else (0, 255, 180)
 
+    _draw_target_drive_arrow(left, left_pt, pd_target_left)
+    _draw_target_drive_arrow(right, right_pt, pd_target_right)
     _draw_flow_tracker(left,  state["trail_left"],  left_pt,  "box center", color_l)
     _draw_flow_tracker(right, state["trail_right"], right_pt, "box center", color_r)
     _draw_zoom_inset(left,  raw_left,  left_pt,  "PD zoom L", color=color_l)
@@ -1031,6 +1521,21 @@ def _draw_manifest_overlays(left, right, record, first_ts, survey_flash_start_ts
         and state not in ("FINE_ALIGN", "LOCKED", "FIRE", "FIRED")
     )
     if survey_flash:
+        crop_overlay = _get_survey_crop_overlay_rects(left.shape[1], left.shape[0])
+        mode = crop_overlay.get("mode")
+        lrect = crop_overlay.get("left_rect")
+        rrect = crop_overlay.get("right_rect")
+        reason = crop_overlay.get("reason")
+        if lrect is not None and rrect is not None:
+            lx0, ly0, lx1, ly1 = lrect
+            rx0, ry0, rx1, ry1 = rrect
+            cv2.rectangle(left, (lx0, ly0), (lx1, ly1), (250, 180, 0), 2, cv2.LINE_AA)
+            cv2.rectangle(right, (rx0, ry0), (rx1, ry1), (250, 180, 0), 2, cv2.LINE_AA)
+            _put_text(left, f"survey crop: {mode}", (12, 84), scale=0.52, color=(250, 180, 0), thickness=1)
+            _put_text(right, f"survey crop: {mode}", (12, 84), scale=0.52, color=(250, 180, 0), thickness=1)
+            if reason and mode == "centered":
+                _put_text(left, f"fallback: {reason}", (12, 104), scale=0.45, color=(180, 200, 255), thickness=1)
+
         hit_ids = {h.get("id") for h in hits}
         for planned in record.get("planned_target_list") or []:
             pid = planned.get("id")
@@ -1046,15 +1551,20 @@ def _draw_manifest_overlays(left, right, record, first_ts, survey_flash_start_ts
         _put_text(right, "SURVEY CV: boxes + box-center points", (12, right.shape[0] - 20),
                   scale=0.58, color=(0, 220, 255), thickness=1)
 
-    # Fine-align: horizontal Y-reference line only.
-    # No vertical line — stereo cameras are symmetric about the laser so the
-    # target appears in the right portion of the left cam and left portion of
-    # the right cam, never at dead-center X in either individual frame.
+    # Fine-align: show the active survey-reference point in each camera.
     if state == "FINE_ALIGN":
-        for frame in (left, right):
-            h, w = frame.shape[:2]
-            cy = h // 2
-            cv2.line(frame, (0, cy), (w, cy), (255, 60, 0), 1, cv2.LINE_AA)
+        planned = _planned_target_for_id(record, active_id)
+        left_ref = _float_pt((planned or {}).get("left_px"))
+        right_ref = _float_pt((planned or {}).get("right_px"))
+
+        for frame, ref_pt in ((left, left_ref), (right, right_ref)):
+            if ref_pt is not None:
+                cx = int(round(float(ref_pt[0])))
+                cy = int(round(float(ref_pt[1])))
+                cx = max(0, min(frame.shape[1] - 1, cx))
+                cy = max(0, min(frame.shape[0] - 1, cy))
+                cv2.drawMarker(frame, (cx, cy), (0, 165, 255), cv2.MARKER_TILTED_CROSS, 13, 1, cv2.LINE_AA)
+                _put_text(frame, "survey ref", _label_origin_near(frame, (cx, cy), dx=10, dy=-10), scale=0.42, color=(0, 165, 255))
             if _CROP_X0 > 0 or _CROP_Y0 > 0:
                 cv2.rectangle(frame, (_CROP_X0, _CROP_Y0), (_CROP_X1, _CROP_Y1), (255, 200, 0), 2)
 
@@ -1117,6 +1627,61 @@ def _draw_yolo(core, frame, imgsz, conf):
     return core.draw_detections(frame, boxes=boxes, points=points)
 
 
+def _open_video_writer(output_path, fps, out_size):
+    suffix = output_path.suffix.lower()
+    if suffix == ".avi":
+        codec_candidates = ["MJPG", "XVID"]
+    else:
+        # Prefer native H.264 writer first. If unavailable in this OpenCV/FFmpeg
+        # build, fall back to mp4v and optionally post-convert.
+        codec_candidates = ["avc1", "H264", "X264", "mp4v"]
+
+    for codec in codec_candidates:
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, out_size)
+        if writer.isOpened():
+            return writer, codec
+        writer.release()
+
+    raise RuntimeError(
+        f"Could not open VideoWriter for {output_path}. Tried codecs: {codec_candidates}"
+    )
+
+
+def _transcode_to_h264_mp4(src_path, dst_path):
+    try:
+        import imageio_ffmpeg
+    except Exception as exc:
+        print(f"[render] H.264 post-convert unavailable (imageio-ffmpeg import failed): {exc}")
+        return False
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [
+        ffmpeg_exe,
+        "-y",
+        "-i", str(src_path),
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(dst_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception as exc:
+        print(f"[render] H.264 post-convert failed to launch ffmpeg: {exc}")
+        return False
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip().splitlines()
+        tail = "\n".join(stderr[-8:]) if stderr else "(no stderr)"
+        print("[render] H.264 post-convert failed; keeping original mp4v file.")
+        print(f"[render] ffmpeg stderr (tail):\n{tail}")
+        return False
+
+    return True
+
+
 # =============================================================================
 # Main render loop
 # =============================================================================
@@ -1143,76 +1708,157 @@ def render_trial(args):
     first_ts, total_duration, total_targets, timeline_segments = _preprocess_records(records)
     pd_seed_points = _collect_pd_seed_points(all_records)
     pd_reid_delays = _collect_reid_delays(run_dir, all_records)
+    render_plan, render_counts = _build_render_plan(records, pd_reid_delays)
+    render_chunks = _chunk_render_plan(render_plan)
     survey_flash_start_ts = _collect_survey_flash_start(all_records)
     fire_start_times = _collect_fire_start_times(all_records)
+    reid_overlay_cache = {}
+    if detector is not None and args.reid_precompute:
+        reid_overlay_cache = _precompute_reid_overlay_cache(
+            run_dir,
+            all_records,
+            pd_seed_points,
+            detector,
+            imgsz=args.imgsz,
+            conf=args.conf,
+        )
     pd_flow_state = _new_pd_flow_state()
     print(f"[render] {len(records)} frames  fps={fps:.1f}  duration={total_duration:.1f}s  targets={total_targets}")
+    print(
+        f"[render] plan: independent={render_counts['independent']} reid={render_counts['reid']} "
+        f"lk={render_counts['lk']} chunks={len(render_chunks)} parallel={args.parallel_render}"
+    )
 
-    fourcc = cv2.VideoWriter_fourcc(*("MJPG" if output.suffix.lower() == ".avi" else "mp4v"))
+    output_suffix = output.suffix.lower()
+    raw_output = output
+    if output_suffix == ".mp4":
+        # Write to a temp file first so we can atomically replace the final output,
+        # regardless of whether we use native H.264 or post-convert fallback.
+        raw_output = output.with_name(f"{output.stem}.__raw__.mp4")
+
     writer = None
+    writer_codec = None
+    writer_codec_upper = None
     out_size = None
+    render_t0 = time.perf_counter()
+    next_progress_pct = 10
 
-    for idx, record in enumerate(records, start=1):
-        left = cv2.imread(str(run_dir / record["left_image_path"]))
-        right = cv2.imread(str(run_dir / record["right_image_path"]))
-        if left is None or right is None:
-            print(f"[render] skipping missing frame {idx}")
-            continue
+    render_ctx = {
+        "first_ts": first_ts,
+        "total_duration": total_duration,
+        "total_targets": total_targets,
+        "timeline_segments": timeline_segments,
+        "survey_flash_start_ts": survey_flash_start_ts,
+        "fire_start_times": fire_start_times,
+        "pd_seed_points": pd_seed_points,
+        "pd_reid_delays": pd_reid_delays,
+        "pd_flow_overlay": args.pd_flow_overlay,
+        "detector": detector,
+        "yolo_conf": args.conf,
+        "reid_overlay_cache": reid_overlay_cache,
+    }
 
-        raw_left = left.copy()
-        raw_right = right.copy()
+    def _fmt_clock(seconds):
+        total = max(0, int(round(float(seconds))))
+        h = total // 3600
+        m = (total % 3600) // 60
+        s = total % 60
+        if h > 0:
+            return f"{h:d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
 
-        _draw_manifest_overlays(
-            left, right, record, first_ts,
-            survey_flash_start_ts=survey_flash_start_ts,
-            fire_start_times=fire_start_times,
-            lk_pt_left=pd_flow_state.get("pt_left"),
-            lk_pt_right=pd_flow_state.get("pt_right"),
-        )
-        if getattr(args, "pd_flow_overlay", PD_FLOW_OVERLAY):
-            _draw_pd_flow_overlay(
-                left, right, raw_left, raw_right,
-                record, pd_seed_points, pd_reid_delays, pd_flow_state,
-                detector=detector, yolo_conf=args.conf,
+    try:
+        total = len(records)
+
+        def _write_combined(idx0, combined):
+            nonlocal writer, writer_codec, writer_codec_upper, out_size, next_progress_pct
+            if combined is None:
+                print(f"[render] skipping missing frame {idx0}")
+                return
+            if writer is None:
+                out_size = (combined.shape[1], combined.shape[0])
+                writer, writer_codec = _open_video_writer(raw_output, fps, out_size)
+                writer_codec_upper = str(writer_codec).upper()
+                print(f"[render] writer codec={writer_codec} size={out_size[0]}x{out_size[1]} fps={fps:.2f}")
+            elif (combined.shape[1], combined.shape[0]) != out_size:
+                combined = cv2.resize(combined, out_size)
+
+            writer.write(combined)
+            pct_done = int((idx0 * 100) / total)
+            if pct_done >= next_progress_pct or idx0 == total:
+                elapsed_wall_s = time.perf_counter() - render_t0
+                avg_s_per_frame = elapsed_wall_s / max(1, idx0)
+                eta_s = avg_s_per_frame * max(0, total - idx0)
+                while next_progress_pct <= min(100, pct_done):
+                    print(
+                        f"[render] {next_progress_pct:3d}%  "
+                        f"{idx0}/{total} frames  "
+                        f"elapsed={_fmt_clock(elapsed_wall_s)}  "
+                        f"eta={_fmt_clock(eta_s)}"
+                    )
+                    next_progress_pct += 10
+
+        def _render_idx(i0):
+            return i0, _compose_rendered_frame(run_dir, records[i0], render_plan[i0], render_ctx, pd_flow_state=None)
+
+        for chunk in render_chunks:
+            indices = list(range(chunk["start"], chunk["end"]))
+            parallel_ok = (
+                args.parallel_render
+                and chunk["mode"] in ("independent", "reid")
+                and len(indices) >= max(1, int(PARALLEL_MIN_CHUNK_FRAMES))
+                and (chunk["mode"] != "reid" or args.reid_precompute)
             )
 
-        if left.shape[0] != right.shape[0]:
-            right = cv2.resize(right, (right.shape[1], left.shape[0]))
-        video_row = np.hstack([left, right])
+            if parallel_ok:
+                print(f"[render] chunk {chunk['mode']} {chunk['start'] + 1}-{chunk['end']} in parallel")
+                with ThreadPoolExecutor(max_workers=max(1, int(args.parallel_workers)), thread_name_prefix="render-frame") as pool:
+                    for i0, combined in pool.map(_render_idx, indices):
+                        _write_combined(i0 + 1, combined)
+            else:
+                if chunk["mode"] == "lk":
+                    pd_flow_state = _new_pd_flow_state()
+                for i0 in indices:
+                    combined = _compose_rendered_frame(
+                        run_dir,
+                        records[i0],
+                        render_plan[i0],
+                        render_ctx,
+                        pd_flow_state=pd_flow_state if chunk["mode"] == "lk" else None,
+                    )
+                    _write_combined(i0 + 1, combined)
+    except KeyboardInterrupt:
+        print("\n[render] interrupted by user; finalizing output file...")
+        raise
+    finally:
+        if writer is not None:
+            writer.release()
 
-        # Prepend the header bar
-        header = np.zeros((HEADER_H, video_row.shape[1], 3), dtype=np.uint8)
-        combined = np.vstack([header, video_row])
+    if writer is None:
+        raise RuntimeError("No frames were written (all input frames were missing).")
 
-        elapsed = 0.0
-        if record.get("timestamp_monotonic") is not None:
-            elapsed = float(record["timestamp_monotonic"]) - float(first_ts)
-        n_hits = len(record.get("hit_targets_so_far") or [])
-        state = record.get("state_name") or "?"
+    if output_suffix == ".mp4":
+        native_h264_codecs = {"AVC1", "H264", "X264"}
+        if writer_codec_upper in native_h264_codecs:
+            if raw_output != output:
+                raw_output.replace(output)
+            print(f"[render] saved {output} (native H.264 codec={writer_codec})")
+        else:
+            print("[render] Post-converting MP4 temp file to H.264...")
+            ok = _transcode_to_h264_mp4(raw_output, output)
+            if ok:
+                try:
+                    raw_output.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                print(f"[render] saved {output} (H.264 post-convert)")
+            else:
+                if raw_output != output:
+                    raw_output.replace(output)
+                print(f"[render] saved {output} (fallback mp4v)")
+    else:
+        print(f"[render] saved {raw_output}")
 
-        _draw_progress_header(
-            combined, elapsed, total_duration,
-            n_hits, total_targets, state, timeline_segments,
-        )
-
-        if writer is None:
-            out_size = (combined.shape[1], combined.shape[0])
-            writer = cv2.VideoWriter(str(output), fourcc, fps, out_size)
-            if not writer.isOpened():
-                raise RuntimeError(f"Could not open VideoWriter for {output}")
-        elif (combined.shape[1], combined.shape[0]) != out_size:
-            combined = cv2.resize(combined, out_size)
-
-        writer.write(combined)
-        if idx % 25 == 0:
-            print(f"[render] {idx}/{len(records)} frames")
-
-    if writer is not None:
-        writer.release()
-    print(f"[render] saved {output}")
-    pruned_count = prune_old_rendered_videos(REPO_ROOT / "Rendered_Videos", keep=args.keep_videos)
-    if args.keep_videos > 0:
-        print(f"[render] pruned {pruned_count} old rendered video(s) from {REPO_ROOT / 'Rendered_Videos'}")
 
 
 # =============================================================================
@@ -1223,25 +1869,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", nargs="?", help="Raw trial recording folder containing manifest.jsonl")
     parser.add_argument("--trial", type=int, help="Trial number, e.g. 7 for trial_007_*.")
-    parser.add_argument("--latest", action="store_true", help="Render the latest trial_recordings/trial_* folder.")
     parser.add_argument("--output", help="Output MP4/AVI path. Default: run_dir/annotated_trial.mp4")
     parser.add_argument("--fps", type=float, help="Output FPS. Default estimates from manifest timestamps.")
     parser.add_argument("--max-frames", type=int, help="Render only the first N frames.")
-    parser.add_argument("--keep-videos", type=int, default=KEEP_VIDEOS,
-                        help="Keep newest N rendered .mp4/.avi files in Rendered_Videos. <=0 disables pruning.")
     parser.add_argument("--run-yolo", action="store_true", help="Run YOLO offline and draw boxes/labels/keypoints.")
     parser.add_argument("--model", help="YOLO .pt or .engine path/name. Default uses config backend selection.")
     parser.add_argument("--imgsz", type=int, help="YOLO inference imgsz for offline overlays.")
     parser.add_argument("--conf", type=float, help="YOLO confidence for offline overlays.")
     parser.add_argument("--no-pd-flow", action="store_true", help="Disable reconstructed PD box-center LK flow overlay.")
+    parser.add_argument("--no-reid-precompute", action="store_true", help="Disable staged RE-ID batch precompute and do YOLO inline during render.")
+    parser.add_argument("--no-parallel-render", action="store_true", help="Disable chunked parallel frame rendering.")
+    parser.add_argument("--parallel-workers", type=int, help="Worker count for independent/re-ID chunk rendering.")
     args = parser.parse_args()
 
     if args.run_dir:
         args.run_dir = Path(args.run_dir)
     elif args.trial is not None:
         args.run_dir = _find_trial_dir(args.trial)
-    elif args.latest:
-        args.run_dir = _latest_trial_dir()
     else:
         args.run_dir = _default_run_dir()
 
@@ -1253,6 +1897,9 @@ def main():
     args.imgsz = args.imgsz if args.imgsz is not None else YOLO_IMGSZ
     args.conf = args.conf if args.conf is not None else YOLO_CONF
     args.pd_flow_overlay = bool(PD_FLOW_OVERLAY and not args.no_pd_flow)
+    args.reid_precompute = bool(REID_PRECOMPUTE and not args.no_reid_precompute)
+    args.parallel_render = bool(PARALLEL_RENDER and not args.no_parallel_render)
+    args.parallel_workers = args.parallel_workers if args.parallel_workers is not None else PARALLEL_FRAME_WORKERS
 
     render_trial(args)
 

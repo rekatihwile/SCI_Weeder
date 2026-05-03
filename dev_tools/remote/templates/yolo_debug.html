@@ -213,6 +213,13 @@
         <button onclick="runScan()">Scan / Save Points</button>
         <button onclick="runMatch()">Match Cached Scan</button>
         <button onclick="closeCameras()">Close Cameras</button>
+        {% if kind == "survey" %}
+        <button id="saveConfigBtn" onclick="saveConfigSettings()" disabled
+          title="Run a scan first, then click to write these settings into config.py"
+          style="margin-top:12px;background:#1a3a1a;border:1px solid #4a8a4a;color:#8eff8e;width:100%;padding:7px 10px;">
+          Save Config Settings → config.py
+        </button>
+        {% endif %}
 
         <div class="status" id="status">Loading preview...</div>
 
@@ -302,6 +309,7 @@
       let frameH = 720;
       let modeLabel = "preview";
       let classNames = {};
+      let lastSuggestedConfig = null;
 
       const SETTINGS_FIELDS = [
         "mode",
@@ -656,6 +664,10 @@
         document.getElementById("status").innerText =
           "Scan saved. You can now run matching here or open /match.";
 
+        lastSuggestedConfig = data.suggested_config || null;
+        const saveBtn = document.getElementById("saveConfigBtn");
+        if (saveBtn && lastSuggestedConfig) saveBtn.disabled = false;
+
         document.getElementById("summary").innerText = JSON.stringify(
           {
             mode: modeLabel,
@@ -760,6 +772,36 @@
         document.getElementById("status").innerText = data.ok
           ? "Cameras closed."
           : data.error;
+      }
+
+      async function saveConfigSettings() {
+        if (!lastSuggestedConfig) {
+          document.getElementById("status").innerText =
+            "Run a scan first — config is only saved from a real scan result.";
+          return;
+        }
+        const saveBtn = document.getElementById("saveConfigBtn");
+        if (saveBtn) saveBtn.disabled = true;
+        document.getElementById("status").innerText = "Writing to config.py...";
+        try {
+          const res = await fetch("/api/save_survey_config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ suggested_config: lastSuggestedConfig }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            document.getElementById("status").innerText =
+              "✓ " + data.message + " (restart runtime to apply)";
+          } else {
+            document.getElementById("status").innerText =
+              "Save failed: " + data.error;
+            if (saveBtn) saveBtn.disabled = false;
+          }
+        } catch (e) {
+          document.getElementById("status").innerText = "Save failed: " + e;
+          if (saveBtn) saveBtn.disabled = false;
+        }
       }
 
       ["crop_w", "crop_h", "mode"].forEach((id) => {

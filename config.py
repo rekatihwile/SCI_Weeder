@@ -50,7 +50,7 @@ else:
 # Operator Toggles
 # =============================================================================
 
-HOMING = True
+HOMING = False
 # Used by main.py. True = home the gantry at startup.
 
 FIRE = False
@@ -272,7 +272,7 @@ OVERRIDE_POINT_MODE = False
 OVERRIDE_POINT_MODE_VALUE = "box_center"
 # Options: "box_center", "qpoint", "heatmap". True forces every CV state to this mode.
 
-SURVEY_POINT_MODE = "box_center"
+SURVEY_POINT_MODE = 'box_center'
 FINE_ALIGN_REID_POINT_MODE = "box_center"
 FINAL_SNAP_POINT_MODE = "qpoint"
 # Survey/Re-ID defaults stay fast. Final snap may use qpoint only when snap is enabled.
@@ -291,7 +291,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 10
+SURVEY_BURST_COUNT = 2
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1
@@ -300,16 +300,40 @@ SURVEY_MIN_HITS = 1
 SURVEY_CLUSTER_RADIUS_PX = 10.0
 # Used by coarse_move.py. Turn UP if burst detections jitter; DOWN to split nearby plants.
 
-SURVEY_YOLO_IMGSZ = None
+SURVEY_YOLO_IMGSZ = [608, 704]
 # Used by coarse_move.py survey burst. None = use actual frame size, no requested upscaling.
 # Set an int/tuple only if you intentionally want YOLO resizing.
 
-SURVEY_CROP_HALF_PX = 352
-# Used by coarse_move.py. If set (int), survey frames are cropped to a centred square of
-# 2*SURVEY_CROP_HALF_PX before YOLO — same approach as re-ID, much faster than full-frame.
-# E.g. 350 → 700×700 crop. None = full frame (default, safe, but slow).
+SURVEY_CROP_HALF_PX = None
+# Legacy symmetric square crop (half-size in px). Overridden by SURVEY_CROP_MODE when that is set.
+# None = full frame unless SURVEY_CROP_MODE is active.
 
-SURVEY_TARGET_CLASSES = None
+SURVEY_CROP_MODE = 'center_facing'
+# Crop mode for the survey burst. Mirrors the dev-tools dashboard crop logic exactly.
+# Options: "center_facing", "center", "full", "left", "right", "top", "bottom"
+# "center_facing": left cam crops right-of-center, right cam crops left-of-center (stereo sweet spot).
+# None disables mode-based cropping and falls back to SURVEY_CROP_HALF_PX.
+# Written by dev_tools "Save Config Settings"; can also be set manually.
+
+SURVEY_CROP_W = 704
+# Crop width in pixels used when SURVEY_CROP_MODE is set.
+
+SURVEY_CROP_H = 608
+# Crop height in pixels used when SURVEY_CROP_MODE is set.
+
+SURVEY_LEFT_OFFSET_X = -272
+SURVEY_LEFT_OFFSET_Y = 44
+# Full-frame pixel offset applied to the left-camera crop center (on top of SURVEY_CROP_MODE geometry).
+
+SURVEY_RIGHT_OFFSET_X = 304
+SURVEY_RIGHT_OFFSET_Y = 48
+# Same as above for the right camera.
+
+SURVEY_CONFIDENCE_OVERRIDE = 0.6
+# When set (float), overrides AI_CONFIDENCE for the survey burst only.
+# None = use AI_CONFIDENCE. Written by dev_tools "Save Config Settings".
+
+SURVEY_TARGET_CLASSES = [1]
 # Used by main.py/coarse_move.py. None uses AI_TARGET_CLASS; list[int] overrides survey only.
 
 SURVEY_CONF_SENSITIVITY_DEBUG = False

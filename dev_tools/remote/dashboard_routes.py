@@ -56,6 +56,7 @@ from dashboard_gantry import (
 from dashboard_settings import (
     get_page_settings,
     update_page_settings,
+    save_survey_config_to_config_py,
 )
 
 
@@ -133,6 +134,25 @@ def register_routes(app):
                 "ok": True,
                 "page": page,
                 "settings": get_page_settings(page),
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": repr(e)}), 500
+
+
+    @app.route("/api/save_survey_config", methods=["POST"])
+    def api_save_survey_config():
+        try:
+            data = request.get_json(silent=True) or {}
+            suggested = data.get("suggested_config", data)
+            if not isinstance(suggested, dict):
+                return jsonify({"ok": False, "error": "No suggested_config provided"}), 400
+
+            updated = save_survey_config_to_config_py(suggested)
+            names = [u["var"] for u in updated]
+            return jsonify({
+                "ok": True,
+                "updated": updated,
+                "message": f"Saved {len(updated)} value(s) to config.py: {', '.join(names)}",
             })
         except Exception as e:
             return jsonify({"ok": False, "error": repr(e)}), 500
