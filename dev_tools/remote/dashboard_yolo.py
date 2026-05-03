@@ -287,9 +287,32 @@ def run_cached_match():
 
     t0 = time.perf_counter()
 
+    left_dets = list(state.last_scan["left_detections"])
+    right_dets = list(state.last_scan["right_detections"])
+
+    # Cached scan points are already in rectified pixel space when frame_mode=rectified.
+    # Mark them explicitly so vision.matching does not apply raw->rectified remapping again.
+    if state.last_scan.get("frame_mode") == "rectified":
+        def _tag_rectified(dets):
+            out = []
+            for d in dets:
+                if not isinstance(d, dict):
+                    out.append(d)
+                    continue
+                item = dict(d)
+                if "point" in item and "point_rectified" not in item:
+                    item["point_rectified"] = tuple(item["point"])
+                if "box" in item and "box_rectified" not in item:
+                    item["box_rectified"] = tuple(item["box"])
+                out.append(item)
+            return out
+
+        left_dets = _tag_rectified(left_dets)
+        right_dets = _tag_rectified(right_dets)
+
     result = match_points(
-        state.last_scan["left_detections"],
-        state.last_scan["right_detections"],
+        left_dets,
+        right_dets,
     )
 
     raw_matches = result[0] if isinstance(result, tuple) else result

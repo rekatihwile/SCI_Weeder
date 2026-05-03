@@ -50,7 +50,7 @@ else:
 # Operator Toggles
 # =============================================================================
 
-HOMING = False
+HOMING = True
 # Used by main.py. True = home the gantry at startup.
 
 FIRE = False
