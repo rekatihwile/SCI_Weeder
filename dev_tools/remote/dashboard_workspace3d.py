@@ -101,6 +101,9 @@ class Workspace3DProjector:
         self.D1 = np.asarray(calib["D1"], dtype=np.float64)
         self.K2 = np.asarray(calib["K2"], dtype=np.float64)
         self.D2 = np.asarray(calib["D2"], dtype=np.float64)
+
+        # Raw stereo extrinsics: left camera -> right camera
+        self.R = np.asarray(calib["R"], dtype=np.float64)
         self.T = np.asarray(calib["T"], dtype=np.float64).reshape(3)
 
         self.R1 = np.asarray(rect["R1"], dtype=np.float64)
@@ -117,19 +120,6 @@ class Workspace3DProjector:
         self.T_rect = (self.R1 @ self.T.reshape(3, 1)).reshape(3)
 
     def workspace_xy_to_xrect(self, x_abs_mm, y_abs_mm, ref_x_mm, ref_y_mm, z_laser_mm):
-        """
-        Convert absolute workspace/gantry XY into rectified left-camera 3D frame.
-
-        This is the inverse of:
-
-            dx_mm = TRI_SIGN_X * TRI_X_GAIN * X_laser[0] * 1000
-            dy_mm = TRI_SIGN_Y * TRI_Y_GAIN * X_laser[1] * 1000
-
-        and:
-
-            X_laser = X_mid - laser_offset
-            X_mid   = X_rect - 0.5*T_rect
-        """
         dx_mm = float(x_abs_mm) - float(ref_x_mm)
         dy_mm = float(y_abs_mm) - float(ref_y_mm)
 
@@ -162,9 +152,6 @@ class Workspace3DProjector:
         return X_rect
 
     def project_rectified(self, X_rect):
-        """
-        Project into rectified left/right image coordinates using P1/P2.
-        """
         Xh = np.array(
             [X_rect[0], X_rect[1], X_rect[2], 1.0],
             dtype=np.float64,
@@ -183,10 +170,16 @@ class Workspace3DProjector:
 
     def project_raw(self, X_rect):
         """
-        Project into raw distorted camera coordinates.
+        Project into the ORIGINAL raw distorted camera coordinates.
+
+        X_rect is in the rectified-left camera frame.
+        So:
+          1) undo left rectification
+          2) transform raw-left -> raw-right using stereo extrinsics
+          3) project each into its own raw camera model
         """
         X_left_raw = self.R1.T @ X_rect
-        X_right_raw = self.R2.T @ (X_rect - self.T_rect)
+        X_right_raw = self.R @ X_left_raw + self.T
 
         objL = X_left_raw.reshape(1, 1, 3).astype(np.float64)
         objR = X_right_raw.reshape(1, 1, 3).astype(np.float64)
@@ -232,7 +225,6 @@ class Workspace3DProjector:
             "left_px": left_px,
             "right_px": right_px,
         }
-
 
 def get_projector():
     if state.workspace_projector is None:
@@ -295,19 +287,24 @@ def _inside_image(px):
     x, y = px
     return 0 <= x < FRAME_WIDTH and 0 <= y < FRAME_HEIGHT
 
-
 def _draw_projected_grid(img, projected_lines, side):
     """
-    Draw grid lines and red node points only.
+    Draw projected grid with small axis tick labels.
 
-    No per-line text labels here because the old constant_x/constant_y labels
-    cluttered the image badly.
+    Labels are only drawn on the workspace border:
+    - x labels along the y-min edge
+    - y labels along the x-min edge
+
+    This avoids the old cluttered constant_x / constant_y labels.
     """
     out = img.copy()
 
     grid_color = (0, 255, 255)
     point_color = (0, 0, 255)
+    tick_color = (255, 255, 255)
+    tick_shadow = (0, 0, 0)
 
+    # Draw grid lines and node points
     for line in projected_lines:
         img_pts = []
 
@@ -327,8 +324,59 @@ def _draw_projected_grid(img, projected_lines, side):
             if pt is not None:
                 cv2.circle(out, pt, 4, point_color, -1, cv2.LINE_AA)
 
-    return out
+    # Draw small tick labels only on border lines
+    # For x-lines, label the first valid point, which corresponds to y_min.
+    # For y-lines, label the first valid point, which corresponds to x_min.
+    for line in projected_lines:
+        kind = line["kind"]
+        value = line["value"]
 
+        pts = []
+        for p in line["points"]:
+            px = p[f"{side}_px"]
+            if px is not None and _inside_image(px):
+                pts.append((int(round(px[0])), int(round(px[1]))))
+            else:
+                pts.append(None)
+
+        valid = [p for p in pts if p is not None]
+        if not valid:
+            continue
+
+        if kind == "x":
+            x0, y0 = valid[0]
+            label = f"{value:.0f}"
+            pos = (x0 - 10, y0 + 18)
+        elif kind == "y":
+            x0, y0 = valid[0]
+            label = f"{value:.0f}"
+            pos = (x0 + 6, y0 + 4)
+        else:
+            continue
+
+        # black shadow then white text
+        cv2.putText(
+            out,
+            label,
+            pos,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            tick_shadow,
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            out,
+            label,
+            pos,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            tick_color,
+            1,
+            cv2.LINE_AA,
+        )
+
+    return out
 
 def _draw_text_box(img, lines):
     out = img.copy()
@@ -374,7 +422,7 @@ def build_projected_workspace_grid(params):
     nx = int(params.get("nx", 10))
     ny = int(params.get("ny", 10))
 
-    z_laser_mm = float(params.get("z_laser_mm", 100.0))
+    z_laser_mm = float(params.get("z_laser_mm", 250.0))
 
     cam = ensure_cameras()
 
@@ -421,16 +469,16 @@ def build_projected_workspace_grid(params):
     left_overlay = _draw_projected_grid(fL, projected_lines, "left")
     right_overlay = _draw_projected_grid(fR, projected_lines, "right")
 
-    text_lines = [
-        f"3D reprojection: {'rectified' if rectified else 'raw'}",
-        f"ref_xy = ({ref_x:.1f}, {ref_y:.1f}) mm  mode={ref_mode}",
-        f"Z_laser = {z_laser_mm:.1f} mm",
-        f"X = {x_min:.0f}..{x_max:.0f} mm  nx={nx}",
-        f"Y = {y_min:.0f}..{y_max:.0f} mm  ny={ny}",
-    ]
+    # text_lines = [
+    #     f"3D reprojection: {'rectified' if rectified else 'raw'}",
+    #     f"ref_xy = ({ref_x:.1f}, {ref_y:.1f}) mm  mode={ref_mode}",
+    #     f"Z_laser = {z_laser_mm:.1f} mm",
+    #     f"X = {x_min:.0f}..{x_max:.0f} mm  nx={nx}",
+    #     f"Y = {y_min:.0f}..{y_max:.0f} mm  ny={ny}",
+    # # ]
 
-    left_overlay = _draw_text_box(left_overlay, text_lines)
-    right_overlay = _draw_text_box(right_overlay, text_lines)
+    # left_overlay = _draw_text_box(left_overlay, text_lines)
+    # right_overlay = _draw_text_box(right_overlay, text_lines)
 
     return {
         "ok": True,

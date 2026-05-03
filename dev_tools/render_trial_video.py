@@ -2,6 +2,7 @@
 """Render an annotated video from a raw trial recording folder."""
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -11,6 +12,16 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
+
+# Apply pure-PyTorch NMS patch before any YOLO/AIDetector imports.
+_NMS_PATCH_PATH = REPO_ROOT / "bringup" / "_nms_patch.py"
+if _NMS_PATCH_PATH.exists():
+    _spec = importlib.util.spec_from_file_location("_nms_patch", _NMS_PATCH_PATH)
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+else:
+    print(f"[WARN] NMS patch not found: {_NMS_PATCH_PATH}")
 
 from config import (  # noqa: E402
     AI_CONFIDENCE,
@@ -30,7 +41,7 @@ from config import (  # noqa: E402
 #   python dev_tools/render_trial_video.py
 #
 # Example: TRIAL_NUMBER = 7 matches trial_recordings/trial_007_*
-TRIAL_NUMBER = 27
+TRIAL_NUMBER = 16
 
 # Optional fallback if you prefer a path instead of a number.
 TRIAL_RUN_DIR = None
@@ -46,6 +57,7 @@ YOLO_CONF = AI_CONFIDENCE
 
 OUTPUT_FPS = None
 MAX_FRAMES = None
+KEEP_VIDEOS = 5
 
 PD_FLOW_OVERLAY = True
 PD_FLOW_TRAIL_LEN = 28
@@ -145,9 +157,48 @@ def _resolve_output_path(output_spec, run_dir):
     return output_dir / f"{run_dir.name}_annotated.mp4"
 
 
+def _latest_trial_dir():
+    recordings_dir = REPO_ROOT / "trial_recordings"
+    matches = sorted(p for p in recordings_dir.glob("trial_*") if p.is_dir())
+    if not matches:
+        raise FileNotFoundError(f"No trial_* folders found in {recordings_dir}")
+    return matches[-1]
+
+
+def prune_old_rendered_videos(output_dir, keep=5):
+    """Delete older rendered videos in output_dir, keeping the newest `keep` files."""
+    try:
+        keep_n = int(keep)
+    except (TypeError, ValueError):
+        keep_n = 5
+    if keep_n <= 0:
+        return 0
+
+    root = (REPO_ROOT / "Rendered_Videos").resolve()
+    out = Path(output_dir).resolve()
+    if out != root:
+        return 0
+
+    videos = []
+    for ext in ("*.mp4", "*.avi"):
+        videos.extend(out.glob(ext))
+    videos = [p for p in videos if p.is_file()]
+    videos.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+    pruned = 0
+    for old_path in videos[keep_n:]:
+        try:
+            old_path.unlink()
+            pruned += 1
+        except OSError as exc:
+            print(f"[render] prune warning: could not delete {old_path}: {exc}")
+    return pruned
+
+
 def _load_records(run_dir):
     jsonl_path = run_dir / "manifest.jsonl"
     if jsonl_path.exists():
+        print(f"[render] Using manifest: {jsonl_path}")
         records = []
         with open(jsonl_path, "r") as f:
             for line in f:
@@ -1159,6 +1210,9 @@ def render_trial(args):
     if writer is not None:
         writer.release()
     print(f"[render] saved {output}")
+    pruned_count = prune_old_rendered_videos(REPO_ROOT / "Rendered_Videos", keep=args.keep_videos)
+    if args.keep_videos > 0:
+        print(f"[render] pruned {pruned_count} old rendered video(s) from {REPO_ROOT / 'Rendered_Videos'}")
 
 
 # =============================================================================
@@ -1169,9 +1223,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_dir", nargs="?", help="Raw trial recording folder containing manifest.jsonl")
     parser.add_argument("--trial", type=int, help="Trial number, e.g. 7 for trial_007_*.")
+    parser.add_argument("--latest", action="store_true", help="Render the latest trial_recordings/trial_* folder.")
     parser.add_argument("--output", help="Output MP4/AVI path. Default: run_dir/annotated_trial.mp4")
     parser.add_argument("--fps", type=float, help="Output FPS. Default estimates from manifest timestamps.")
     parser.add_argument("--max-frames", type=int, help="Render only the first N frames.")
+    parser.add_argument("--keep-videos", type=int, default=KEEP_VIDEOS,
+                        help="Keep newest N rendered .mp4/.avi files in Rendered_Videos. <=0 disables pruning.")
     parser.add_argument("--run-yolo", action="store_true", help="Run YOLO offline and draw boxes/labels/keypoints.")
     parser.add_argument("--model", help="YOLO .pt or .engine path/name. Default uses config backend selection.")
     parser.add_argument("--imgsz", type=int, help="YOLO inference imgsz for offline overlays.")
@@ -1183,6 +1240,8 @@ def main():
         args.run_dir = Path(args.run_dir)
     elif args.trial is not None:
         args.run_dir = _find_trial_dir(args.trial)
+    elif args.latest:
+        args.run_dir = _latest_trial_dir()
     else:
         args.run_dir = _default_run_dir()
 

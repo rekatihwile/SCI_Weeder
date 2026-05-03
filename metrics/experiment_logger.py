@@ -141,6 +141,40 @@ class ExperimentLogger:
         if target_id in self.targets:
             self.targets[target_id].update(target_data)
 
+    def log_reid_debug(self, target_id, reid_debug):
+        if target_id not in self.targets or not isinstance(reid_debug, dict):
+            return
+
+        entry = self.targets[target_id]
+        rejects = dict(reid_debug.get("reid_filter_rejects") or {})
+        chosen = dict(reid_debug.get("reid_chosen_detail") or {})
+        timing = dict(reid_debug.get("reid_timing") or {})
+
+        entry["reid_debug"] = dict(reid_debug)
+        entry.update({
+            "reid_ok": bool(reid_debug.get("reid_ok", False)),
+            "reid_error": reid_debug.get("reid_error"),
+            "reid_filter_mode": reid_debug.get("reid_filter_mode"),
+            "reid_left_count": int(reid_debug.get("reid_left_count", 0) or 0),
+            "reid_right_count": int(reid_debug.get("reid_right_count", 0) or 0),
+            "reid_match_count": int(reid_debug.get("reid_match_count", 0) or 0),
+            "reid_expected_cls": reid_debug.get("reid_expected_cls"),
+            "reid_point_mode": reid_debug.get("reid_point_mode"),
+            "reid_burst_count": reid_debug.get("reid_burst_count"),
+            "reid_chosen": bool(reid_debug.get("reid_chosen", False)),
+            "reid_chosen_pd_err_px": chosen.get("pd_err_px"),
+            "reid_chosen_tri_dist_mm": chosen.get("tri_dist_mm"),
+            "reid_chosen_geo_score": chosen.get("geo_score"),
+            "reid_reject_crop": int(rejects.get("crop", 0) or 0),
+            "reid_reject_duplicate": int(rejects.get("duplicate", 0) or 0),
+            "reid_reject_pd": int(rejects.get("pd", 0) or 0),
+            "reid_reject_epipolar": int(rejects.get("epipolar", 0) or 0),
+            "reid_reject_max_tri_dist": int(rejects.get("max_tri_dist", 0) or 0),
+            "reid_timing_total_s": timing.get("reid_total_time_s", timing.get("total_s")),
+            "reid_timing_yolo_s": timing.get("reid_yolo_time_s"),
+            "reid_timing_match_s": timing.get("reid_matching_time_s", timing.get("match_s")),
+        })
+
     def start_target_section(self, target_id, section_name):
         if target_id not in self.target_section_starts:
             self.target_section_starts[target_id] = {}
@@ -204,6 +238,13 @@ class ExperimentLogger:
             "fine_align_reid_yolo_time_s", "fine_align_reid_total_time_s",
             "fine_align_pd_lk_time_s", "final_snap_time_s",
             "fine_align_snap_used", "fine_align_snap_move_px",
+            "reid_ok", "reid_error", "reid_filter_mode",
+            "reid_left_count", "reid_right_count", "reid_match_count",
+            "reid_expected_cls", "reid_point_mode", "reid_burst_count",
+            "reid_chosen", "reid_chosen_pd_err_px", "reid_chosen_tri_dist_mm", "reid_chosen_geo_score",
+            "reid_reject_crop", "reid_reject_duplicate", "reid_reject_pd",
+            "reid_reject_epipolar", "reid_reject_max_tri_dist",
+            "reid_timing_total_s", "reid_timing_yolo_s", "reid_timing_match_s",
             "hit_success", "false_positive", "missed", "status", "notes",
         ]
         tgt_exists = tgt_path.exists()

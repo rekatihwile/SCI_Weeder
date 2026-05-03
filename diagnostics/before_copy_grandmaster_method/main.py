@@ -45,7 +45,7 @@ from config import (
 )
 
 from control.coarse_move import TriangulationCoarseMover, is_in_workspace
-from control.fine_align import (
+from control.fine_align_motion import (
     fine_align_target,
     close_fine_align_window,
 )

@@ -57,7 +57,7 @@ from config import (
 )
 
 from control.coarse_move import TriangulationCoarseMover, is_in_workspace
-from control.fine_align import (
+from control.fine_align_motion import (
     fine_align_target,
     close_fine_align_window,
 )
@@ -585,6 +585,9 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                             _add_run_total(logger, "total_fine_align_reid_time_s", fa_timing.get("fine_align_reid_total_time_s"))
                             _add_run_total(logger, "total_fine_align_pd_lk_time_s", fa_timing.get("fine_align_pd_lk_time_s"))
                             _add_run_total(logger, "total_final_snap_time_s", fa_timing.get("final_snap_time_s"))
+                        reid_debug = dict(getattr(fine_align_target, "last_reid_debug", {}) or {})
+                        if reid_debug:
+                            logger.log_reid_debug(i, reid_debug)
 
                     if aligned:
                         actual_hits.append(actual_entry)

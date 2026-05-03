@@ -112,9 +112,60 @@
     </div>
 
     <script>
+      const SETTINGS_PAGE = "camera";
+      const SETTINGS_FIELDS = ["rectified", "period_ms"];
+
       let live = true;
       let timer = null;
       let busy = false;
+
+      function collectSettings() {
+        const out = {};
+        SETTINGS_FIELDS.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          out[id] = el.type === "checkbox" ? !!el.checked : el.value;
+        });
+        return out;
+      }
+
+      function applySettings(settings) {
+        if (!settings || typeof settings !== "object") return;
+        SETTINGS_FIELDS.forEach((id) => {
+          if (!(id in settings)) return;
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el.type === "checkbox") {
+            el.checked = !!settings[id];
+          } else {
+            el.value = settings[id];
+          }
+        });
+      }
+
+      async function saveSettings() {
+        try {
+          await fetch(`/api/settings/${SETTINGS_PAGE}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: collectSettings() }),
+          });
+        } catch (_) {
+          // Keep camera controls responsive even if settings save fails.
+        }
+      }
+
+      async function loadSettings() {
+        try {
+          const res = await fetch(`/api/settings/${SETTINGS_PAGE}`);
+          const data = await res.json();
+          if (data && data.ok) {
+            applySettings(data.settings || {});
+          }
+        } catch (_) {
+          // Keep defaults when settings cannot be loaded.
+        }
+      }
 
       function periodMs() {
         return parseInt(document.getElementById("period_ms").value);
@@ -132,6 +183,7 @@
       }
 
       async function refreshOnce() {
+        await saveSettings();
         if (busy) return;
         busy = true;
 
@@ -175,6 +227,7 @@
       }
 
       async function resetCameras() {
+        await saveSettings();
         if (timer) clearTimeout(timer);
         live = false;
         busy = true;
@@ -232,11 +285,13 @@
       }
 
       function restartLoop() {
+        saveSettings();
         if (timer) clearTimeout(timer);
         if (live) loopTick();
       }
 
       function toggleLive() {
+        saveSettings();
         live = !live;
         document.getElementById("liveBtn").innerText = live
           ? "Pause Live"
@@ -252,6 +307,7 @@
       }
 
       async function closeCameras() {
+        await saveSettings();
         live = false;
         busy = true;
         document.getElementById("liveBtn").innerText = "Resume Live";
@@ -281,9 +337,18 @@
 
       document
         .getElementById("rectified")
-        .addEventListener("change", refreshOnce);
+        .addEventListener("change", () => {
+          saveSettings();
+          refreshOnce();
+        });
 
-      loopTick();
+      document
+        .getElementById("period_ms")
+        .addEventListener("change", saveSettings);
+
+      loadSettings().then(() => {
+        loopTick();
+      });
     </script>
     </div>
   </body>

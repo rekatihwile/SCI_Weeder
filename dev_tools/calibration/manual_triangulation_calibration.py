@@ -9,8 +9,8 @@ if str(ROOT) not in sys.path:
 
 from config import GRBL_PORT, MANUAL_DISPLAY_SCALE, SURVEY_POS_X, SURVEY_POS_Y
 from control.coarse_move import TriangulationCoarseMover
-from control.fine_align import fine_align_target
-import control.fine_align as fine_align_mod
+from control.fine_align_motion import fine_align_target
+import control.fine_align_motion as fine_align_mod
 from hardware.cameras import StereoCameras
 from hardware.gantry import Gantry
 from vision.detectors.manual_detector_local import ManualDetectorLocal

@@ -127,6 +127,16 @@
       .danger {
         border-color: #aa4444;
       }
+
+      .live-on {
+        color: #8cff9b;
+        font-weight: bold;
+      }
+
+      .live-off {
+        color: #ffcf70;
+        font-weight: bold;
+      }
     </style>
   </head>
 
@@ -166,12 +176,13 @@
 
           <div class="row">
             <label>Z laser mm</label>
-            <input id="z_laser_mm" type="number" value="100" step="1" />
+            <input id="z_laser_mm" type="number" value="250" step="1" />
           </div>
 
           <p class="small">
             Reference defaults to the gantry's current position. Manual Ref X/Y
-            is only for debugging.
+            is only for debugging. Z controls the assumed workspace/weed-plane
+            height used for reprojection.
           </p>
         </div>
 
@@ -180,42 +191,22 @@
 
           <div class="row">
             <label>X min</label>
-            <input
-              id="x_min"
-              type="number"
-              value="{{ workspace_x_min }}"
-              step="1"
-            />
+            <input id="x_min" type="number" value="{{ workspace_x_min }}" step="1" />
           </div>
 
           <div class="row">
             <label>X max</label>
-            <input
-              id="x_max"
-              type="number"
-              value="{{ workspace_x_max }}"
-              step="1"
-            />
+            <input id="x_max" type="number" value="{{ workspace_x_max }}" step="1" />
           </div>
 
           <div class="row">
             <label>Y min</label>
-            <input
-              id="y_min"
-              type="number"
-              value="{{ workspace_y_min }}"
-              step="1"
-            />
+            <input id="y_min" type="number" value="{{ workspace_y_min }}" step="1" />
           </div>
 
           <div class="row">
             <label>Y max</label>
-            <input
-              id="y_max"
-              type="number"
-              value="{{ workspace_y_max }}"
-              step="1"
-            />
+            <input id="y_max" type="number" value="{{ workspace_y_max }}" step="1" />
           </div>
 
           <div class="row">
@@ -230,6 +221,30 @@
 
           <button onclick="projectGrid()">Project 3D Grid</button>
           <button onclick="getGantryPosition()">Read Gantry Position</button>
+        </div>
+
+        <div class="panel">
+          <h3>Live Overlay</h3>
+
+          <div class="row">
+            <label>Refresh ms</label>
+            <input id="live_ms" type="number" value="700" step="100" min="100" />
+          </div>
+
+          <div class="btn-row">
+            <button onclick="startLive()">Start Live</button>
+            <button onclick="stopLive()">Stop Live</button>
+          </div>
+
+          <p>
+            Live status:
+            <span id="live_status" class="live-off">OFF</span>
+          </p>
+
+          <p class="small">
+            Live mode repeatedly grabs new frames and redraws the projected grid.
+            Use this while placing weeds into cells.
+          </p>
         </div>
 
         <div class="panel">
@@ -302,8 +317,8 @@
           </div>
 
           <p class="small">
-            After each jog, the page reads the new gantry position and
-            reprojects the grid using the live reference.
+            After each jog, the page reads the new gantry position and reprojects
+            the grid using the live reference.
           </p>
         </div>
 
@@ -331,6 +346,30 @@
     </div>
 
     <script>
+      const SETTINGS_PAGE = "workspace3d";
+      let liveTimer = null;
+      let liveBusy = false;
+
+      const SETTINGS_FIELDS = [
+        "rectified",
+        "ref_mode",
+        "ref_x",
+        "ref_y",
+        "z_laser_mm",
+        "x_min",
+        "x_max",
+        "y_min",
+        "y_max",
+        "nx",
+        "ny",
+        "live_ms",
+        "jog_step",
+        "jog_feed",
+        "abs_x",
+        "abs_y",
+        "abs_feed",
+      ];
+
       function value(id) {
         return document.getElementById(id).value;
       }
@@ -355,6 +394,55 @@
         return parseFloat(document.getElementById("abs_feed").value || "2000");
       }
 
+      function collectSettings() {
+        const out = {};
+        SETTINGS_FIELDS.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          out[id] = el.type === "checkbox" ? !!el.checked : el.value;
+        });
+        return out;
+      }
+
+      function applySettings(settings) {
+        if (!settings || typeof settings !== "object") return;
+        SETTINGS_FIELDS.forEach((id) => {
+          if (!(id in settings)) return;
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el.type === "checkbox") {
+            el.checked = !!settings[id];
+          } else {
+            el.value = settings[id];
+          }
+        });
+      }
+
+      async function saveSettings() {
+        try {
+          await fetch(`/api/settings/${SETTINGS_PAGE}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: collectSettings() }),
+          });
+        } catch (_) {
+          // Keep controls responsive even if settings save fails.
+        }
+      }
+
+      async function loadSettings() {
+        try {
+          const res = await fetch(`/api/settings/${SETTINGS_PAGE}`);
+          const data = await res.json();
+          if (data && data.ok) {
+            applySettings(data.settings || {});
+          }
+        } catch (_) {
+          // Keep template defaults if settings cannot be loaded.
+        }
+        updateRefInputState();
+      }
+
       function renderStatus(obj) {
         document.getElementById("status").innerText =
           typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
@@ -363,6 +451,17 @@
       function renderGantry(obj) {
         document.getElementById("gantry_status").innerText =
           typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+      }
+
+      function setLiveStatus(on) {
+        const el = document.getElementById("live_status");
+        if (on) {
+          el.innerText = "ON";
+          el.className = "live-on";
+        } else {
+          el.innerText = "OFF";
+          el.className = "live-off";
+        }
       }
 
       function updateRefInputState() {
@@ -389,10 +488,8 @@
         return await res.json();
       }
 
-      async function projectGrid() {
-        renderStatus("Projecting 3D grid...");
-
-        const payload = {
+      function makeProjectPayload() {
+        return {
           rectified: value("rectified") === "1",
           ref_mode: value("ref_mode"),
           ref_x: numberValue("ref_x"),
@@ -405,8 +502,17 @@
           nx: intValue("nx"),
           ny: intValue("ny"),
         };
+      }
 
-        const data = await postJSON("/api/workspace3d/project", payload);
+      async function projectGrid(silent = false) {
+        if (!silent) {
+          await saveSettings();
+        }
+        if (!silent) {
+          renderStatus("Projecting 3D grid...");
+        }
+
+        const data = await postJSON("/api/workspace3d/project", makeProjectPayload());
 
         if (!data.ok) {
           renderStatus(data);
@@ -438,7 +544,44 @@
         renderStatus(compact);
       }
 
+      async function liveTick() {
+        if (liveBusy) return;
+
+        liveBusy = true;
+        try {
+          await projectGrid(true);
+        } catch (err) {
+          renderStatus({ ok: false, error: String(err) });
+        } finally {
+          liveBusy = false;
+        }
+      }
+
+      function startLive() {
+        saveSettings();
+        stopLive();
+
+        const ms = Math.max(
+          100,
+          parseInt(document.getElementById("live_ms").value || "700"),
+        );
+
+        setLiveStatus(true);
+        liveTick();
+        liveTimer = setInterval(liveTick, ms);
+      }
+
+      function stopLive() {
+        saveSettings();
+        if (liveTimer !== null) {
+          clearInterval(liveTimer);
+          liveTimer = null;
+        }
+        setLiveStatus(false);
+      }
+
       async function getGantryPosition() {
+        await saveSettings();
         renderGantry("Reading gantry position...");
 
         const data = await postJSON("/api/gantry/position", {});
@@ -448,6 +591,7 @@
           document.getElementById("ref_y").value = data.position.y;
           document.getElementById("abs_x").value = data.position.x;
           document.getElementById("abs_y").value = data.position.y;
+          await saveSettings();
         }
 
         renderGantry(data);
@@ -460,21 +604,25 @@
       }
 
       async function openGantry() {
+        await saveSettings();
         const data = await postJSON("/api/gantry/open", {});
         renderGantry(data);
       }
 
       async function closeGantry() {
+        await saveSettings();
         const data = await postJSON("/api/gantry/close", {});
         renderGantry(data);
       }
 
       async function unlockGantry() {
+        await saveSettings();
         const data = await postJSON("/api/gantry/unlock", {});
         renderGantry(data);
       }
 
       async function homeGantry() {
+        await saveSettings();
         renderGantry("Homing...");
         const data = await postJSON("/api/gantry/home", {});
         renderGantry(data);
@@ -482,11 +630,13 @@
       }
 
       async function stopGantry() {
+        await saveSettings();
         const data = await postJSON("/api/gantry/stop", {});
         renderGantry(data);
       }
 
       async function jog(dx, dy) {
+        await saveSettings();
         renderGantry({ running: "/api/gantry/jog", dx: dx, dy: dy });
 
         const data = await postJSON("/api/gantry/jog", {
@@ -500,6 +650,7 @@
       }
 
       async function moveAbsolute() {
+        await saveSettings();
         const x = parseFloat(document.getElementById("abs_x").value || "0");
         const y = parseFloat(document.getElementById("abs_y").value || "0");
 
@@ -515,8 +666,20 @@
         await getGantryPositionThenProject();
       }
 
+      window.addEventListener("beforeunload", () => {
+        saveSettings();
+        stopLive();
+      });
+
+      SETTINGS_FIELDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("input", saveSettings);
+        el.addEventListener("change", saveSettings);
+      });
+
       window.addEventListener("load", () => {
-        getGantryPosition().then(projectGrid);
+        loadSettings().then(() => getGantryPosition().then(projectGrid));
       });
     </script>
   </body>

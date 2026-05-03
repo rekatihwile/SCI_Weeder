@@ -13,6 +13,7 @@ from flask import Response, jsonify, render_template, request
 
 from dashboard_state import state
 from dashboard_workspace3d import register_workspace3d_routes
+from dashboard_fine_align import register_fine_align_routes
 
 from dashboard_camera import (
     get_preview_frame,
@@ -52,6 +53,11 @@ from dashboard_gantry import (
     raw_gcode,
 )
 
+from dashboard_settings import (
+    get_page_settings,
+    update_page_settings,
+)
+
 
 # =============================================================================
 # Route registration
@@ -59,6 +65,7 @@ from dashboard_gantry import (
 
 def register_routes(app):
     register_workspace3d_routes(app)
+    register_fine_align_routes(app)
 
     # =========================================================================
     # Page routes
@@ -99,6 +106,58 @@ def register_routes(app):
     @app.route("/gantry")
     def gantry_page():
         return render_template("gantry.html")
+
+
+    # =========================================================================
+    # Persistent dashboard settings API
+    # =========================================================================
+
+    allowed_settings_pages = {
+        "survey",
+        "fine",
+        "fine_align",
+        "match",
+        "workspace3d",
+        "gantry",
+        "camera",
+    }
+
+    @app.route("/api/settings/<page_name>", methods=["GET"])
+    def api_get_page_settings(page_name):
+        try:
+            page = str(page_name or "").strip()
+            if page not in allowed_settings_pages:
+                return jsonify({"ok": False, "error": f"Unknown page: {page}"}), 404
+
+            return jsonify({
+                "ok": True,
+                "page": page,
+                "settings": get_page_settings(page),
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": repr(e)}), 500
+
+
+    @app.route("/api/settings/<page_name>", methods=["POST"])
+    def api_post_page_settings(page_name):
+        try:
+            page = str(page_name or "").strip()
+            if page not in allowed_settings_pages:
+                return jsonify({"ok": False, "error": f"Unknown page: {page}"}), 404
+
+            data = request.get_json(silent=True) or {}
+            values = data.get("settings", data)
+            if not isinstance(values, dict):
+                values = {}
+
+            settings = update_page_settings(page, values)
+            return jsonify({
+                "ok": True,
+                "page": page,
+                "settings": settings,
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": repr(e)}), 500
 
 
     # =========================================================================

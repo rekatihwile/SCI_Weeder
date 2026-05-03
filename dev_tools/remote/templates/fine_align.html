@@ -14,7 +14,7 @@
 
       .layout {
         display: grid;
-        grid-template-columns: 390px 1fr;
+        grid-template-columns: 420px 1fr;
         gap: 16px;
         height: calc(100vh - 42px);
         padding: 12px;
@@ -68,15 +68,27 @@
         padding: 5px 10px;
       }
 
+      .primary {
+        border-color: #3a7a3a;
+        background: #1b331b;
+        color: #a7ffb2;
+      }
+
       .status {
         margin: 10px 0;
         font-weight: bold;
       }
 
+      .hint {
+        color: #bbb;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
       pre {
         background: #222;
         padding: 10px;
-        max-height: 310px;
+        max-height: 260px;
         overflow: auto;
         font-size: 12px;
         white-space: pre-wrap;
@@ -106,124 +118,190 @@
         background: #222;
       }
 
-      .hint {
-        color: #bbb;
-        font-size: 13px;
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        border: 1px solid #333;
+        padding: 4px 6px;
+        text-align: left;
+      }
+
+      tr.selected {
+        background: #1a3a1a;
       }
 
       a {
         color: #8ecbff;
+      }
+
+      .section {
+        border-top: 1px solid #333;
+        margin-top: 12px;
+        padding-top: 10px;
       }
     </style>
   </head>
 
   <body>
     {% include '_nav.html' %}
+
     <div class="layout">
       <div class="sidebar">
         <h2>{{ title }}</h2>
 
-        <div class="controls">
-          <label>Crop mode</label>
-          <select id="mode">
-            <option value="center">center</option>
-            <option value="center_facing">center_facing</option>
-            <option value="full">full</option>
-            <option value="left">left</option>
-            <option value="right">right</option>
-            <option value="top">top</option>
-            <option value="bottom">bottom</option>
-          </select>
-          <span></span>
+        <div class="section">
+          <h3>1 · Cached Plan</h3>
+          <button onclick="loadPlan()">Load Cached Plan</button>
+          <div class="status" id="plan_status">No plan loaded.</div>
 
-          <label>Crop width px</label>
-          <input
-            id="crop_w"
-            type="range"
-            min="64"
-            max="1280"
-            value="{{ default_crop_w }}"
-            step="4"
-          />
-          <span id="wLabel">{{ default_crop_w }}</span>
+          <table id="target_table" style="display:none;">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>X</th>
+                <th>Y</th>
+                <th>Score</th>
+                <th>Cls</th>
+              </tr>
+            </thead>
+            <tbody id="target_body"></tbody>
+          </table>
 
-          <label>Crop height px</label>
-          <input
-            id="crop_h"
-            type="range"
-            min="64"
-            max="720"
-            value="{{ default_crop_h }}"
-            step="4"
-          />
-          <span id="hLabel">{{ default_crop_h }}</span>
-
-          <label>Burst count</label>
-          <input
-            id="burst_count"
-            type="number"
-            value="{{ default_burst }}"
-            min="1"
-            max="30"
-          />
-          <span></span>
-
-          <label>Min hits</label>
-          <input
-            id="min_hits"
-            type="number"
-            value="{{ default_min_hits }}"
-            min="1"
-            max="30"
-          />
-          <span></span>
-
-          <label>Point mode</label>
-          <select id="point_mode">
-            <option value="box_center">box_center</option>
-            <option value="qpoint">qpoint</option>
-          </select>
-          <span></span>
-
-          <label>Classes</label>
-          <input id="classes" type="text" value="" placeholder="all or 0,1,2" />
-          <span></span>
-
-          <label>Confidence</label>
-          <input id="conf" type="text" value="" placeholder="blank=config" />
-          <span></span>
-
-          <label>YOLO imgsz</label>
-          <select id="imgsz_mode">
-            <option value="snap_crop">snap crop W/H</option>
-            <option value="config">use config</option>
-          </select>
-          <span></span>
-
-          <label>Rectified</label>
-          <label>
-            <input id="rectified" type="checkbox" />
-            use rectified frames
-          </label>
-          <span></span>
+          <div class="controls" style="margin-top:8px;">
+            <label>Selected ID</label>
+            <input id="target_id" type="number" value="0" min="0" />
+            <span></span>
+          </div>
         </div>
 
-        <button onclick="refreshPreview()">Refresh Preview</button>
-        <button onclick="snapCrop()">Snap Crop to 32</button>
-        <button onclick="runScan()">Scan / Save Points</button>
-        <button onclick="runMatch()">Match Cached Scan</button>
-        <button onclick="closeCameras()">Close Cameras</button>
+        <div class="section">
+          <h3>2 · Coarse Move</h3>
+          <div class="controls">
+            <label>Feed mm/min</label>
+            <input id="coarse_feed" type="text" value="" placeholder="blank = default" />
+            <span></span>
+          </div>
+          <button class="primary" onclick="moveCoarse()">Move Coarse</button>
+          <div class="status" id="move_status">Idle.</div>
+        </div>
 
-        <div class="status" id="status">Loading preview...</div>
+        <div class="section">
+          <h3>3 · Re-ID CV Debug</h3>
 
-        <p class="hint">
-          center_facing = left camera crops right side, right camera crops left
-          side. Left/right offsets are independent and are applied in full-frame
-          pixel coordinates.
-        </p>
+          <p class="hint">
+            Fine Align Re-ID uses the same unified CV function as runtime.
+            This page calls control.fine_align_reid.run_fine_align_reid.
+          </p>
 
-        <h3>Model classes / current test config</h3>
-        <pre id="summary"></pre>
+          <div class="controls">
+            <label>Crop mode</label>
+            <select id="mode">
+              <option value="center">center</option>
+              <option value="center_facing">center_facing</option>
+              <option value="full">full</option>
+              <option value="left">left</option>
+              <option value="right">right</option>
+              <option value="top">top</option>
+              <option value="bottom">bottom</option>
+            </select>
+            <span></span>
+
+            <label>Crop width px</label>
+            <input
+              id="crop_w"
+              type="range"
+              min="64"
+              max="1280"
+              value="{{ default_crop_w }}"
+              step="4"
+            />
+            <span id="wLabel">{{ default_crop_w }}</span>
+
+            <label>Crop height px</label>
+            <input
+              id="crop_h"
+              type="range"
+              min="64"
+              max="720"
+              value="{{ default_crop_h }}"
+              step="4"
+            />
+            <span id="hLabel">{{ default_crop_h }}</span>
+
+            <label>Burst count</label>
+            <input
+              id="burst_count"
+              type="number"
+              value="{{ default_burst }}"
+              min="1"
+              max="30"
+            />
+            <span></span>
+
+            <label>Min hits</label>
+            <input
+              id="min_hits"
+              type="number"
+              value="{{ default_min_hits }}"
+              min="1"
+              max="30"
+            />
+            <span></span>
+
+            <label>Point mode</label>
+            <select id="point_mode">
+              <option value="box_center">box_center</option>
+              <option value="qpoint">qpoint</option>
+            </select>
+            <span></span>
+
+            <label>Y gate px</label>
+            <input id="y_gate_px" type="number" value="5" min="0" step="0.5" />
+            <span></span>
+
+            <label>Min disp px</label>
+            <input id="min_disp_px" type="number" value="10" min="0" step="1" />
+            <span></span>
+
+            <label>Max disp px</label>
+            <input id="max_disp_px" type="number" value="500" min="1" step="1" />
+            <span></span>
+
+            <label>Classes</label>
+            <input id="classes" type="text" value="" placeholder="all or 0,1,2" />
+            <span></span>
+
+            <label>Confidence</label>
+            <input id="conf" type="text" value="" placeholder="blank=config" />
+            <span></span>
+
+            <label>YOLO imgsz</label>
+            <input id="imgsz" type="text" value="" placeholder="blank=default" />
+            <span></span>
+
+            <label>Rectified</label>
+            <label>
+              <input id="rectified" type="checkbox" checked />
+              use rectified frames
+            </label>
+            <span></span>
+          </div>
+
+          <button onclick="refreshPreview()">Refresh Preview</button>
+          <button onclick="snapCrop()">Snap Crop to 32</button>
+          <button class="primary" onclick="runFineAlignScan()">Run Fine Align Re-ID Scan</button>
+          <button onclick="closeCameras()">Close Cameras</button>
+
+          <div class="status" id="status">Loading preview...</div>
+
+          <h3>Summary</h3>
+          <pre id="summary"></pre>
+        </div>
       </div>
 
       <div class="viewer">
@@ -234,25 +312,11 @@
 
             <div class="side-controls">
               <label>Offset X</label>
-              <input
-                id="left_offset_x"
-                type="range"
-                min="-500"
-                max="500"
-                value="0"
-                step="4"
-              />
+              <input id="left_offset_x" type="range" min="-500" max="500" value="0" step="4" />
               <span id="leftXLabel">0</span>
 
               <label>Offset Y</label>
-              <input
-                id="left_offset_y"
-                type="range"
-                min="-300"
-                max="300"
-                value="0"
-                step="4"
-              />
+              <input id="left_offset_y" type="range" min="-300" max="300" value="0" step="4" />
               <span id="leftYLabel">0</span>
             </div>
           </div>
@@ -263,25 +327,11 @@
 
             <div class="side-controls">
               <label>Offset X</label>
-              <input
-                id="right_offset_x"
-                type="range"
-                min="-500"
-                max="500"
-                value="0"
-                step="4"
-              />
+              <input id="right_offset_x" type="range" min="-500" max="500" value="0" step="4" />
               <span id="rightXLabel">0</span>
 
               <label>Offset Y</label>
-              <input
-                id="right_offset_y"
-                type="range"
-                min="-300"
-                max="300"
-                value="0"
-                step="4"
-              />
+              <input id="right_offset_y" type="range" min="-300" max="300" value="0" step="4" />
               <span id="rightYLabel">0</span>
             </div>
           </div>
@@ -292,7 +342,7 @@
     <script>
       const PAGE_KIND = "{{ kind }}";
       const DEFAULT_MODE = "{{ default_mode }}";
-      const SETTINGS_PAGE = PAGE_KIND || (window.location.pathname.includes("/fine") ? "fine" : "survey");
+      const SETTINGS_PAGE = "fine_align";
 
       let latestLeft = null;
       let latestRight = null;
@@ -302,17 +352,23 @@
       let frameH = 720;
       let modeLabel = "preview";
       let classNames = {};
+      let targets = {};
 
       const SETTINGS_FIELDS = [
+        "target_id",
+        "coarse_feed",
         "mode",
         "crop_w",
         "crop_h",
         "burst_count",
         "min_hits",
         "point_mode",
+        "y_gate_px",
+        "min_disp_px",
+        "max_disp_px",
         "classes",
         "conf",
-        "imgsz_mode",
+        "imgsz",
         "rectified",
         "left_offset_x",
         "left_offset_y",
@@ -376,7 +432,7 @@
             applySettings(data.settings || {});
           }
         } catch (_) {
-          // Keep defaults when settings file is unavailable.
+          // Keep defaults when settings are unavailable.
         }
 
         updateLabels();
@@ -386,6 +442,8 @@
       function getParams() {
         return {
           page_kind: PAGE_KIND,
+          target_id: val("target_id"),
+
           mode: val("mode"),
           crop_w: val("crop_w"),
           crop_h: val("crop_h"),
@@ -398,9 +456,12 @@
           burst_count: val("burst_count"),
           min_hits: val("min_hits"),
           point_mode: val("point_mode"),
+          y_gate_px: val("y_gate_px"),
+          min_disp_px: val("min_disp_px"),
+          max_disp_px: val("max_disp_px"),
           classes: val("classes"),
           conf: val("conf"),
-          imgsz_mode: val("imgsz_mode"),
+          imgsz: val("imgsz"),
           rectified: document.getElementById("rectified").checked ? "1" : "0",
         };
       }
@@ -408,13 +469,10 @@
       function updateLabels() {
         document.getElementById("wLabel").innerText = val("crop_w");
         document.getElementById("hLabel").innerText = val("crop_h");
-
         document.getElementById("leftXLabel").innerText = val("left_offset_x");
         document.getElementById("leftYLabel").innerText = val("left_offset_y");
-        document.getElementById("rightXLabel").innerText =
-          val("right_offset_x");
-        document.getElementById("rightYLabel").innerText =
-          val("right_offset_y");
+        document.getElementById("rightXLabel").innerText = val("right_offset_x");
+        document.getElementById("rightYLabel").innerText = val("right_offset_y");
       }
 
       function cropForSide(side) {
@@ -455,14 +513,8 @@
           cy = Math.floor((3 * frameH) / 4) + oy;
         }
 
-        let x0 = Math.max(
-          0,
-          Math.min(frameW - cropW, Math.floor(cx - cropW / 2)),
-        );
-        let y0 = Math.max(
-          0,
-          Math.min(frameH - cropH, Math.floor(cy - cropH / 2)),
-        );
+        let x0 = Math.max(0, Math.min(frameW - cropW, Math.floor(cx - cropW / 2)));
+        let y0 = Math.max(0, Math.min(frameH - cropH, Math.floor(cy - cropH / 2)));
 
         return { x0: x0, y0: y0, x1: x0 + cropW, y1: y0 + cropH };
       }
@@ -473,7 +525,6 @@
 
         canvas.width = frameW;
         canvas.height = frameH;
-
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         if (img) {
@@ -506,13 +557,10 @@
 
       function redrawOnlyCrop() {
         updateLabels();
-
         latestLeftCrop = cropForSide("left");
         latestRightCrop = cropForSide("right");
-
         drawCanvas("left_canvas", latestLeft, latestLeftCrop, "left");
         drawCanvas("right_canvas", latestRight, latestRightCrop, "right");
-
         updateSuggestedConfigPreview();
       }
 
@@ -524,12 +572,88 @@
         });
       }
 
+      async function loadPlan() {
+        document.getElementById("plan_status").innerText = "Loading plan...";
+
+        const res = await fetch("/api/fine_align/load_plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("plan_status").innerText = data.error;
+          return;
+        }
+
+        targets = {};
+        const body = document.getElementById("target_body");
+        body.innerHTML = "";
+
+        (data.targets || []).forEach((t) => {
+          targets[t.target_id] = t;
+          const row = document.createElement("tr");
+          row.dataset.id = t.target_id;
+          row.innerHTML =
+            `<td>${t.target_id}</td>` +
+            `<td>${Number(t.coarse_x_mm).toFixed(1)}</td>` +
+            `<td>${Number(t.coarse_y_mm).toFixed(1)}</td>` +
+            `<td>${Number(t.match_score || 0).toFixed(3)}</td>` +
+            `<td>${t.class_id ?? "—"}</td>`;
+          row.onclick = () => selectTarget(t.target_id);
+          body.appendChild(row);
+        });
+
+        document.getElementById("target_table").style.display = "";
+        if ((data.targets || []).length > 0) {
+          selectTarget(data.targets[0].target_id);
+        }
+
+        document.getElementById("plan_status").innerText =
+          `Loaded ${(data.targets || []).length} targets from ${data.path}`;
+      }
+
+      function selectTarget(id) {
+        setVal("target_id", id);
+        document.querySelectorAll("#target_body tr").forEach((row) => {
+          row.classList.toggle("selected", parseInt(row.dataset.id) === parseInt(id));
+        });
+
+        const t = targets[id];
+        if (t && t.class_id !== undefined && t.class_id !== null) {
+          // Use the selected target class by default.
+          setVal("classes", String(t.class_id));
+        }
+        updateSuggestedConfigPreview();
+        saveSettings();
+      }
+
+      async function moveCoarse() {
+        await saveSettings();
+        document.getElementById("move_status").innerText = "Moving coarse...";
+
+        const res = await fetch("/api/fine_align/move_coarse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_id: val("target_id"),
+            feed: val("coarse_feed"),
+          }),
+        });
+
+        const data = await res.json();
+        document.getElementById("move_status").innerText = data.ok
+          ? `Moved to (${data.commanded_x_mm?.toFixed(2)}, ${data.commanded_y_mm?.toFixed(2)}) mm`
+          : data.error;
+      }
+
       async function refreshPreview() {
         await saveSettings();
         updateLabels();
         modeLabel = "preview";
-        document.getElementById("status").innerText =
-          "Refreshing preview frame...";
+        document.getElementById("status").innerText = "Refreshing preview frame...";
 
         const res = await fetch("/api/preview_frame", {
           method: "POST",
@@ -547,7 +671,6 @@
 
         frameW = data.frame.width;
         frameH = data.frame.height;
-
         latestLeftCrop = data.left_crop;
         latestRightCrop = data.right_crop;
 
@@ -566,48 +689,41 @@
       function updateSuggestedConfigPreview() {
         const leftCrop = cropForSide("left");
         const rightCrop = cropForSide("right");
-
         const cropW = parseInt(val("crop_w"));
         const cropH = parseInt(val("crop_h"));
 
         const preview = {
           mode: modeLabel,
           page_kind: PAGE_KIND,
+          target_id: val("target_id"),
           rectified: document.getElementById("rectified").checked,
-
           model_classes: classNames,
-
           left_crop_full_frame: leftCrop,
           right_crop_full_frame: rightCrop,
-
           yolo_imgsz_if_snap_crop: [snap32(cropH), snap32(cropW)],
-
           requested_classes: val("classes") || "all",
           confidence_override: val("conf") || "config default",
-
+          cv_path: "control.fine_align_reid.run_fine_align_reid",
           suggested_debug_values: {
             crop_mode: val("mode"),
             crop_w: cropW,
             crop_h: cropH,
-
             left_offset_x: parseInt(val("left_offset_x")),
             left_offset_y: parseInt(val("left_offset_y")),
             right_offset_x: parseInt(val("right_offset_x")),
             right_offset_y: parseInt(val("right_offset_y")),
-
             burst_count: parseInt(val("burst_count")),
             min_hits: parseInt(val("min_hits")),
             point_mode: val("point_mode"),
-            imgsz_mode: val("imgsz_mode"),
+            y_gate_px: parseFloat(val("y_gate_px")),
+            min_disp_px: parseFloat(val("min_disp_px")),
+            max_disp_px: parseFloat(val("max_disp_px")),
+            imgsz: val("imgsz") || null,
             rectified: document.getElementById("rectified").checked,
           },
         };
 
-        document.getElementById("summary").innerText = JSON.stringify(
-          preview,
-          null,
-          2,
-        );
+        document.getElementById("summary").innerText = JSON.stringify(preview, null, 2);
       }
 
       function snapCrop() {
@@ -617,16 +733,16 @@
         saveSettings();
       }
 
-      async function runScan() {
+      async function runFineAlignScan() {
         await saveSettings();
         updateLabels();
-        modeLabel = "scan_result";
+        modeLabel = "fine_align_result";
 
         document.getElementById("status").innerText =
-          "Running scan / saving detections...";
-        document.getElementById("summary").innerText = "Running YOLO. Wait...";
+          "Running unified Fine Align Re-ID...";
+        document.getElementById("summary").innerText = "Running control.fine_align_reid.run_fine_align_reid. Wait...";
 
-        const res = await fetch("/api/run_scan", {
+        const res = await fetch("/api/fine_align/reid_once", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(getParams()),
@@ -635,102 +751,55 @@
         const data = await res.json();
 
         if (!data.ok) {
-          document.getElementById("status").innerText = "YOLO scan error.";
-          document.getElementById("summary").innerText = data.error;
+          document.getElementById("status").innerText = "Fine Align Re-ID scan error.";
+          document.getElementById("summary").innerText =
+            JSON.stringify(data, null, 2);
           return;
         }
 
         frameW = 1280;
         frameH = 720;
 
-        latestLeft = await loadImageFromBase64(data.left_image);
-        latestRight = await loadImageFromBase64(data.right_image);
+        latestLeft = data.left_image ? await loadImageFromBase64(data.left_image) : null;
+        latestRight = data.right_image ? await loadImageFromBase64(data.right_image) : null;
 
-        latestLeftCrop = data.left_crop;
-        latestRightCrop = data.right_crop;
+        latestLeftCrop = data.crop?.left || null;
+        latestRightCrop = data.crop?.right || null;
         classNames = data.class_names || classNames;
 
         drawCanvas("left_canvas", latestLeft, latestLeftCrop, "left");
         drawCanvas("right_canvas", latestRight, latestRightCrop, "right");
 
         document.getElementById("status").innerText =
-          "Scan saved. You can now run matching here or open /match.";
+          `Done. L=${data.left_count} R=${data.right_count} matches=${data.matched_count} chosen=${data.chosen ? "YES" : "NONE"}`;
 
         document.getElementById("summary").innerText = JSON.stringify(
           {
             mode: modeLabel,
-            page_kind: PAGE_KIND,
+            cv_path: data.cv_path,
             frame_mode: data.frame_mode,
-            cached: data.cached,
-
-            model_classes: classNames,
-
-            left_count: data.left_count,
-            right_count: data.right_count,
-
-            capture_s: data.capture_s,
-            yolo_s: data.yolo_s,
-
-            requested_classes: data.requested_classes,
-            confidence_override: data.confidence_override,
-            yolo_imgsz_used: data.imgsz,
-
-            left_crop_full_frame: data.left_crop,
-            right_crop_full_frame: data.right_crop,
-
-            suggested_config: data.suggested_config,
-          },
-          null,
-          2,
-        );
-      }
-
-      async function runMatch() {
-        await saveSettings();
-        document.getElementById("status").innerText =
-          "Running matching on cached scan...";
-        document.getElementById("summary").innerText =
-          "Matching cached detections. Wait...";
-
-        const res = await fetch("/api/run_match", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-
-        const data = await res.json();
-
-        if (!data.ok) {
-          document.getElementById("status").innerText = "Matching error.";
-          document.getElementById("summary").innerText = data.error;
-          return;
-        }
-
-        frameW = 1280;
-        frameH = 720;
-
-        latestLeft = await loadImageFromBase64(data.left_image);
-        latestRight = await loadImageFromBase64(data.right_image);
-
-        drawCanvas("left_canvas", latestLeft, null, "left");
-        drawCanvas("right_canvas", latestRight, null, "right");
-
-        document.getElementById("status").innerText =
-          "Matching done. Magenta labels/lines show matched pairs.";
-
-        document.getElementById("summary").innerText = JSON.stringify(
-          {
-            mode: "match_result",
-            frame_mode: data.frame_mode,
-            scan_timestamp: data.scan_timestamp,
+            rectified: data.rectified,
+            target_id: data.target_id,
+            expected_cls: data.expected_cls,
 
             left_count: data.left_count,
             right_count: data.right_count,
             matched_count: data.matched_count,
 
+            capture_s: data.capture_s,
+            yolo_s: data.yolo_s,
             match_s: data.match_s,
+            timing: data.timing,
+
+            chosen: data.chosen,
             matches: data.matches,
-            model_classes: data.class_names,
+
+            requested_classes: data.requested_classes,
+            confidence_override: data.confidence_override,
+            yolo_imgsz_used: data.imgsz,
+
+            crop: data.crop,
+            error: data.error,
           },
           null,
           2,
@@ -757,9 +826,7 @@
         drawCanvas("left_canvas", null, null, "left");
         drawCanvas("right_canvas", null, null, "right");
 
-        document.getElementById("status").innerText = data.ok
-          ? "Cameras closed."
-          : data.error;
+        document.getElementById("status").innerText = data.ok ? "Cameras closed." : data.error;
       }
 
       ["crop_w", "crop_h", "mode"].forEach((id) => {
@@ -767,31 +834,14 @@
         document.getElementById(id).addEventListener("change", redrawOnlyCrop);
       });
 
-      [
-        "left_offset_x",
-        "left_offset_y",
-        "right_offset_x",
-        "right_offset_y",
-      ].forEach((id) => {
+      ["left_offset_x", "left_offset_y", "right_offset_x", "right_offset_y"].forEach((id) => {
         document.getElementById(id).addEventListener("input", redrawOnlyCrop);
         document.getElementById(id).addEventListener("change", redrawOnlyCrop);
       });
 
-      [
-        "burst_count",
-        "min_hits",
-        "point_mode",
-        "classes",
-        "conf",
-        "imgsz_mode",
-        "rectified",
-      ].forEach((id) => {
-        document
-          .getElementById(id)
-          .addEventListener("input", updateSuggestedConfigPreview);
-        document
-          .getElementById(id)
-          .addEventListener("change", updateSuggestedConfigPreview);
+      ["burst_count", "min_hits", "point_mode", "y_gate_px", "min_disp_px", "max_disp_px", "classes", "conf", "imgsz", "rectified", "target_id"].forEach((id) => {
+        document.getElementById(id).addEventListener("input", updateSuggestedConfigPreview);
+        document.getElementById(id).addEventListener("change", updateSuggestedConfigPreview);
       });
 
       SETTINGS_FIELDS.forEach((id) => {
@@ -802,7 +852,6 @@
       });
 
       document.getElementById("mode").value = DEFAULT_MODE;
-
       loadSettings().then(refreshPreview);
     </script>
   </body>

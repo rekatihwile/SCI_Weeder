@@ -104,6 +104,19 @@ def main():
         start_xy=(SURVEY_POS_X, SURVEY_POS_Y),
         output_path=plan_path,
     )
+
+    # Save normalised plan for fine align debug pipeline
+    from pipeline.steps.fine_align_debug import (
+        normalize_planned_targets_to_plan,
+        save_latest_plan,
+    )
+    fine_align_plan = normalize_planned_targets_to_plan(
+        planned,
+        survey_ref_xy=(SURVEY_POS_X, SURVEY_POS_Y),
+        frame_mode="raw",
+    )
+    save_latest_plan(fine_align_plan)
+
     print(f"  Matched pairs: {len(matched_targets)}")
     print(f"  Solved targets: {len(solved)}")
     for i, s in enumerate(solved):

@@ -50,7 +50,7 @@ else:
 # Operator Toggles
 # =============================================================================
 
-HOMING = False
+HOMING = True
 # Used by main.py. True = home the gantry at startup.
 
 FIRE = False
@@ -167,9 +167,9 @@ FRAME_HEIGHT = 720
 # Used throughout calibration, detection, matching, and recording.
 
 WORKSPACE_X_MIN = 0.0
-WORKSPACE_X_MAX = 450.0
+WORKSPACE_X_MAX = 400.0
 WORKSPACE_Y_MIN = 0.0
-WORKSPACE_Y_MAX = 440.0
+WORKSPACE_Y_MAX = 400.0
 # Used by coarse_move.py, fine_align.py, workspace_plot.py, and grid_capture.py.
 # Shrink these if the gantry gets too close to walls.
 
@@ -291,7 +291,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 10
+SURVEY_BURST_COUNT = 3
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1
@@ -362,7 +362,7 @@ FINE_ALIGN_MIN_HITS = 1
 FINE_ALIGN_CLUSTER_RADIUS_PX = 35.0
 # Used by fine_align.py Re-ID. Turn UP if Re-ID detections jitter between burst frames.
 
-FINE_ALIGN_REID_CROP_HALF_PX = 128
+FINE_ALIGN_REID_CROP_HALF_PX = 500
 # Used by fine_align.py Re-ID burst crop. Turn UP to search a wider center square.
 
 FINE_ALIGN_REID_STEREO_DISP_PX = 0
@@ -380,17 +380,17 @@ FINE_ALIGN_REID_MIN_DISPARITY_PX = 10.0
 FINE_ALIGN_REID_MAX_DISPARITY_PX = 500.0
 # Used by fine_align.py after matching.py. Widen only if valid stereo pairs are rejected.
 
-FINE_ALIGN_REID_MAX_PD_ERROR_PX = 150.0
+FINE_ALIGN_REID_MAX_PD_ERROR_PX = 220
 # Used by fine_align.py candidate ranking. This is for a LEFT+RIGHT stereo pair average,
 # not individual points. Turn DOWN to require less fine-align travel.
 
-FINE_ALIGN_REID_EPIPOLAR_TOL_MULT = 3.0
+FINE_ALIGN_REID_EPIPOLAR_TOL_MULT = 6.0
 # Used by fine_align.py. Multiplier on the survey-fitted epipolar slope std dev.
 # Survey std is tight (measured across many pairs); re-ID individual pairs deviate more due
 # to depth variation and gantry-position effects.  3× gives ±3σ from survey mean.
 # A minimum floor of 0.15 is applied in code regardless of this multiplier.
 
-FINE_ALIGN_REID_MAX_TRI_DIST_MM = 20.0
+FINE_ALIGN_REID_MAX_TRI_DIST_MM = 35
 # Used by fine_align.py. Hard cutoff on re-ID candidate tri_dist from planned coarse position.
 # Good re-ID picks are <10mm. This blocks bad fallbacks (plants 40+mm away) when the
 # correct candidate was filtered out, preventing cascade duplicate-rejection failures.

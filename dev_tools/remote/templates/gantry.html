@@ -184,7 +184,7 @@
 
           <div class="row">
             <label>Feed</label>
-            <input id="jog_feed" type="number" step="1" value="1000" />
+            <input id="jog_feed" type="number" step="1" value="10000" />
           </div>
 
           <div class="jog-grid">
@@ -291,6 +291,17 @@
     </div>
 
     <script>
+      const SETTINGS_PAGE = "gantry";
+      const SETTINGS_FIELDS = [
+        "jog_step",
+        "jog_feed",
+        "abs_x",
+        "abs_y",
+        "abs_feed",
+        "raw_cmd",
+        "rectified_toggle",
+      ];
+
       function getJogStep() {
         return parseFloat(document.getElementById("jog_step").value || "0");
       }
@@ -301,6 +312,54 @@
 
       function getAbsFeed() {
         return parseFloat(document.getElementById("abs_feed").value || "0");
+      }
+
+      function collectSettings() {
+        const out = {};
+        SETTINGS_FIELDS.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          out[id] = el.type === "checkbox" ? !!el.checked : el.value;
+        });
+        return out;
+      }
+
+      function applySettings(settings) {
+        if (!settings || typeof settings !== "object") return;
+        SETTINGS_FIELDS.forEach((id) => {
+          if (!(id in settings)) return;
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el.type === "checkbox") {
+            el.checked = !!settings[id];
+          } else {
+            el.value = settings[id];
+          }
+        });
+      }
+
+      async function saveSettings() {
+        try {
+          await fetch(`/api/settings/${SETTINGS_PAGE}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: collectSettings() }),
+          });
+        } catch (_) {
+          // Keep controls responsive even if settings save fails.
+        }
+      }
+
+      async function loadSettings() {
+        try {
+          const res = await fetch(`/api/settings/${SETTINGS_PAGE}`);
+          const data = await res.json();
+          if (data && data.ok) {
+            applySettings(data.settings || {});
+          }
+        } catch (_) {
+          // Keep defaults when settings are unavailable.
+        }
       }
 
       function renderResult(data) {
@@ -342,52 +401,64 @@
       }
 
       function refreshStreams() {
+        saveSettings();
         const q = "rectified=" + streamRectifiedFlag() + "&t=" + Date.now();
         document.getElementById("left_stream").src = "/stream/left?" + q;
         document.getElementById("right_stream").src = "/stream/right?" + q;
       }
 
       async function resetCameras() {
+        await saveSettings();
         await postJSON("/api/reset_cameras", {});
         refreshStreams();
       }
 
       async function closeCameras() {
+        await saveSettings();
         await postJSON("/api/close_cameras", {});
         refreshStreams();
       }
 
       async function openGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/open", {});
       }
 
       async function getStatus() {
+        await saveSettings();
         await postJSON("/api/gantry/status", {});
       }
       async function getPosition() {
+        await saveSettings();
         await postJSON("/api/gantry/position", {});
       }
       async function closeGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/close", {});
       }
 
       async function unlockGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/unlock", {});
       }
 
       async function resetGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/reset", {});
       }
 
       async function stopGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/stop", {});
       }
 
       async function homeGantry() {
+        await saveSettings();
         await postJSON("/api/gantry/home", {});
       }
 
       async function jog(dx, dy) {
+        await saveSettings();
         await postJSON("/api/gantry/jog", {
           dx: dx,
           dy: dy,
@@ -396,6 +467,7 @@
       }
 
       async function moveAbsolute() {
+        await saveSettings();
         const x = parseFloat(document.getElementById("abs_x").value || "0");
         const y = parseFloat(document.getElementById("abs_y").value || "0");
 
@@ -408,9 +480,11 @@
 
       function setRaw(cmd) {
         document.getElementById("raw_cmd").value = cmd;
+        saveSettings();
       }
 
       async function sendRaw() {
+        await saveSettings();
         const cmd = document.getElementById("raw_cmd").value;
         await postJSON("/api/gantry/raw", { cmd: cmd });
       }
@@ -419,9 +493,18 @@
         .getElementById("rectified_toggle")
         .addEventListener("change", refreshStreams);
 
+      SETTINGS_FIELDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("input", saveSettings);
+        el.addEventListener("change", saveSettings);
+      });
+
       window.addEventListener("load", () => {
-        refreshStreams();
-        getStatus();
+        loadSettings().then(() => {
+          refreshStreams();
+          getStatus();
+        });
       });
     </script>
   </body>
