@@ -50,7 +50,7 @@ else:
 # Operator Toggles
 # =============================================================================
 
-HOMING = True
+HOMING = False
 # Used by main.py. True = home the gantry at startup.
 
 FIRE = False
@@ -167,9 +167,9 @@ FRAME_HEIGHT = 720
 # Used throughout calibration, detection, matching, and recording.
 
 WORKSPACE_X_MIN = 0.0
-WORKSPACE_X_MAX = 400.0
+WORKSPACE_X_MAX = 420.0
 WORKSPACE_Y_MIN = 0.0
-WORKSPACE_Y_MAX = 400.0
+WORKSPACE_Y_MAX = 420.0
 # Used by coarse_move.py, fine_align.py, workspace_plot.py, and grid_capture.py.
 # Shrink these if the gantry gets too close to walls.
 
@@ -291,7 +291,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 3
+SURVEY_BURST_COUNT = 10
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1
@@ -324,7 +324,7 @@ STEREO_MATCH_MIN_DISPARITY_PX = 5.0
 STEREO_MATCH_MAX_DISPARITY_PX = 250.0
 # Used by vision/matching.py. Widen only if true stereo pairs are being rejected.
 
-STEREO_MATCH_MAX_Y_DIFF_PX = 25.0
+STEREO_MATCH_MAX_Y_DIFF_PX = 10.0
 # Used by vision/matching.py. Turn UP only if valid left/right pairs are rejected.
 # Keep LOW: large y differences mean bad epipolar geometry or a wrong plant match.
 

@@ -415,6 +415,20 @@ def run_fine_align_reid(
 
         left_detections = _translate_to_full(left_stable_crop, x0, y0)
         right_detections = _translate_to_full(right_stable_crop, x0, y0)
+
+        # Re-ID detections come from rectified frames when use_rectified=True.
+        # Thread explicit rectified fields so matcher uses these directly and
+        # avoids applying raw->rectified remapping a second time.
+        if use_rectified:
+            for det in left_detections:
+                det["point_rectified"] = tuple(det["point"])
+                if "box" in det:
+                    det["box_rectified"] = tuple(det["box"])
+            for det in right_detections:
+                det["point_rectified"] = tuple(det["point"])
+                if "box" in det:
+                    det["box_rectified"] = tuple(det["box"])
+
         result["left_detections"] = left_detections
         result["right_detections"] = right_detections
 

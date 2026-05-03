@@ -1,13 +1,4 @@
 {
-  "run": {
-    "recording_dir": "/home/eli/LaserWeeder_CleanRuntime/trial_recordings/trial_017_20260502_202223",
-    "recording_manifest_path": "/home/eli/LaserWeeder_CleanRuntime/trial_recordings/trial_017_20260502_202223/manifest.jsonl",
-    "recording_frames_seen": 338,
-    "recording_frames_saved": 337,
-    "recording_frames_dropped": 0,
-    "recording_frame_save_time_s": 6.877,
-    "recording_elapsed_s": 22.553,
-    "run_status": "failed"
-  },
+  "run": {},
   "targets": {}
 }
