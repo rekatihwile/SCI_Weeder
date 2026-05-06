@@ -81,8 +81,8 @@ nodes = [
      "Entrypoint\nrun_runtime()"),
     ("hardware_setup","hardware_setup.py",              "entry",       7.0,  0.5,
      "Interactive setup wizard\n(detect cameras, serial port,\nwrite hardware_config.json)"),
-    ("config",        "config.py",                      "config",      3.5,  3.5,
-     "All constants & flags\n(paths, thresholds, toggles)\nloads params/hardware/*.json"),
+    ("config",        "config/  (package)",                 "config",      3.5,  3.5,
+     "runtime_flags.py  paths.py  hardware.py\nvision.py  survey_params.py\nalignment_params.py  recording.py\nexperiment.py\n→ from config import X still works"),
 
     # ── Params (files, not Python) ───────────────────────────────────────────
     ("params_hw",     "params/hardware/\nhardware_config.json\ncamera_config.json",
@@ -98,8 +98,6 @@ nodes = [
     # ── Pipeline ────────────────────────────────────────────────────────────
     ("preflight",     "pipeline/preflight.py",          "pipeline",    3.5,  2.0,
      "Print env/dependency info\n(no hardware touched)"),
-    ("p_context",     "pipeline/steps/context.py",      "pipeline",    3.5,  5.5,
-     "RunContext dataclass\n(shared state across steps)"),
     ("p_cam_setup",   "pipeline/steps/camera_setup.py", "pipeline",    3.5,  7.0,
      "open_cameras()\nrecover on failure"),
     ("p_gantry_setup","pipeline/steps/gantry_setup.py", "pipeline",    3.5,  8.5,
@@ -110,7 +108,7 @@ nodes = [
      "run_survey_detection()\nburst detect at survey position"),
     ("p_match_plan",  "pipeline/steps/match_plan.py",   "pipeline",    3.5, 13.0,
      "run_match_and_plan()\nstereo match → triangulate\n→ plan_targets()"),
-    ("runtime",       "pipeline/steps/runtime.py",      "pipeline",    3.5, 15.5,
+    ("runtime",       "pipeline/runtime.py",            "pipeline",    3.5, 15.5,
      "Main orchestration loop\nsurvey → match → plan\n→ per-target: coarse→fine→strike"),
     ("p_fa_debug",    "pipeline/steps/fine_align_debug.py","pipeline", 3.5, 17.5,
      "save/load cached plan\ncoarse-move to target\nrun Re-ID (no PD loop)"),
@@ -123,7 +121,8 @@ nodes = [
     ("mock_gantry",   "hardware/mock_gantry.py",        "hardware",    7.0,  8.5,
      "MockGantry\nFake gantry for dry-runs\nno serial required"),
 
-    # ── Vision ──────────────────────────────────────────────────────────────
+    ("visualization", "vision/visualization.py",        "vision",      10.5,  3.0,
+     "Single source of truth for drawing\nBOX_COLOR_CONFIRMED / _RAW\nQPOINT_COLOR  LABEL_FONT_SCALE\ndraw_detections()  draw_stable_detections()\ndraw_crop()  draw_matches()"),
     ("ai_detector",   "vision/detectors/\nai_detector.py",  "vision",  10.5,  5.0,
      "AIDetector  +  _WeedCVCore\n• YOLO segmentation (.pt/.engine)\n• MeristemPredictor heatmap CNN\n• burst-stable detection\n• batch qpoint inference"),
     ("manual_det",    "vision/detectors/\nmanual_detector_local.py","vision",10.5, 9.5,
@@ -193,11 +192,11 @@ nodes = [
     ("dash_fa",       "dev_tools/remote/\ndashboard_fine_align.py","dashboard",27.5,17.5,
      "Fine-align debug page\nLoad cached plan → coarse move\n→ Re-ID → show result"),
     ("dash_imgs",     "dev_tools/remote/\ndashboard_images.py","dashboard",27.5,19.5,
-     "Image drawing helpers\nbase64 encode  JPEG bytes\n(no hardware, no Flask)"),
+     "Thin shim → vision/visualization.py\nbase64 encode  JPEG bytes\n(no hardware, no Flask)"),
     ("dash_rect",     "dev_tools/remote/\ndashboard_rectify.py","dashboard",27.5,21.5,
      "Load stereo rectification maps\nApply remap to frame pair"),
     ("dash_settings", "dev_tools/remote/\ndashboard_settings.py","dashboard",27.5,23.5,
-     "Persistent dashboard UI state\nSave/load settings JSON\nwrite config.py survey params"),
+     "Persistent dashboard UI state\nSave/load settings JSON\nwrite config/survey_params.py"),
     ("dash_ws3d",     "dev_tools/remote/\ndashboard_workspace3d.py","dashboard",27.5,25.5,
      "3D workspace reprojection\nGantry XY → stereo pixels\n(inverse of triangulation)"),
 
@@ -254,7 +253,6 @@ edges = [
     ("config",      "params_calib",     "data"),
 
     # runtime → pipeline steps
-    ("runtime",     "p_context",        "call"),
     ("runtime",     "p_cam_setup",      "call"),
     ("runtime",     "p_gantry_setup",   "call"),
     ("runtime",     "p_det_setup",      "call"),
@@ -307,6 +305,11 @@ edges = [
 
     ("strike",       "gantry",          "call"),
     ("strike",       "cameras",         "uses"),
+
+    # vision/visualization — shared drawing
+    ("visualization","dash_imgs",        "uses"),
+    ("visualization","ai_detector",      "uses"),
+    ("visualization","cameras",          "uses"),
 
     # vision
     ("ai_detector",  "params_cv",       "data"),
