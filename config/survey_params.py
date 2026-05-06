@@ -103,3 +103,26 @@ STEREO_MATCH_MIN_SCORE  = 0.1
 STEREO_MATCH_MIN_BOX_IOU = 0.15
 STEREO_MATCH_IOU_WEIGHT  = 0.50
 # Used by vision/matching.py. Adjust IoU weight to trust box geometry more/less.
+
+
+# =============================================================================
+# Shared CV utilities — resolve override flags from config
+# Used by pipeline/steps/survey.py and control/fine_align_motion.py
+# =============================================================================
+
+def resolve_burst_count(default_count):
+    """Return the effective burst count, respecting OVERRIDE_BURST_NUMBER."""
+    if OVERRIDE_BURST_NUMBER:
+        return max(1, int(OVERRIDE_BURST_COUNT))
+    return max(1, int(default_count))
+
+
+def resolve_point_mode(default_mode):
+    """Return the effective point mode string, respecting OVERRIDE_POINT_MODE."""
+    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
+    mode = str(mode or "box_center").strip().lower()
+    if mode == "heatmap":
+        mode = "qpoint"
+    if mode not in ("box_center", "qpoint", "none"):
+        raise ValueError(f"Unknown point mode: {mode!r}")
+    return mode

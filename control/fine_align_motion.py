@@ -7,6 +7,7 @@ import numpy as np
 
 from ui.terminal import print_live_fine_align, end_live_fine_align
 from control.fine_align_reid import run_fine_align_reid
+from config.survey_params import resolve_burst_count, resolve_point_mode
 from config import (
     DETECTOR_MODE,
     FRAME_WIDTH,
@@ -100,29 +101,13 @@ _WS_MARGIN = 5.0
 _FINE_WINDOW = "Fine Align"
 
 
-def _resolve_burst_count(default_count):
-    if OVERRIDE_BURST_NUMBER:
-        return max(1, int(OVERRIDE_BURST_COUNT))
-    return max(1, int(default_count))
-
-
-def _resolve_point_mode(default_mode):
-    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
-    mode = str(mode or "box_center").strip().lower()
-    if mode == "heatmap":
-        mode = "qpoint"
-    if mode not in ("box_center", "qpoint", "none"):
-        raise ValueError(f"Unknown point mode: {mode}")
-    return mode
-
-
 def _fine_debug(msg):
     print(f"[FINE DEBUG] {msg}", flush=True)
 
 
 def _default_reid_settings():
     return {
-        "burst_count": _resolve_burst_count(BURST_COUNT),
+        "burst_count": resolve_burst_count(BURST_COUNT),
         "min_hits": MIN_HITS,
         "cluster_radius_px": CLUSTER_RADIUS_PX,
         "crop_half_px": _REID_HALF,
@@ -131,7 +116,7 @@ def _default_reid_settings():
         "min_disparity_px": _REID_MIN_DISP,
         "max_disparity_px": _REID_MAX_DISP,
         "max_pd_error_px": _REID_MAX_PD_ERR,
-        "point_mode": _resolve_point_mode(FINE_ALIGN_REID_POINT_MODE),
+        "point_mode": resolve_point_mode(FINE_ALIGN_REID_POINT_MODE),
     }
 
 
@@ -152,7 +137,7 @@ def _resolve_reid_settings(overrides=None):
     settings["min_disparity_px"] = float(settings["min_disparity_px"])
     settings["max_disparity_px"] = float(settings["max_disparity_px"])
     settings["max_pd_error_px"] = float(settings["max_pd_error_px"])
-    settings["point_mode"] = _resolve_point_mode(settings.get("point_mode", FINE_ALIGN_REID_POINT_MODE))
+    settings["point_mode"] = resolve_point_mode(settings.get("point_mode", FINE_ALIGN_REID_POINT_MODE))
     return settings
 
 
@@ -901,13 +886,13 @@ def fine_align_target(
     total_targets=None,
 ):
     target_label = f"{target_idx}/{total_targets}" if target_idx is not None else "?"
-    snap_point_mode = _resolve_point_mode(FINAL_SNAP_POINT_MODE)
+    snap_point_mode = resolve_point_mode(FINAL_SNAP_POINT_MODE)
     snap_enabled = (
         bool(FINE_ALIGN_ENABLE_SNAP)
         and str(FINE_ALIGN_SNAP_MODE).lower() == "qpoint"
         and snap_point_mode == "qpoint"
     )
-    snap_burst_count = _resolve_burst_count(FINAL_SNAP_BURST_COUNT)
+    snap_burst_count = resolve_burst_count(FINAL_SNAP_BURST_COUNT)
     fine_align_target.last_timing = {
         "fine_align_reid_yolo_time_s": 0.0,
         "fine_align_reid_total_time_s": 0.0,

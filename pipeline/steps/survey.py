@@ -12,22 +12,7 @@ from config import (
     SURVEY_POINT_MODE,
     SURVEY_TARGET_CLASSES,
 )
-
-
-def _resolve_burst_count(default_count):
-    if OVERRIDE_BURST_NUMBER:
-        return max(1, int(OVERRIDE_BURST_COUNT))
-    return max(1, int(default_count))
-
-
-def _resolve_point_mode(default_mode):
-    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
-    mode = str(mode or "box_center").strip().lower()
-    if mode == "heatmap":
-        mode = "qpoint"
-    if mode not in ("box_center", "qpoint"):
-        raise ValueError(f"Unknown point mode: {mode}")
-    return mode
+from config.survey_params import resolve_burst_count, resolve_point_mode
 
 
 def flush_camera_buffer(cameras, n=8):
@@ -38,8 +23,8 @@ def flush_camera_buffer(cameras, n=8):
 def run_survey_detection(cameras, detector, coarse_mover):
     flush_camera_buffer(cameras, n=8)
 
-    survey_burst_count = _resolve_burst_count(SURVEY_BURST_COUNT)
-    survey_point_mode = _resolve_point_mode(SURVEY_POINT_MODE)
+    survey_burst_count = resolve_burst_count(SURVEY_BURST_COUNT)
+    survey_point_mode = resolve_point_mode(SURVEY_POINT_MODE)
     print(f"[CV CONFIG] SURVEY burst_count={survey_burst_count} point_mode={survey_point_mode}")
 
     return coarse_mover.detect_stable_points(
