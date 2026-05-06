@@ -106,7 +106,7 @@ def update_page_settings(page_name: str, values: dict) -> dict:
 # config.py writer — "Save Config Settings"
 # =============================================================================
 
-_CONFIG_PY_PATH = BASE_DIR / "config.py"
+_CONFIG_PY_PATH = BASE_DIR / "config" / "survey_params.py"
 _config_write_lock = Lock()
 
 # Maps suggested_config keys (from run_debug_scan) → config.py variable names.
