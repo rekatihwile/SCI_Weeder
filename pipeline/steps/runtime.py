@@ -95,27 +95,6 @@ def build_detector():
     raise ValueError(f"Unknown DETECTOR_MODE: {DETECTOR_MODE}")
 
 
-def _resolve_burst_count(default_count):
-    if OVERRIDE_BURST_NUMBER:
-        return max(1, int(OVERRIDE_BURST_COUNT))
-    return max(1, int(default_count))
-
-
-def _resolve_point_mode(default_mode):
-    mode = OVERRIDE_POINT_MODE_VALUE if OVERRIDE_POINT_MODE else default_mode
-    mode = str(mode or "box_center").strip().lower()
-    if mode == "heatmap":
-        mode = "qpoint"
-    if mode not in ("box_center", "qpoint"):
-        raise ValueError(f"Unknown point mode: {mode}")
-    return mode
-
-
-def _flush_camera_buffer(cameras, n=8):
-    for _ in range(n):
-        cameras.read_pair()
-
-
 def _save_manifest(manifest, timestamp, recording_dir=None):
     if recording_dir is not None:
         recording_dir.mkdir(parents=True, exist_ok=True)

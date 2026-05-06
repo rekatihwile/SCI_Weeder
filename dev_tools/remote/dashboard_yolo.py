@@ -274,17 +274,7 @@ def run_debug_scan(params):
 # Cached match
 # =============================================================================
 
-def normalize_match(match):
-    if isinstance(match, dict):
-        if "left_px" in match and "right_px" in match:
-            return match
-    if isinstance(match, (list, tuple)) and len(match) >= 2:
-        return {
-            "left_px": tuple(match[0]),
-            "right_px": tuple(match[1]),
-            "score": float(match[2]) if len(match) >= 3 and isinstance(match[2], (int, float)) else 1.0,
-        }
-    raise ValueError(f"Unknown match format: {type(match)} {match}")
+from pipeline.steps.match_plan import normalize_match
 
 
 def _fallback_box(point, half=12.0):
