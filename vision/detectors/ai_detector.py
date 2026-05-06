@@ -6,6 +6,12 @@ import warnings
 import cv2
 import numpy as np
 import torch
+from vision.visualization import (
+    BOX_COLOR_RAW,
+    QPOINT_COLOR, QPOINT_OUTLINE_COLOR, QPOINT_RADIUS, QPOINT_OUTLINE_RADIUS,
+    LABEL_FONT, LABEL_FONT_SCALE, LABEL_THICKNESS,
+    draw_stable_detections as _vis_draw_stable,
+)
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
@@ -547,7 +553,12 @@ class _WeedCVCore:
         ]
 
     def draw_detections(self, frame, boxes=None, points=None):
-        """Draw YOLO boxes + qpoint markers on frame. Uses self.filtered_boxes if boxes is None."""
+        """Draw YOLO boxes + qpoint markers on frame.
+
+        Uses internal YOLO box objects (not the public dict format).
+        Called by render_trial_video.py and internally during debug.
+        Colours come from vision.visualization — edit there to restyle.
+        """
         if boxes is None:
             boxes = self.filtered_boxes
         if points is None:
@@ -559,34 +570,25 @@ class _WeedCVCore:
             conf = float(b.conf[0].cpu().item())
             cls_id = int(b.cls[0].cpu().item())
             cls_name = self.yolo.names.get(cls_id, str(cls_id))
-            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 220, 0), 2)
+            cv2.rectangle(out, (x1, y1), (x2, y2), BOX_COLOR_RAW, 2)
             label = f"{cls_name} {conf:.2f}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 2, y1), (0, 220, 0), -1)
-            cv2.putText(out, label, (x1 + 1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            (tw, th), _ = cv2.getTextSize(label, LABEL_FONT, LABEL_FONT_SCALE, LABEL_THICKNESS)
+            cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 2, y1), BOX_COLOR_RAW, -1)
+            cv2.putText(out, label, (x1 + 1, y1 - 4), LABEL_FONT, LABEL_FONT_SCALE, (0, 0, 0), LABEL_THICKNESS)
             if i < len(points):
                 px, py = int(points[i][0]), int(points[i][1])
-                cv2.circle(out, (px, py), 7, (0, 0, 255), -1)
-                cv2.circle(out, (px, py), 10, (255, 255, 255), 1)
+                cv2.circle(out, (px, py), QPOINT_RADIUS, QPOINT_COLOR, -1)
+                cv2.circle(out, (px, py), QPOINT_OUTLINE_RADIUS, QPOINT_OUTLINE_COLOR, 1)
         return out
 
     def draw_stable_detections(self, frame, stable_points):
-        """Draw burst-stable cluster results (mean box + mean qpoint + view count)."""
-        out = frame.copy()
-        for s in stable_points:
-            x1, y1, x2, y2 = (int(v) for v in s["box"])
-            conf = s.get("conf", 0.0)
-            cls_id = s.get("cls", 0)
-            cls_name = self.yolo.names.get(cls_id, str(cls_id))
-            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 200, 255), 2)
-            label = f"{cls_name} {conf:.2f} [{s['views']}v]"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 2, y1), (0, 200, 255), -1)
-            cv2.putText(out, label, (x1 + 1, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-            px, py = int(s["point"][0]), int(s["point"][1])
-            cv2.circle(out, (px, py), 7, (0, 0, 255), -1)
-            cv2.circle(out, (px, py), 10, (255, 255, 255), 1)
-        return out
+        """Draw burst-stable cluster results.
+
+        Delegates to vision.visualization.draw_stable_detections so that the
+        dashboard and runtime always render detections identically.
+        Edit vision/visualization.py to restyle colours, labels, or dot sizes.
+        """
+        return _vis_draw_stable(frame, stable_points, cls_names=self.yolo.names)
 
     def refine_one_heatmap(self, crop_pt):
         """Run heatmap on ONE detection using the last burst merged image.
