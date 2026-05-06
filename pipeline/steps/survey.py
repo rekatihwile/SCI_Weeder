@@ -11,6 +11,7 @@ from config import (
     SURVEY_MIN_HITS,
     SURVEY_POINT_MODE,
     SURVEY_TARGET_CLASSES,
+    SURVEY_AVOID_CLASSES,
 )
 from config.survey_params import resolve_burst_count, resolve_point_mode
 
@@ -25,7 +26,11 @@ def run_survey_detection(cameras, detector, coarse_mover):
 
     survey_burst_count = resolve_burst_count(SURVEY_BURST_COUNT)
     survey_point_mode = resolve_point_mode(SURVEY_POINT_MODE)
-    print(f"[CV CONFIG] SURVEY burst_count={survey_burst_count} point_mode={survey_point_mode}")
+    print(
+        f"[CV CONFIG] SURVEY burst_count={survey_burst_count} "
+        f"point_mode={survey_point_mode} "
+        f"avoid_classes={SURVEY_AVOID_CLASSES}"
+    )
 
     return coarse_mover.detect_stable_points(
         cameras=cameras,

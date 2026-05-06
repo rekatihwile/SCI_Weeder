@@ -19,10 +19,10 @@ RECORD_RAW_FRAMES_ONLY = True
 RECORD_FRAME_FORMAT  = "jpg"
 # Used by hardware/cameras.py. Options: "jpg", "jpeg", or "png".
 
-RECORD_JPEG_QUALITY  = 90
+RECORD_JPEG_QUALITY  = 75
 # Used by hardware/cameras.py when RECORD_FRAME_FORMAT is jpg/jpeg.
 
-RECORD_EVERY_N_FRAMES   = 1
+RECORD_EVERY_N_FRAMES   = 5
 RECORD_MAX_FPS          = None
 RECORD_MIN_INTERVAL_SEC = 0.0
 # RECORD_MAX_FPS, when set, takes precedence over RECORD_MIN_INTERVAL_SEC.

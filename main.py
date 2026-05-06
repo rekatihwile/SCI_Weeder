@@ -17,8 +17,22 @@ from pipeline.runtime import run_runtime
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="LaserWeeder runtime")
+    parser.add_argument(
+        "--dry-run-grid-filter",
+        action="store_true",
+        help="run survey/triangulation/grid filtering with a mock gantry and stop before target execution",
+    )
+    args = parser.parse_args()
+
     try:
-        run_runtime(use_real_gantry=True, execute_targets=True)
+        run_runtime(
+            use_real_gantry=not args.dry_run_grid_filter,
+            execute_targets=not args.dry_run_grid_filter,
+            dry_run_grid_filter=args.dry_run_grid_filter,
+        )
         print("\n[MAIN] Runtime finished.")
     except KeyboardInterrupt:
         print("\n[MAIN] Interrupted by user.")

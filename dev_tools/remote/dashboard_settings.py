@@ -106,25 +106,30 @@ def update_page_settings(page_name: str, values: dict) -> dict:
 # config.py writer — "Save Config Settings"
 # =============================================================================
 
-_CONFIG_PY_PATH = BASE_DIR / "config" / "survey_params.py"
+_CONFIG_PY_PATH        = BASE_DIR / "config" / "survey_params.py"
+_VISION_CONFIG_PY_PATH = BASE_DIR / "config" / "vision.py"
 _config_write_lock = Lock()
 
-# Maps suggested_config keys (from run_debug_scan) → config.py variable names.
-# Only keys listed here are ever touched; everything else in config.py is left alone.
+# Maps suggested_config keys → (config_file_path, variable_name_in_file).
+# Only keys listed here are ever touched; all other content is preserved.
 _SURVEY_CONFIG_MAP = {
-    "BURST_COUNT":      "SURVEY_BURST_COUNT",
-    "MIN_HITS":         "SURVEY_MIN_HITS",
-    "POINT_MODE":       "SURVEY_POINT_MODE",
-    "TARGET_CLASSES":   "SURVEY_TARGET_CLASSES",
-    "YOLO_IMGSZ_USED":  "SURVEY_YOLO_IMGSZ",
-    "CONFIDENCE_OVERRIDE": "SURVEY_CONFIDENCE_OVERRIDE",
-    "CROP_MODE":        "SURVEY_CROP_MODE",
-    "CROP_W":           "SURVEY_CROP_W",
-    "CROP_H":           "SURVEY_CROP_H",
-    "LEFT_OFFSET_X":    "SURVEY_LEFT_OFFSET_X",
-    "LEFT_OFFSET_Y":    "SURVEY_LEFT_OFFSET_Y",
-    "RIGHT_OFFSET_X":   "SURVEY_RIGHT_OFFSET_X",
-    "RIGHT_OFFSET_Y":   "SURVEY_RIGHT_OFFSET_Y",
+    # written to config/survey_params.py
+    "BURST_COUNT":         (_CONFIG_PY_PATH,        "SURVEY_BURST_COUNT"),
+    "MIN_HITS":            (_CONFIG_PY_PATH,         "SURVEY_MIN_HITS"),
+    "POINT_MODE":          (_CONFIG_PY_PATH,         "SURVEY_POINT_MODE"),
+    "TARGET_CLASSES":      (_CONFIG_PY_PATH,         "SURVEY_TARGET_CLASSES"),
+    "AVOID_CLASSES":       (_CONFIG_PY_PATH,         "SURVEY_AVOID_CLASSES"),
+    "YOLO_IMGSZ_USED":     (_CONFIG_PY_PATH,         "SURVEY_YOLO_IMGSZ"),
+    "CONFIDENCE_OVERRIDE": (_CONFIG_PY_PATH,         "SURVEY_CONFIDENCE_OVERRIDE"),
+    "CROP_MODE":           (_CONFIG_PY_PATH,         "SURVEY_CROP_MODE"),
+    "CROP_W":              (_CONFIG_PY_PATH,         "SURVEY_CROP_W"),
+    "CROP_H":              (_CONFIG_PY_PATH,         "SURVEY_CROP_H"),
+    "LEFT_OFFSET_X":       (_CONFIG_PY_PATH,         "SURVEY_LEFT_OFFSET_X"),
+    "LEFT_OFFSET_Y":       (_CONFIG_PY_PATH,         "SURVEY_LEFT_OFFSET_Y"),
+    "RIGHT_OFFSET_X":      (_CONFIG_PY_PATH,         "SURVEY_RIGHT_OFFSET_X"),
+    "RIGHT_OFFSET_Y":      (_CONFIG_PY_PATH,         "SURVEY_RIGHT_OFFSET_Y"),
+    # written to config/vision.py
+    "GLOBAL_AVOID_CLASSES": (_VISION_CONFIG_PY_PATH, "AVOID_CLASSES"),
 }
 
 
@@ -148,41 +153,50 @@ def _fmt_config_val(v) -> str:
     return repr(v)
 
 
-def save_survey_config_to_config_py(suggested_config: dict) -> list:
-    """Write survey tuning values from suggested_config into config.py in-place.
+def _write_config_vars(file_path: Path, var_updates: dict) -> list:
+    """Rewrite specific variable assignments in a config .py file in-place.
 
-    Only the variables listed in _SURVEY_CONFIG_MAP are touched — all other
-    config.py content (comments, formatting, unrelated vars) is preserved.
+    var_updates: {var_name: new_value}
+    Returns list of {"var": name, "value": repr} for each var actually updated.
+    """
+    content = file_path.read_text()
+    updated = []
+    for cfg_var, new_val in var_updates.items():
+        val_repr = _fmt_config_val(new_val)
+        pattern = re.compile(
+            r"^(" + re.escape(cfg_var) + r"\s*=\s*).*$",
+            re.MULTILINE,
+        )
+        new_content, n = pattern.subn(lambda m, vr=val_repr: m.group(1) + vr, content)
+        if n == 0:
+            continue
+        content = new_content
+        updated.append({"var": cfg_var, "value": val_repr})
+
+    tmp = file_path.with_suffix(".py.tmp")
+    tmp.write_text(content)
+    tmp.replace(file_path)
+    return updated
+
+
+def save_survey_config_to_config_py(suggested_config: dict) -> list:
+    """Write survey tuning values from suggested_config into config files in-place.
+
+    Entries in _SURVEY_CONFIG_MAP map suggested_config keys to (file, var_name).
+    Only the listed variables are touched; all other file content is preserved.
 
     Returns a list of {"var": name, "value": repr} dicts for each updated var.
     """
     with _config_write_lock:
-        content = _CONFIG_PY_PATH.read_text()
-        updated = []
-
-        for sc_key, cfg_var in _SURVEY_CONFIG_MAP.items():
+        # Group updates by target file.
+        by_file: dict[Path, dict] = {}
+        for sc_key, (cfg_path, cfg_var) in _SURVEY_CONFIG_MAP.items():
             if sc_key not in suggested_config:
                 continue
+            by_file.setdefault(cfg_path, {})[cfg_var] = suggested_config[sc_key]
 
-            new_val = suggested_config[sc_key]
-            val_repr = _fmt_config_val(new_val)
-
-            # Match the exact assignment line: VAR_NAME = <anything to end of line>
-            pattern = re.compile(
-                r"^(" + re.escape(cfg_var) + r"\s*=\s*).*$",
-                re.MULTILINE,
-            )
-            new_content, n = pattern.subn(lambda m, vr=val_repr: m.group(1) + vr, content)
-
-            if n == 0:
-                continue  # var not found — skip rather than append a stray line
-
-            content = new_content
-            updated.append({"var": cfg_var, "value": val_repr})
-
-        # Atomic write: write to .tmp then rename so a crash mid-write can't corrupt config.py
-        tmp = _CONFIG_PY_PATH.with_suffix(".py.tmp")
-        tmp.write_text(content)
-        tmp.replace(_CONFIG_PY_PATH)
+        updated = []
+        for file_path, var_updates in by_file.items():
+            updated.extend(_write_config_vars(file_path, var_updates))
 
         return updated

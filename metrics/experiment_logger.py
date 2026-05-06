@@ -6,6 +6,12 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _bbox_area(box):
+    if not box or len(box) < 4:
+        return None
+    return round(max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1])), 3)
+
+
 class ExperimentLogger:
     def __init__(self, output_dir="experiments/metrics", config=None):
         self.output_dir = Path(output_dir)
@@ -67,6 +73,37 @@ class ExperimentLogger:
             "total_run_time_s": None,
             "planned_path_length_mm": None,
             "actual_path_length_mm": None,
+            "experiment_grid_enabled": None,
+            "trial_filter_enabled": None,
+            "trial_filter_mode": None,
+            "random_seed": None,
+            "grid_rows": None,
+            "grid_cols": None,
+            "grid_x_min_mm": None,
+            "grid_x_max_mm": None,
+            "grid_y_min_mm": None,
+            "grid_y_max_mm": None,
+            "cell_width_mm": None,
+            "cell_height_mm": None,
+            "survey_origin_x_mm": None,
+            "survey_origin_y_mm": None,
+            "survey_origin_cell_id": None,
+            "survey_origin_cell_row": None,
+            "survey_origin_cell_col": None,
+            "surveyed_target_count": None,
+            "requested_active_cell_count": None,
+            "selected_target_count": None,
+            "rejected_target_count": None,
+            "occupied_cell_count": None,
+            "occupied_cell_ids": None,
+            "selected_cell_ids": None,
+            "rejected_cell_ids": None,
+            "mean_selected_radius_mm": None,
+            "max_selected_radius_mm": None,
+            "mean_selected_distance_from_cell_center_mm": None,
+            "selected_spread_mm": None,
+            "selected_convex_hull_area_mm2": None,
+            "total_treatment_time_s": None,
             "area_rate_mm2_per_s": None,
             "area_rate_m2_per_min": None,
             "weeds_per_min": None,
@@ -91,6 +128,7 @@ class ExperimentLogger:
             fired = self.run.get("num_targets_fired") or 0
             if elapsed > 0:
                 self.run["weeds_per_min"] = round(fired * 60 / elapsed, 3)
+        self.compute_treatment_totals()
 
     def start_section(self, name):
         self.section_starts[name] = time.perf_counter()
@@ -109,9 +147,24 @@ class ExperimentLogger:
             "class_name": None,
             "class_id": None,
             "confidence": None,
+            "weed_bbox_area_px2": None,
+            "weed_mask_area_px2": None,
             "x_target_mm": None,
             "y_target_mm": None,
             "z_target_mm": None,
+            "cell_id": None,
+            "cell_row": None,
+            "cell_col": None,
+            "cell_center_x_mm": None,
+            "cell_center_y_mm": None,
+            "distance_from_cell_center_mm": None,
+            "radius_from_survey_mm": None,
+            "angle_from_survey_deg": None,
+            "ring_index": None,
+            "axis_label": None,
+            "quadrant_label": None,
+            "was_selected_by_trial_filter": None,
+            "selection_reason": None,
             "x_commanded_mm": None,
             "y_commanded_mm": None,
             "x_final_mm": None,
@@ -119,9 +172,12 @@ class ExperimentLogger:
             "position_error_mm": None,
             "travel_distance_mm": None,
             "travel_time_s": None,
+            "reid_time_s": None,
+            "fine_align_time_s": None,
             "pd_time_s": None,
             "fire_time_s": None,
             "per_target_total_time_s": None,
+            "per_target_treatment_time_s": None,
             "pd_iterations": None,
             "pd_converged": None,
             "fired": False,
@@ -133,13 +189,58 @@ class ExperimentLogger:
         }
         if target_data:
             entry.update(target_data)
+        if target_id in self.targets:
+            existing = self.targets[target_id]
+            existing.update({k: v for k, v in entry.items() if v is not None})
+            entry = existing
         self.targets[target_id] = entry
         self.target_section_starts[target_id] = {"_start": time.perf_counter()}
         self.run["num_targets_attempted"] = (self.run.get("num_targets_attempted") or 0) + 1
 
+    def register_survey_targets(self, targets):
+        for idx, target in enumerate(targets or [], start=1):
+            target_id = target.get("target_id", idx)
+            xy = target.get("target_xy_mm") or (None, None)
+            src = target.get("source_target", {})
+            entry = {
+                "run_id": self.run.get("run_id"),
+                "target_id": target_id,
+                "detection_id": target_id,
+                "class_name": src.get("class_name"),
+                "class_id": src.get("left_cls", src.get("right_cls")),
+                "confidence": src.get("left_conf", src.get("right_conf", src.get("conf"))),
+                "weed_bbox_area_px2": _bbox_area(src.get("left_box", src.get("right_box"))),
+                "weed_mask_area_px2": src.get("weed_mask_area_px2"),
+                "x_target_mm": xy[0],
+                "y_target_mm": xy[1],
+                "z_target_mm": target.get("z_target_mm"),
+                "status": (
+                    "selected_by_trial_filter"
+                    if target.get("was_selected_by_trial_filter", True)
+                    else "rejected_by_trial_filter"
+                ),
+            }
+            for key in (
+                "cell_id", "cell_row", "cell_col",
+                "cell_center_x_mm", "cell_center_y_mm",
+                "distance_from_cell_center_mm",
+                "radius_from_survey_mm", "angle_from_survey_deg",
+                "ring_index", "axis_label", "quadrant_label",
+                "was_selected_by_trial_filter", "selection_reason",
+            ):
+                entry[key] = target.get(key)
+            if target_id in self.targets:
+                self.targets[target_id].update(entry)
+            else:
+                self.targets[target_id] = entry
+
     def update_target(self, target_id, target_data):
         if target_id in self.targets:
             self.targets[target_id].update(target_data)
+            if "fine_align_reid_total_time_s" in target_data:
+                self.targets[target_id]["reid_time_s"] = target_data.get("fine_align_reid_total_time_s")
+            if "fine_align_pd_lk_time_s" in target_data:
+                self.targets[target_id]["fine_align_time_s"] = target_data.get("fine_align_pd_lk_time_s")
 
     def log_reid_debug(self, target_id, reid_debug):
         if target_id not in self.targets or not isinstance(reid_debug, dict):
@@ -201,8 +302,26 @@ class ExperimentLogger:
             self.targets[target_id]["per_target_total_time_s"] = round(
                 time.perf_counter() - start, 3
             )
+        t = self.targets[target_id]
+        treatment_parts = [
+            t.get("travel_time_s"),
+            t.get("fine_align_reid_total_time_s") or t.get("reid_time_s"),
+            t.get("fine_align_pd_lk_time_s") or t.get("fine_align_time_s"),
+            t.get("fire_time_s"),
+        ]
+        if any(v is not None for v in treatment_parts):
+            t["per_target_treatment_time_s"] = round(sum(float(v or 0.0) for v in treatment_parts), 3)
         if self.targets[target_id].get("fired"):
             self.run["num_targets_fired"] = (self.run.get("num_targets_fired") or 0) + 1
+
+    def compute_treatment_totals(self):
+        if not self.run:
+            return
+        travel = self.run.get("total_travel_time_s") or 0.0
+        reid = self.run.get("total_fine_align_reid_time_s") or 0.0
+        pd_lk = self.run.get("total_fine_align_pd_lk_time_s") or 0.0
+        fire = self.run.get("total_fire_time_s") or 0.0
+        self.run["total_treatment_time_s"] = round(travel + reid + pd_lk + fire, 3)
 
     def compute_path_metrics(self, planned_targets, start_xy=None):
         if not planned_targets:
@@ -230,10 +349,18 @@ class ExperimentLogger:
 
         tgt_fields = [
             "run_id", "target_id", "detection_id", "class_name", "class_id",
-            "confidence", "x_target_mm", "y_target_mm", "z_target_mm",
+            "confidence", "weed_bbox_area_px2", "weed_mask_area_px2",
+            "x_target_mm", "y_target_mm", "z_target_mm",
+            "cell_id", "cell_row", "cell_col",
+            "cell_center_x_mm", "cell_center_y_mm",
+            "distance_from_cell_center_mm", "radius_from_survey_mm",
+            "angle_from_survey_deg", "ring_index", "axis_label", "quadrant_label",
+            "was_selected_by_trial_filter", "selection_reason",
             "x_commanded_mm", "y_commanded_mm", "x_final_mm", "y_final_mm",
             "position_error_mm", "travel_distance_mm", "travel_time_s",
+            "reid_time_s", "fine_align_time_s",
             "pd_time_s", "fire_time_s", "per_target_total_time_s",
+            "per_target_treatment_time_s",
             "pd_iterations", "pd_converged", "fired",
             "fine_align_reid_yolo_time_s", "fine_align_reid_total_time_s",
             "fine_align_pd_lk_time_s", "final_snap_time_s",

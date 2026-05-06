@@ -9,7 +9,9 @@ from dashboard_state import (
     SURVEY_MIN_HITS,
     SURVEY_YOLO_IMGSZ,
     SURVEY_TARGET_CLASSES,
+    SURVEY_AVOID_CLASSES,
     SURVEY_POINT_MODE,
+    AVOID_CLASSES,
 )
 from dashboard_images import b64_img, draw_crop, draw_detections, draw_matches
 from dashboard_camera import parse_bool, crop_bounds_for_side, ensure_cameras
@@ -51,6 +53,16 @@ def parse_classes(value):
         return SURVEY_TARGET_CLASSES
     text = str(value).strip().lower()
     if text in ("", "all", "none", "null"):
+        return None
+    return [int(part.strip()) for part in text.split(",") if part.strip()]
+
+
+def parse_avoid_classes(value):
+    """Parse avoid_classes param. Empty/none = use detector's configured avoid_classes."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in ("", "none", "null"):
         return None
     return [int(part.strip()) for part in text.split(",") if part.strip()]
 
@@ -149,6 +161,7 @@ def run_debug_scan(params):
     min_hits = int(params.get("min_hits", SURVEY_MIN_HITS))
     point_mode = params.get("point_mode", SURVEY_POINT_MODE or "box_center")
     class_filter = parse_classes(params.get("classes", ""))
+    avoid_filter = parse_avoid_classes(params.get("avoid_classes", ""))
     conf_override = parse_conf(params.get("conf", ""))
     imgsz = yolo_imgsz_from_params(params)
 
@@ -173,12 +186,17 @@ def run_debug_scan(params):
     left_crop_frames = [f[ly0:ly1, lx0:lx1] for f in left_frames]
     right_crop_frames = [f[ry0:ry1, rx0:rx1] for f in right_frames]
 
-    old_left_conf = det.cv_left.conf
+    old_left_conf  = det.cv_left.conf
     old_right_conf = det.cv_right.conf
+    old_left_avoid  = det.cv_left.avoid_classes
+    old_right_avoid = det.cv_right.avoid_classes
 
     if conf_override is not None:
-        det.cv_left.conf = conf_override
+        det.cv_left.conf  = conf_override
         det.cv_right.conf = conf_override
+    if avoid_filter is not None:
+        det.cv_left.avoid_classes  = avoid_filter
+        det.cv_right.avoid_classes = avoid_filter
 
     try:
         t_yolo = time.perf_counter()
@@ -206,8 +224,10 @@ def run_debug_scan(params):
         yolo_s = time.perf_counter() - t_yolo
 
     finally:
-        det.cv_left.conf = old_left_conf
+        det.cv_left.conf  = old_left_conf
         det.cv_right.conf = old_right_conf
+        det.cv_left.avoid_classes  = old_left_avoid
+        det.cv_right.avoid_classes = old_right_avoid
 
     stable_left_full = translate_detections_to_full(stable_left, left_crop_box)
     stable_right_full = translate_detections_to_full(stable_right, right_crop_box)
@@ -234,6 +254,9 @@ def run_debug_scan(params):
         "class_names": class_names,
     }
 
+    # Effective avoid list used in this scan (explicit override or detector default).
+    effective_avoid = avoid_filter if avoid_filter is not None else old_left_avoid
+
     return {
         "left_count": len(stable_left_full),
         "right_count": len(stable_right_full),
@@ -245,6 +268,7 @@ def run_debug_scan(params):
         "right_image": b64_img(right_overlay),
         "class_names": class_names,
         "requested_classes": class_filter,
+        "avoid_classes": effective_avoid,
         "confidence_override": conf_override,
         "imgsz": imgsz,
         "frame_mode": frame_mode,
@@ -254,6 +278,7 @@ def run_debug_scan(params):
             "MIN_HITS": min_hits,
             "POINT_MODE": point_mode,
             "TARGET_CLASSES": class_filter,
+            "AVOID_CLASSES": effective_avoid,
             "CONFIDENCE_OVERRIDE": conf_override,
             "RECTIFIED_DEBUG": use_rectification,
             "CROP_MODE": params.get("mode", "center"),

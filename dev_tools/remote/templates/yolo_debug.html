@@ -185,8 +185,12 @@
           </select>
           <span></span>
 
-          <label>Classes</label>
+          <label>Classes (target)</label>
           <input id="classes" type="text" value="" placeholder="all or 0,1,2" />
+          <span></span>
+
+          <label>Avoid classes</label>
+          <input id="avoid_classes" type="text" value="" placeholder="none or 0,1" title="Detections in these classes suppress overlapping target detections with lower confidence" />
           <span></span>
 
           <label>Confidence</label>
@@ -328,6 +332,7 @@
         "min_hits",
         "point_mode",
         "classes",
+        "avoid_classes",
         "conf",
         "imgsz_mode",
         "rectified",
@@ -416,6 +421,7 @@
           min_hits: val("min_hits"),
           point_mode: val("point_mode"),
           classes: val("classes"),
+          avoid_classes: val("avoid_classes"),
           conf: val("conf"),
           imgsz_mode: val("imgsz_mode"),
           rectified: document.getElementById("rectified").checked ? "1" : "0",
@@ -600,6 +606,7 @@
           yolo_imgsz_if_snap_crop: [snap32(cropH), snap32(cropW)],
 
           requested_classes: val("classes") || "all",
+          avoid_classes: val("avoid_classes") || "none (config default)",
           confidence_override: val("conf") || "config default",
 
           suggested_debug_values: {
@@ -750,6 +757,7 @@
             yolo_s: data.yolo_s,
 
             requested_classes: data.requested_classes,
+            avoid_classes: data.avoid_classes,
             confidence_override: data.confidence_override,
             yolo_imgsz_used: data.imgsz,
 
@@ -890,6 +898,7 @@
         "min_hits",
         "point_mode",
         "classes",
+        "avoid_classes",
         "conf",
         "imgsz_mode",
         "rectified",

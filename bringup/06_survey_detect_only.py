@@ -32,8 +32,11 @@ def main():
         SURVEY_MIN_HITS,
         SURVEY_CLUSTER_RADIUS_PX,
         SURVEY_TARGET_CLASSES,
+        SURVEY_AVOID_CLASSES,
         SURVEY_POINT_MODE,
         DETECTOR_MODE,
+        TARGET_CLASSES,
+        AVOID_CLASSES,
     )
     from vision.detectors.ai_detector import AIDetector
     from hardware.cameras import StereoCameras
@@ -48,8 +51,11 @@ def main():
     print(f"  SURVEY_MIN_HITS        : {SURVEY_MIN_HITS}")
     print(f"  SURVEY_CLUSTER_RADIUS  : {SURVEY_CLUSTER_RADIUS_PX}")
     print(f"  SURVEY_TARGET_CLASSES  : {SURVEY_TARGET_CLASSES}")
+    print(f"  SURVEY_AVOID_CLASSES   : {SURVEY_AVOID_CLASSES}  (None = use global AVOID_CLASSES={AVOID_CLASSES})")
     print(f"  SURVEY_POINT_MODE      : {SURVEY_POINT_MODE}")
     print(f"  DETECTOR_MODE          : {DETECTOR_MODE}")
+    print(f"  TARGET_CLASSES (global): {TARGET_CLASSES}")
+    print(f"  AVOID_CLASSES  (global): {AVOID_CLASSES}")
 
     print("\n--- Building detector ---")
     detector = AIDetector()

@@ -5,7 +5,8 @@ KNOBS most often changed:
   AI_CONFIDENCE     — detection threshold (lower = catch more plants, higher = fewer false positives)
   DEFAULT_MODEL     — which YOLO weight file to use (see MODEL_MAP)
   YOLO_DEVICE       — "cuda:0" for Jetson GPU, "cpu" for offline testing
-  AI_TARGET_CLASS   — int class id to detect, or None for all classes
+  TARGET_CLASSES    — class IDs the laser should target (list[int] or None for all)
+  AVOID_CLASSES     — class IDs to detect but never target (crops/non-weeds)
   QPOINT_DEBUG      — True to log per-detection qpoint output
 """
 
@@ -55,8 +56,18 @@ AI_IOM_THRESHOLD = 0.80
 # Used by AIDetector. Turn UP to merge only very-overlapping masks; DOWN to merge more.
 
 AI_TARGET_CLASS = 1
-# Used by AIDetector for default class filtering.
-# None = all classes, int = one class, list[int] = several classes.
+# Legacy alias kept for backward compat (ros2_ws/cv_node.py, etc.).
+# Prefer TARGET_CLASSES / AVOID_CLASSES below for new code.
+
+TARGET_CLASSES = [1]
+# Class IDs the laser should target. YOLO is run on TARGET_CLASSES + AVOID_CLASSES
+# together so avoid detections can suppress overlapping targets.
+# None = all classes (minus AVOID_CLASSES), list[int] = explicit set.
+
+AVOID_CLASSES = []
+# Class IDs to detect but NEVER target (e.g., crop rows, ornamentals).
+# When an avoid-class detection overlaps a target detection with higher
+# confidence (IoM >= AI_IOM_THRESHOLD), the target detection is suppressed.
 
 AI_DISPLAY_SCALE     = 1.0
 MANUAL_DISPLAY_SCALE = 0.75

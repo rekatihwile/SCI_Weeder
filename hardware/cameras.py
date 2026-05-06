@@ -966,7 +966,8 @@ def _display_pair(left, right, display_scale):
 def _build_ai_debug_detector(display_scale):
     from config import (
         AI_CONFIDENCE,
-        AI_TARGET_CLASS,
+        TARGET_CLASSES,
+        AVOID_CLASSES,
         CV_WEIGHTS_DIR,
         DEFAULT_MODEL,
         DEFAULT_QPOINT_MODEL,
@@ -996,7 +997,8 @@ def _build_ai_debug_detector(display_scale):
         yolo_path=yolo_path,
         qpoint_path=qpoint_path,
         conf=AI_CONFIDENCE,
-        target_class=AI_TARGET_CLASS,
+        target_classes=TARGET_CLASSES,
+        avoid_classes=AVOID_CLASSES,
     )
 
 

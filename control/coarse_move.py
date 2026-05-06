@@ -32,6 +32,7 @@ from config import (
     SURVEY_RIGHT_OFFSET_X,
     SURVEY_RIGHT_OFFSET_Y,
     SURVEY_CONFIDENCE_OVERRIDE,
+    SURVEY_AVOID_CLASSES,
     WORKSPACE_X_MIN,
     WORKSPACE_X_MAX,
     WORKSPACE_Y_MIN,
@@ -430,13 +431,19 @@ class TriangulationCoarseMover:
             return stable, time.perf_counter() - t_side, timing
 
         t_detect = time.perf_counter()
-        # Apply per-survey confidence override without touching the detector's default.
+        # Apply per-survey overrides without touching the detector's permanent defaults.
         if SURVEY_CONFIDENCE_OVERRIDE is not None:
             _orig_left_conf  = detector.cv_left.conf
             _orig_right_conf = detector.cv_right.conf
             detector.cv_left.conf  = SURVEY_CONFIDENCE_OVERRIDE
             detector.cv_right.conf = SURVEY_CONFIDENCE_OVERRIDE
             _survey_debug(f"confidence override: {SURVEY_CONFIDENCE_OVERRIDE}")
+        if SURVEY_AVOID_CLASSES is not None:
+            _orig_left_avoid  = detector.cv_left.avoid_classes
+            _orig_right_avoid = detector.cv_right.avoid_classes
+            detector.cv_left.avoid_classes  = list(SURVEY_AVOID_CLASSES)
+            detector.cv_right.avoid_classes = list(SURVEY_AVOID_CLASSES)
+            _survey_debug(f"avoid classes override: {SURVEY_AVOID_CLASSES}")
         try:
             # Sequential execution avoids cuDNN thread contention on shared GPU.
             stable_left,  left_dt,  left_timing  = _stable_side(detector.cv_left,  left_frames_yolo,  "[SURVEY DEBUG] LEFT")
@@ -445,6 +452,9 @@ class TriangulationCoarseMover:
             if SURVEY_CONFIDENCE_OVERRIDE is not None:
                 detector.cv_left.conf  = _orig_left_conf
                 detector.cv_right.conf = _orig_right_conf
+            if SURVEY_AVOID_CLASSES is not None:
+                detector.cv_left.avoid_classes  = _orig_left_avoid
+                detector.cv_right.avoid_classes = _orig_right_avoid
 
         # Translate crop-space points back to full-frame coordinates.
         if _crop_applied:

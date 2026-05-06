@@ -54,6 +54,11 @@ from config import (
     EXPECTED_WEED_COUNT,
     EXPECTED_KALE_COUNT,
     EXPERIMENT_NOTES,
+    EXPERIMENT_GRID_ENABLED,
+    TRIAL_FILTER_ENABLED,
+    TRIAL_FILTER_MODE,
+    RANDOM_SEED,
+    DRY_RUN_GRID_FILTER,
 )
 
 from control.coarse_move import TriangulationCoarseMover, is_in_workspace
@@ -163,6 +168,56 @@ def _active_target_xy(active_target):
     return list(xy) if xy is not None else None
 
 
+def _target_manifest_entry(target, status=None):
+    xy = target.get("target_xy_mm") or (None, None)
+    src = target.get("source_target", {})
+    entry = {
+        "target_id": target.get("target_id"),
+        "detection_id": target.get("target_id"),
+        "class_name": src.get("class_name"),
+        "class_id": src.get("left_cls", src.get("right_cls")),
+        "confidence": src.get("left_conf", src.get("right_conf", src.get("conf"))),
+        "weed_bbox_area_px2": _bbox_area(src.get("left_box", src.get("right_box"))),
+        "weed_mask_area_px2": src.get("weed_mask_area_px2"),
+        "survey_pixel_left": src.get("left_px"),
+        "survey_pixel_right": src.get("right_px"),
+        "coarse_triangulated_mm": [xy[0], xy[1]] if xy[0] is not None else None,
+        "x_target_mm": xy[0],
+        "y_target_mm": xy[1],
+        "z_target_mm": target.get("z_target_mm"),
+        "fine_align_final_mm": None,
+        "reid_protocol": None,
+        "status": status or (
+            "selected_by_trial_filter"
+            if target.get("was_selected_by_trial_filter", True)
+            else "rejected_by_trial_filter"
+        ),
+    }
+    for key in (
+        "cell_id", "cell_row", "cell_col",
+        "cell_center_x_mm", "cell_center_y_mm",
+        "distance_from_cell_center_mm", "radius_from_survey_mm",
+        "angle_from_survey_deg", "ring_index", "axis_label",
+        "quadrant_label", "was_selected_by_trial_filter", "selection_reason",
+    ):
+        entry[key] = target.get(key)
+    return entry
+
+
+def _upsert_manifest_target(manifest, target_id, updates):
+    for entry in manifest.get("targets", []):
+        if entry.get("target_id") == target_id:
+            entry.update(updates)
+            return
+    manifest.setdefault("targets", []).append({"target_id": target_id, **updates})
+
+
+def _bbox_area(box):
+    if not box or len(box) < 4:
+        return None
+    return round(max(0.0, float(box[2]) - float(box[0])) * max(0.0, float(box[3]) - float(box[1])), 3)
+
+
 def _update_recording_context(
     cameras,
     state_name,
@@ -226,7 +281,7 @@ def _save_metrics(logger, status, cameras=None):
         print(f"[METRICS] Warning: could not save metrics: {e}")
 
 
-def run_runtime(use_real_gantry=True, execute_targets=True):
+def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=False):
     gantry = None
     cameras = None
     state = "INIT"
@@ -249,8 +304,13 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
     manifest = {
         "trial_timestamp": trial_timestamp,
         "survey_position_mm": [SURVEY_POS_X, SURVEY_POS_Y],
+        "experiment_grid_enabled": EXPERIMENT_GRID_ENABLED,
+        "trial_filter_enabled": TRIAL_FILTER_ENABLED,
+        "trial_filter_mode": TRIAL_FILTER_MODE,
+        "random_seed": RANDOM_SEED,
         "targets": [],
     }
+    effective_dry_run_grid_filter = bool(dry_run_grid_filter or DRY_RUN_GRID_FILTER)
 
     try:
         while state != "DONE":
@@ -364,9 +424,20 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     right_detections,
                     coarse_mover,
                     start_xy=gantry.get_estimated_xy(),
+                    precomputed_matches=matched_targets,
                 )
                 if logger is not None:
                     logger.end_section("triangulation")
+
+                grid_summary = dict(getattr(coarse_mover, "last_grid_summary", {}) or {})
+                if grid_summary:
+                    manifest.update(grid_summary)
+                    if logger is not None:
+                        logger.run.update(grid_summary)
+                all_solved_targets = list(getattr(coarse_mover, "last_solved_targets", absolute_targets) or [])
+                manifest["targets"] = [_target_manifest_entry(t) for t in all_solved_targets]
+                if logger is not None:
+                    logger.register_survey_targets(all_solved_targets)
 
                 if logger is not None:
                     logger.start_section("planning")
@@ -375,8 +446,17 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     logger.end_section("planning")
                     logger.run["num_targets_planned"] = len(target_queue)
                     logger.compute_path_metrics(target_queue, start_xy=gantry.get_estimated_xy())
+                    manifest["planned_path_length_mm"] = logger.run.get("planned_path_length_mm")
 
                 coarse_mover.all_planned_targets = target_queue
+
+                if effective_dry_run_grid_filter:
+                    print("[GridFilter] dry-run enabled; stopping before target execution.")
+                    if cameras is not None:
+                        cameras.stop_recording()
+                    _save_metrics(logger, "grid_filter_dry_run", cameras)
+                    state = "DONE"
+                    continue
 
                 coarse_mover.save_workspace_targets(
                     target_queue,
@@ -418,13 +498,14 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                 prev_xy = gantry.get_estimated_xy()
 
                 for i, solved in enumerate(target_queue, start=1):
+                    target_id = solved.get("target_id", i)
                     tx, ty = solved["target_xy_mm"]
                     src = solved.get("source_target", {})
                     travel_dist = round(math.hypot(tx - prev_xy[0], ty - prev_xy[1]), 2)
-                    _update_recording_context(cameras, "TARGET", gantry, target_queue, i, solved, actual_hits, logger)
+                    _update_recording_context(cameras, "TARGET", gantry, target_queue, target_id, solved, actual_hits, logger)
 
                     if logger is not None:
-                        logger.start_target(i, {
+                        logger.start_target(target_id, {
                             "x_target_mm": tx,
                             "y_target_mm": ty,
                             "x_commanded_mm": tx,
@@ -437,12 +518,8 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     if not is_in_workspace(tx, ty):
                         print_skip_target(i, total, solved, f"Outside workspace bounds ({tx:.1f}, {ty:.1f}) mm.")
                         if logger is not None:
-                            logger.end_target(i, {"status": "skipped_out_of_bounds"})
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                            logger.end_target(target_id, {"status": "skipped_out_of_bounds"})
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": None,
                             "reid_protocol": None,
                             "status": "skipped_out_of_bounds",
@@ -456,12 +533,8 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     ):
                         print_skip_target(i, total, solved, "Already covered by a previous PD lock.")
                         if logger is not None:
-                            logger.end_target(i, {"status": "skipped_duplicate"})
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                            logger.end_target(target_id, {"status": "skipped_duplicate"})
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": None,
                             "reid_protocol": None,
                             "status": "skipped_duplicate",
@@ -477,21 +550,17 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     ])
 
                     if logger is not None:
-                        logger.start_target_section(i, "travel")
-                    _update_recording_context(cameras, "TRAVEL", gantry, target_queue, i, solved, actual_hits, logger)
+                        logger.start_target_section(target_id, "travel")
+                    _update_recording_context(cameras, "TRAVEL", gantry, target_queue, target_id, solved, actual_hits, logger)
                     moved = coarse_mover.move_to_absolute_target(gantry, solved)
                     if logger is not None:
-                        logger.end_target_section(i, "travel")
-                    _update_recording_context(cameras, "POST_TRAVEL", gantry, target_queue, i, solved, actual_hits, logger)
+                        logger.end_target_section(target_id, "travel")
+                    _update_recording_context(cameras, "POST_TRAVEL", gantry, target_queue, target_id, solved, actual_hits, logger)
 
                     if not moved:
                         if logger is not None:
-                            logger.end_target(i, {"status": "skipped_move_failed"})
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                            logger.end_target(target_id, {"status": "skipped_move_failed"})
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": None,
                             "reid_protocol": None,
                             "status": "skipped_move_failed",
@@ -517,17 +586,13 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                             filename="actual_pd_targets.json",
                         )
                         print_target_result(i, total, solved, actual_entry)
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": list(final_xy),
                             "reid_protocol": None,
                             "status": "triangulation_only",
                         })
                         if logger is not None:
-                            logger.end_target(i, {
+                            logger.end_target(target_id, {
                                 "x_final_mm": float(final_xy[0]),
                                 "y_final_mm": float(final_xy[1]),
                                 "fired": False,
@@ -547,8 +612,8 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                     ])
 
                     if logger is not None:
-                        logger.start_target_section(i, "pd")
-                    _update_recording_context(cameras, "FINE_ALIGN", gantry, target_queue, i, solved, actual_hits, logger)
+                        logger.start_target_section(target_id, "pd")
+                    _update_recording_context(cameras, "FINE_ALIGN", gantry, target_queue, target_id, solved, actual_hits, logger)
                     aligned, actual_entry = fine_align_target(
                         gantry,
                         cameras,
@@ -562,43 +627,39 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                         total_targets=total,
                     )
                     if logger is not None:
-                        logger.end_target_section(i, "pd")
+                        logger.end_target_section(target_id, "pd")
                         fa_timing = dict(getattr(fine_align_target, "last_timing", {}))
                         if fa_timing:
-                            logger.update_target(i, fa_timing)
+                            logger.update_target(target_id, fa_timing)
                             _add_run_total(logger, "total_fine_align_reid_yolo_time_s", fa_timing.get("fine_align_reid_yolo_time_s"))
                             _add_run_total(logger, "total_fine_align_reid_time_s", fa_timing.get("fine_align_reid_total_time_s"))
                             _add_run_total(logger, "total_fine_align_pd_lk_time_s", fa_timing.get("fine_align_pd_lk_time_s"))
                             _add_run_total(logger, "total_final_snap_time_s", fa_timing.get("final_snap_time_s"))
                         reid_debug = dict(getattr(fine_align_target, "last_reid_debug", {}) or {})
                         if reid_debug:
-                            logger.log_reid_debug(i, reid_debug)
+                            logger.log_reid_debug(target_id, reid_debug)
 
                     if aligned:
                         actual_hits.append(actual_entry)
-                        _update_recording_context(cameras, "LOCKED", gantry, target_queue, i, solved, actual_hits, logger)
+                        _update_recording_context(cameras, "LOCKED", gantry, target_queue, target_id, solved, actual_hits, logger)
                         print_target_result(i, total, solved, actual_entry)
 
                         if logger is not None:
-                            logger.start_target_section(i, "fire")
-                        _update_recording_context(cameras, "FIRE", gantry, target_queue, i, solved, actual_hits, logger)
+                            logger.start_target_section(target_id, "fire")
+                        _update_recording_context(cameras, "FIRE", gantry, target_queue, target_id, solved, actual_hits, logger)
                         fire_target(gantry, solved, cameras=cameras)
                         if logger is not None:
-                            logger.end_target_section(i, "fire")
-                        _update_recording_context(cameras, "FIRED", gantry, target_queue, i, solved, actual_hits, logger)
+                            logger.end_target_section(target_id, "fire")
+                        _update_recording_context(cameras, "FIRED", gantry, target_queue, target_id, solved, actual_hits, logger)
 
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": actual_entry.get("final_xy_mm"),
                             "reid_protocol": actual_entry.get("reid_protocol"),
                             "status": "locked_fired",
                         })
                         if logger is not None:
                             final_xy = actual_entry.get("final_xy_mm") or [tx, ty]
-                            logger.end_target(i, {
+                            logger.end_target(target_id, {
                                 "x_final_mm": float(final_xy[0]),
                                 "y_final_mm": float(final_xy[1]),
                                 "fired": True,
@@ -606,24 +667,20 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                                 "status": "locked_fired",
                             })
                     else:
-                        _update_recording_context(cameras, "FAILED_FINE_ALIGN", gantry, target_queue, i, solved, actual_hits, logger)
+                        _update_recording_context(cameras, "FAILED_FINE_ALIGN", gantry, target_queue, target_id, solved, actual_hits, logger)
                         cameras.set_recording_status([
                             f"Target {i}/{total}",
                             f"Coarse: ({tx:.1f}, {ty:.1f}) mm",
                             "FAILED: fine align",
                         ])
                         print_skip_target(i, total, solved, "Fine align failed")
-                        manifest["targets"].append({
-                            "target_id": i,
-                            "survey_pixel_left": src.get("left_px"),
-                            "survey_pixel_right": src.get("right_px"),
-                            "coarse_triangulated_mm": [tx, ty],
+                        _upsert_manifest_target(manifest, target_id, {
                             "fine_align_final_mm": None,
                             "reid_protocol": None,
                             "status": "failed_fine_align",
                         })
                         if logger is not None:
-                            logger.end_target(i, {
+                            logger.end_target(target_id, {
                                 "pd_converged": False,
                                 "fired": False,
                                 "status": "failed_fine_align",
@@ -657,6 +714,15 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
         _save_metrics(logger, "failed", cameras)
 
     finally:
+        if logger is not None and getattr(logger, "run", None):
+            for key in (
+                "planned_path_length_mm", "actual_path_length_mm",
+                "total_treatment_time_s", "total_travel_time_s",
+                "total_fine_align_reid_time_s", "total_fine_align_pd_lk_time_s",
+                "total_fire_time_s", "total_run_time_s",
+            ):
+                if key in logger.run:
+                    manifest[key] = logger.run.get(key)
         recording_dir = cameras.get_recording_dir() if cameras is not None else None
         _save_manifest(manifest, trial_timestamp, recording_dir=recording_dir)
         if cameras is not None:

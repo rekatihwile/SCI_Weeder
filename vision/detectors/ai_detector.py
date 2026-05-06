@@ -28,6 +28,8 @@ from config import (
     AI_CLASS_CONFIDENCE,
     AI_IOM_THRESHOLD,
     AI_TARGET_CLASS,
+    TARGET_CLASSES,
+    AVOID_CLASSES,
     DEFAULT_MODEL,
     DEFAULT_MODEL_PT,
     DEFAULT_MODEL_ENGINE,
@@ -157,7 +159,8 @@ def _select_yolo_model_path(explicit_path=None):
 
 class _WeedCVCore:
     def __init__(self, yolo_path, qpoint_path=None, conf=AI_CONFIDENCE,
-                 iom_thresh=AI_IOM_THRESHOLD, target_class=AI_TARGET_CLASS,
+                 iom_thresh=AI_IOM_THRESHOLD,
+                 target_classes=TARGET_CLASSES, avoid_classes=AVOID_CLASSES,
                  class_conf=None, verbose=True, yolo_backend=None,
                  yolo_device=YOLO_DEVICE, yolo_half=YOLO_HALF):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -168,7 +171,8 @@ class _WeedCVCore:
         self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else None
         self.verbose = verbose
 
-        self.target_class = target_class
+        self.target_classes = list(target_classes) if target_classes is not None else None
+        self.avoid_classes  = list(avoid_classes)  if avoid_classes  else []
         # Per-class confidence thresholds: {class_id: conf}. Falls back to self.conf.
         self.class_conf = dict(class_conf or AI_CLASS_CONFIDENCE or {})
 
@@ -181,12 +185,16 @@ class _WeedCVCore:
             )
             if self.yolo.names:
                 print(f"[INFO] Model classes: {self.yolo.names}")
-            resolved = _resolve_classes(self.target_class)
-            if resolved is not None:
-                names = [self.yolo.names.get(c, "???") for c in resolved]
-                print(f"[CV] Filtering to class(es) {resolved} = {names}")
+            if self.target_classes is not None:
+                names = [self.yolo.names.get(c, "???") for c in self.target_classes]
+                print(f"[CV] TARGET_CLASSES: {self.target_classes} = {names}")
             else:
-                print("[CV] No class filter — detecting all classes.")
+                print("[CV] TARGET_CLASSES: all (no filter)")
+            if self.avoid_classes:
+                names = [self.yolo.names.get(c, "???") for c in self.avoid_classes]
+                print(f"[CV] AVOID_CLASSES:  {self.avoid_classes} = {names}  (suppress overlapping targets)")
+            else:
+                print("[CV] AVOID_CLASSES:  none")
             if self.class_conf:
                 named = {self.yolo.names.get(k, k): v for k, v in self.class_conf.items()}
                 print(f"[CV] Per-class conf overrides: {named}")
@@ -228,6 +236,58 @@ class _WeedCVCore:
         a2 = max(0, b2[2] - b2[0]) * max(0, b2[3] - b2[1])
         amin = min(a1, a2)
         return inter / float(amin) if amin > 0 else 0.0
+
+    def _all_detect_classes(self, target_override=None):
+        """Union of effective target classes + avoid classes for YOLO. None = all."""
+        targets = target_override if target_override is not None else self.target_classes
+        if targets is None and not self.avoid_classes:
+            return None
+        all_cls = set(self.avoid_classes)
+        if targets is not None:
+            all_cls.update(targets)
+        return sorted(all_cls) if all_cls else None
+
+    def _is_target(self, cls_id, target_override=None):
+        """True if cls_id should be targeted (not in avoid, in effective target set)."""
+        if cls_id in self.avoid_classes:
+            return False
+        targets = target_override if target_override is not None else self.target_classes
+        return targets is None or cls_id in targets
+
+    def _filter_to_targets(self, boxes, masks, target_override=None):
+        """Keep only target-class boxes/masks (drops avoid-class detections)."""
+        kept_b, kept_m = [], []
+        for b, m in zip(boxes, masks):
+            if self._is_target(int(b.cls[0].cpu().item()), target_override):
+                kept_b.append(b)
+                kept_m.append(m)
+        return kept_b, kept_m
+
+    def _suppress_avoid_overlaps(self, stable):
+        """Remove target detections dominated by a higher-confidence avoid-class detection.
+
+        Per-frame IoM suppression in _filter_yolo_result already handles the
+        common case (highest-conf box wins cross-class). This is the burst-level
+        safety net: if a target survived in some frames but an avoid-class detection
+        covers it in the merged stable list with higher mean confidence, suppress it.
+        """
+        if not self.avoid_classes or not stable:
+            return stable
+        avoid = [s for s in stable if s["cls"] in self.avoid_classes]
+        if not avoid:
+            return stable
+        kept = []
+        for s in stable:
+            if s["cls"] in self.avoid_classes:
+                kept.append(s)
+                continue
+            dominated = any(
+                self._iom(s["box"], a["box"]) >= self.iom_thresh and a["conf"] > s["conf"]
+                for a in avoid
+            )
+            if not dominated:
+                kept.append(s)
+        return kept
 
     def _extract_qpoint(self, heatmap_224, mask_224):
         heat = heatmap_224.astype(np.float32)
@@ -402,11 +462,14 @@ class _WeedCVCore:
         return filtered_boxes, filtered_masks
 
     def _get_filtered_results(self, frame, classes_override=None, conf_override=None, imgsz=1280):
-        classes_arg = _resolve_classes(self.target_class, classes_override)
+        # Run YOLO on all relevant classes (target + avoid) so cross-class IoM
+        # suppression can happen in _filter_yolo_result (highest conf wins).
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        classes_arg = self._all_detect_classes(target_override)
         run_imgsz = self._resolve_imgsz(frame, imgsz)
 
-        # Run YOLO at the lowest effective threshold so per-class filtering
-        # can happen after IoM suppression rather than before it.
+        # Run at lowest effective threshold so per-class filtering happens
+        # after IoM suppression rather than before it.
         results = self.yolo(
             frame,
             imgsz=run_imgsz,
@@ -418,6 +481,7 @@ class _WeedCVCore:
         )
 
         result = results[0] if results else None
+        # filtered_boxes holds all-class results (for debug visualization).
         self.filtered_boxes, filtered_masks = self._filter_yolo_result(
             result,
             conf_override=conf_override,
@@ -429,7 +493,8 @@ class _WeedCVCore:
             self.filtered_boxes = []
             return []
 
-        classes_arg = _resolve_classes(self.target_class, classes_override)
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        classes_arg = self._all_detect_classes(target_override)
         run_imgsz = self._resolve_imgsz(frames, imgsz)
         results = self.yolo(
             list(frames),
@@ -457,8 +522,9 @@ class _WeedCVCore:
 
     def count_at_conf(self, frame, conf_override, classes_override=None):
         """Fast single-frame detection count at a given confidence (no qpoints, no IoM).
-        Used for sensitivity analysis after a survey burst."""
-        classes_arg = _resolve_classes(self.target_class, classes_override)
+        Used for sensitivity analysis after a survey burst. Counts target-class only."""
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        classes_arg = self._all_detect_classes(target_override)
         results = self.yolo(
             frame, imgsz=1280, verbose=False,
             conf=conf_override, retina_masks=False, classes=classes_arg,
@@ -466,7 +532,10 @@ class _WeedCVCore:
         )
         if not results or len(results[0].boxes) == 0:
             return 0
-        return int(len(results[0].boxes))
+        return sum(
+            1 for b in results[0].boxes
+            if self._is_target(int(b.cls[0].cpu().item()), target_override)
+        )
 
     def warmup(self, imgsz=YOLO_WARMUP_IMGSZ, iters=YOLO_WARMUP_ITERS):
         iters = max(0, int(iters or 0))
@@ -487,13 +556,17 @@ class _WeedCVCore:
                 verbose=False,
                 conf=self._effective_yolo_conf(None),
                 retina_masks=True,
-                classes=_resolve_classes(self.target_class),
+                classes=self._all_detect_classes(),
                 **self._yolo_predict_kwargs(),
             )
         return time.perf_counter() - t0
 
     def detect_points(self, frame, classes_override=None, point_mode=None):
-        boxes, masks = self._get_filtered_results(frame, classes_override=classes_override)
+        all_boxes, all_masks = self._get_filtered_results(frame, classes_override=classes_override)
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        # Drop avoid-class boxes (cross-class IoM already suppressed most overlaps;
+        # this removes any remaining avoid detections from the output).
+        boxes, masks = self._filter_to_targets(all_boxes, all_masks, target_override)
         if not boxes:
             return []
 
@@ -525,7 +598,9 @@ class _WeedCVCore:
 
     def detect_rich_points(self, frame, classes_override=None, point_mode=None):
         """Returns [{"point": (gx,gy), "cls": cls_id, "conf": yolo_conf}, ...]."""
-        boxes, masks = self._get_filtered_results(frame, classes_override=classes_override)
+        all_boxes, all_masks = self._get_filtered_results(frame, classes_override=classes_override)
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        boxes, masks = self._filter_to_targets(all_boxes, all_masks, target_override)
         if not boxes:
             return []
 
@@ -679,6 +754,7 @@ class _WeedCVCore:
         t_total = time.perf_counter()
         mode = _normalise_point_mode(point_mode, default="qpoint")
         self.last_burst_timing = {}
+        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
 
         def _debug(msg):
             if debug_label:
@@ -774,11 +850,20 @@ class _WeedCVCore:
                 "point_source": "box_center",
             })
 
+        # Suppress target detections dominated by a higher-confidence avoid-class
+        # detection, then drop all non-target classes from the output.
+        n_raw = len(stable)
+        stable = self._suppress_avoid_overlaps(stable)
+        stable = [s for s in stable if self._is_target(s["cls"], target_override)]
         stable.sort(key=lambda d: d["box"][0])
+
         group_dt = time.perf_counter() - t_group
+        suppressed = n_raw - len(stable)
         _debug(
             f"grouped {sum(len(d) for d in all_detections)} detection(s) "
-            f"into {len(stable)} stable target(s) in {group_dt:.2f}s"
+            f"into {len(stable)} stable target(s)"
+            + (f" ({suppressed} suppressed by avoid/class filter)" if suppressed else "")
+            + f" in {group_dt:.2f}s"
         )
 
         # Merge all burst frames into one image (averaging reduces noise, sharpens plant signal).
@@ -850,7 +935,8 @@ class AIDetector:
         qpoint_path=None,
         conf=AI_CONFIDENCE,
         iom_thresh=AI_IOM_THRESHOLD,
-        target_class=AI_TARGET_CLASS,
+        target_classes=TARGET_CLASSES,
+        avoid_classes=AVOID_CLASSES,
     ):
         self.yolo_path, self.yolo_backend = _select_yolo_model_path(yolo_path)
 
@@ -865,13 +951,15 @@ class AIDetector:
         self.display_scale = display_scale
         self.burst_size = burst_size
         self.min_stable_views = min_stable_views
-        self.target_class = target_class
+        self.target_classes = target_classes
+        self.avoid_classes = avoid_classes
         self.window_name = "AI Detector - Stereo Pair"
 
         core_kwargs = dict(
             conf=conf,
             iom_thresh=iom_thresh,
-            target_class=target_class,
+            target_classes=target_classes,
+            avoid_classes=avoid_classes,
             yolo_backend=self.yolo_backend,
             yolo_device=YOLO_DEVICE,
             yolo_half=YOLO_HALF,

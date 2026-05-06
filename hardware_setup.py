@@ -70,25 +70,29 @@ def detect_cameras_linux():
         except Exception:
             pass
     return entries
-
-
-def reset_cameras_uhubctl(hub_loc="1-4", ports=(3, 4), delay=3):
-    """Power-cycle specific USB hub ports using uhubctl (surgical camera reset)."""
+def reset_cameras_uhubctl(hub_loc="1-4", ports=(4,), delay=3):
     print(f"\n=== UHUBCTL CAMERA RESET (hub {hub_loc}, ports {ports}) ===")
     for port in ports:
         print(f"[RESET] Cycling port {port}...")
         result = subprocess.run(
             ["sudo", "uhubctl", "-l", hub_loc, "-p", str(port), "-a", "cycle", "-d", str(delay)],
-            capture_output=True,
-            text=True,
+            capture_output=True, text=True,
         )
         if result.returncode != 0:
             print(f"[RESET] Port {port} cycle FAILED: {result.stderr.strip()}")
             return False
-    time.sleep(2)  # let cameras enumerate after power restore
+
+    # Poll until cameras are actually readable by OpenCV (max 15s)
+    print("[RESET] Waiting for cameras to become readable...")
+    for i in range(15):
+        time.sleep(1)
+        cams = detect_cameras_linux()
+        print(f"[RESET] ...{i+1}s: {len(cams)} camera(s) ready")
+        if len(cams) >= 2:
+            break
+
     print("[RESET] Camera port reset complete.")
     return True
-
 
 def nuclear_reset_usb_hub(hub_port="1-4"):
     # Try surgical uhubctl reset first
