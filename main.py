@@ -1,4 +1,4 @@
-from pipeline.steps.runtime import run_runtime
+from pipeline.runtime import run_runtime
 
 
 def main():

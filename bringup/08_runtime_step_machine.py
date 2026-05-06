@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline.steps.runtime import run_runtime
+from pipeline.runtime import run_runtime
 
 
 USE_REAL_GANTRY = False
