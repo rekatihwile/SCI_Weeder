@@ -1,14 +1,10 @@
-"""Camera lifecycle helpers: open, close, flush, reset, preview frame, MJPEG stream.
+"""Camera lifecycle helpers: open, close, recover, preview frame, MJPEG stream.
 
 Also owns parse_bool and crop_bounds_for_side because both are needed here and
 placing them here avoids a circular import with dashboard_yolo.
 """
 
-import time
-import json
-import cv2
-
-from dashboard_state import state, lock, REPO_ROOT, FRAME_WIDTH, FRAME_HEIGHT
+from dashboard_state import state, lock, FRAME_WIDTH, FRAME_HEIGHT
 from dashboard_images import b64_img, jpg_bytes
 from dashboard_rectify import maybe_rectify_pair
 from hardware.cameras import StereoCameras
@@ -72,7 +68,11 @@ def crop_bounds_for_side(params, side):
 def ensure_cameras():
     if state.cameras is None:
         state.cameras = StereoCameras()
-        state.cameras.open(start_recorder=False)
+    if state.cameras.left is None or state.cameras.right is None:
+        try:
+            state.cameras.open(start_recorder=False)
+        except RuntimeError:
+            state.cameras.recover()
     return state.cameras
 
 
@@ -82,87 +82,19 @@ def close_all():
         state.cameras = None
 
 
-def get_camera_indices():
-    """Read left/right indices from camera_config.json; falls back to 0/2."""
-    cfg_path = REPO_ROOT / "params" / "hardware" / "camera_config.json"
-    try:
-        with open(cfg_path, "r") as f:
-            cfg = json.load(f)
-        left = (
-            cfg.get("left_camera")
-            or cfg.get("left_index")
-            or cfg.get("LEFT_CAMERA_INDEX")
-            or cfg.get("LEFT_CAMERA_ID")
-            or cfg.get("left")
-            or 0
-        )
-        right = (
-            cfg.get("right_camera")
-            or cfg.get("right_index")
-            or cfg.get("RIGHT_CAMERA_INDEX")
-            or cfg.get("RIGHT_CAMERA_ID")
-            or cfg.get("right")
-            or 2
-        )
-        return int(left), int(right)
-    except Exception:
-        return 0, 2
-
-
-def flush_single_camera(device_index, reads=20):
-    """Open one camera, read/discard frames, release. Returns a diagnostic dict."""
-    cap = cv2.VideoCapture(device_index, cv2.CAP_V4L2)
-    try:
-        if not cap.isOpened():
-            return {"device": device_index, "opened": False, "valid_reads": 0, "message": "open failed"}
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-        cap.set(cv2.CAP_PROP_FPS, 30)
-        valid = 0
-        last_shape = None
-        for _ in range(reads):
-            ret, frame = cap.read()
-            if ret and frame is not None and getattr(frame, "size", 0) > 0:
-                valid += 1
-                last_shape = tuple(frame.shape)
-        return {
-            "device": device_index,
-            "opened": True,
-            "valid_reads": valid,
-            "reads": reads,
-            "last_shape": last_shape,
-            "message": "ok" if valid > 0 else "opened but no valid frames",
-        }
-    finally:
-        cap.release()
-
-
 def reset_cameras_sequence():
-    """Close cameras, flush each device individually, reopen as stereo pair, return preview images."""
-    close_all()
-    time.sleep(0.5)
+    """Recover the shared stereo camera interface and return preview images."""
+    if state.cameras is None:
+        state.cameras = StereoCameras()
 
-    left_idx, right_idx = get_camera_indices()
-
-    left_flush = flush_single_camera(left_idx, reads=20)
-    time.sleep(0.25)
-
-    right_flush = flush_single_camera(right_idx, reads=20)
-    time.sleep(0.25)
-
-    state.cameras = StereoCameras()
-    state.cameras.open(start_recorder=False)
+    state.cameras.recover()
 
     fL, fR = state.cameras.read_pair()
     if fL is None or fR is None:
         raise RuntimeError("Camera reset reopened cameras, but stereo read_pair returned None.")
 
     return {
-        "left_index": left_idx,
-        "right_index": right_idx,
-        "left_flush": left_flush,
-        "right_flush": right_flush,
+        "recovery": "StereoCameras.recover",
         "left_image": b64_img(fL),
         "right_image": b64_img(fR),
         "frame": {"width": FRAME_WIDTH, "height": FRAME_HEIGHT},

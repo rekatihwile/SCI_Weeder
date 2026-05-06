@@ -214,9 +214,18 @@
         <button onclick="runMatch()">Match Cached Scan</button>
         <button onclick="closeCameras()">Close Cameras</button>
         {% if kind == "survey" %}
+        <button onclick="runSurveyFull()"
+          title="Detect + stereo-match + save frames and matched pixel coords to cache/survey/"
+          style="margin-top:12px;background:#003366;border:1px solid #0066cc;color:#88ccff;width:100%;padding:7px 10px;font-weight:bold;">
+          Scan + Match + Cache →
+        </button>
+        <div id="surveyFullResult" style="display:none;margin-top:8px;padding:6px 8px;background:#1a1a2e;border:1px solid #334;border-radius:3px;font-size:13px;">
+          <span id="surveyFullMsg"></span>
+          <a id="surveyFullLink" href="/triangulate" style="float:right;color:#88ccff;font-weight:bold;"></a>
+        </div>
         <button id="saveConfigBtn" onclick="saveConfigSettings()" disabled
           title="Run a scan first, then click to write these settings into config.py"
-          style="margin-top:12px;background:#1a3a1a;border:1px solid #4a8a4a;color:#8eff8e;width:100%;padding:7px 10px;">
+          style="margin-top:8px;background:#1a3a1a;border:1px solid #4a8a4a;color:#8eff8e;width:100%;padding:7px 10px;">
           Save Config Settings → config.py
         </button>
         {% endif %}
@@ -623,6 +632,63 @@
         setVal("crop_h", snap32(val("crop_h")));
         redrawOnlyCrop();
         saveSettings();
+      }
+
+      async function runSurveyFull() {
+        await saveSettings();
+        updateLabels();
+        modeLabel = "survey_full";
+
+        document.getElementById("status").innerText = "Running scan + match + caching to disk...";
+        document.getElementById("summary").innerText = "Running YOLO + stereo match. Wait...";
+        document.getElementById("surveyFullResult").style.display = "none";
+
+        const res = await fetch("/api/run_survey_full", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getParams()),
+        });
+
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = "Survey error: " + data.error;
+          document.getElementById("summary").innerText = data.error;
+          return;
+        }
+
+        frameW = 1280;
+        frameH = 720;
+
+        latestLeft = await loadImageFromBase64(data.match_left_image || data.left_image);
+        latestRight = await loadImageFromBase64(data.match_right_image || data.right_image);
+        latestLeftCrop = data.left_crop;
+        latestRightCrop = data.right_crop;
+        classNames = data.class_names || classNames;
+
+        drawCanvas("left_canvas", latestLeft, null, "left");
+        drawCanvas("right_canvas", latestRight, null, "right");
+
+        const msg = `L:${data.left_count} R:${data.right_count} matched:${data.matched_count} — cached to disk`;
+        document.getElementById("status").innerText = msg;
+        document.getElementById("surveyFullMsg").innerText = `${data.matched_count} matched pair(s) cached`;
+        document.getElementById("surveyFullLink").textContent = "→ Triangulate";
+        document.getElementById("surveyFullResult").style.display = "block";
+
+        lastSuggestedConfig = data.suggested_config || null;
+        const saveBtn = document.getElementById("saveConfigBtn");
+        if (saveBtn && lastSuggestedConfig) saveBtn.disabled = false;
+
+        document.getElementById("summary").innerText = JSON.stringify({
+          mode: modeLabel,
+          left_count: data.left_count,
+          right_count: data.right_count,
+          matched_count: data.matched_count,
+          capture_s: data.capture_s,
+          yolo_s: data.yolo_s,
+          match_s: data.match_s,
+          cached_to_disk: data.cached_to_disk,
+        }, null, 2);
       }
 
       async function runScan() {

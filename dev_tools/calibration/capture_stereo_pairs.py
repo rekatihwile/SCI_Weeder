@@ -36,47 +36,54 @@ def get_start_index(save_dir: Path):
     return max(indices) + 1 if indices else 0
 def main():
     cams = StereoCameras()
-    cams.open()
-    print("Warming up cameras...")
-    for _ in range(WARMUP_FRAMES):
-        left, right = cams.read_pair()
+    try:
+        try:
+            cams.open()
+        except RuntimeError:
+            cams.recover()
+            cams.start_recording()
 
-    print("\nPress SPACE to capture pair")
-    print("Press Q to quit\n")
+        print("Warming up cameras...")
+        for _ in range(WARMUP_FRAMES):
+            left, right = cams.read_pair()
 
-    idx = get_start_index(SAVE_DIR)
+        print("\nPress SPACE to capture pair")
+        print("Press Q to quit\n")
 
-    while True:
-        left, right = cams.read_pair()
+        idx = get_start_index(SAVE_DIR)
 
-        display = cv2.hconcat([left, right])
+        while True:
+            left, right = cams.read_pair()
 
-# Resize ONLY for display
-        display_small = cv2.resize(
-            display,
-            None,
-            fx=DISPLAY_SCALE,
-            fy=DISPLAY_SCALE,
-            interpolation=cv2.INTER_AREA
-        )
-        cv2.imshow("Stereo Capture", display_small)
+            display = cv2.hconcat([left, right])
 
-        key = cv2.waitKey(1) & 0xFF
+            # Resize ONLY for display
+            display_small = cv2.resize(
+                display,
+                None,
+                fx=DISPLAY_SCALE,
+                fy=DISPLAY_SCALE,
+                interpolation=cv2.INTER_AREA
+            )
+            cv2.imshow("Stereo Capture", display_small)
 
-        if key == ord(' '):
-            left_path = SAVE_DIR / f"left_{idx:04d}.png"
-            right_path = SAVE_DIR / f"right_{idx:04d}.png"
+            key = cv2.waitKey(1) & 0xFF
 
-            cv2.imwrite(str(left_path), left)
-            cv2.imwrite(str(right_path), right)
+            if key == ord(' '):
+                left_path = SAVE_DIR / f"left_{idx:04d}.png"
+                right_path = SAVE_DIR / f"right_{idx:04d}.png"
 
-            print(f"Saved pair {idx}")
-            idx += 1
+                cv2.imwrite(str(left_path), left)
+                cv2.imwrite(str(right_path), right)
 
-        elif key == ord('q'):
-            break
+                print(f"Saved pair {idx}")
+                idx += 1
 
-    cv2.destroyAllWindows()
+            elif key == ord('q'):
+                break
+    finally:
+        cams.close()
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()

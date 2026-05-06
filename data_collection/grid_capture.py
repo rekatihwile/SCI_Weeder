@@ -369,7 +369,11 @@ def main():
     try:
         gantry = Gantry(GRBL_PORT)
         cameras = StereoCameras()
-        cameras.open()
+        try:
+            cameras.open()
+        except RuntimeError:
+            cameras.recover()
+            cameras.start_recording()
 
         print("Homing gantry first...")
         gantry.home()

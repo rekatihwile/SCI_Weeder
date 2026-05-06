@@ -299,94 +299,100 @@ def try_calibrate_with_all_pairs(img_size):
 # ============================================================
 def main():
     cams = StereoCameras()
-    cams.open()
+    try:
+        try:
+            cams.open()
+        except RuntimeError:
+            cams.recover()
+            cams.start_recording()
 
-    print("Warming up cameras…")
-    for _ in range(WARMUP_FRAMES):
-        left, right = cams.read_pair()
+        print("Warming up cameras…")
+        for _ in range(WARMUP_FRAMES):
+            left, right = cams.read_pair()
 
-    img_size = (left.shape[1], left.shape[0])   # (width, height)
-    idx = get_start_index(SAVE_DIR)
-    pair_count = idx                             # how many pairs already on disk
-    status_lines = [
-        f"Pairs on disk: {pair_count}",
-        "SPACE=capture  C=calibrate  Q=quit",
-    ]
-    status_color = (200, 200, 200)
+        img_size = (left.shape[1], left.shape[0])   # (width, height)
+        idx = get_start_index(SAVE_DIR)
+        pair_count = idx                             # how many pairs already on disk
+        status_lines = [
+            f"Pairs on disk: {pair_count}",
+            "SPACE=capture  C=calibrate  Q=quit",
+        ]
+        status_color = (200, 200, 200)
 
-    print(f"\nSaving pairs to: {SAVE_DIR}")
-    print(f"SPACE = capture  |  C = calibrate  |  Q = quit\n")
+        print(f"\nSaving pairs to: {SAVE_DIR}")
+        print(f"SPACE = capture  |  C = calibrate  |  Q = quit\n")
 
-    while True:
-        left, right = cams.read_pair()
+        while True:
+            left, right = cams.read_pair()
 
-        # ---- build display ----
-        display = cv2.hconcat([left, right])
-        display_small = cv2.resize(display, None,
-                                   fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
-                                   interpolation=cv2.INTER_AREA)
-        overlay_text(display_small, status_lines, color=status_color)
-        cv2.imshow("Stereo Capture + Calibrate", display_small)
+            # ---- build display ----
+            display = cv2.hconcat([left, right])
+            display_small = cv2.resize(display, None,
+                                       fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
+                                       interpolation=cv2.INTER_AREA)
+            overlay_text(display_small, status_lines, color=status_color)
+            cv2.imshow("Stereo Capture + Calibrate", display_small)
 
-        key = cv2.waitKey(1) & 0xFF
+            key = cv2.waitKey(1) & 0xFF
 
-        if key == ord('q'):
-            break
+            if key == ord('q'):
+                break
 
-        if key == ord(' '):
-            left_path  = SAVE_DIR / f"left_{idx:04d}.png"
-            right_path = SAVE_DIR / f"right_{idx:04d}.png"
-            cv2.imwrite(str(left_path),  left)
-            cv2.imwrite(str(right_path), right)
-            idx += 1
-            pair_count += 1
-            print(f"[{idx-1:04d}] Saved pair  (total on disk: {pair_count})")
-            status_lines = [
-                f"Pairs on disk: {pair_count}",
-                "SPACE=capture  C=calibrate  Q=quit",
-            ]
-            status_color = (200, 200, 200)
-
-        elif key == ord('c'):
-            if pair_count < MIN_VIEWS:
-                msg = f"Need {MIN_VIEWS} pairs to calibrate — only {pair_count} on disk"
-                print(f"       {msg}")
+            if key == ord(' '):
+                left_path  = SAVE_DIR / f"left_{idx:04d}.png"
+                right_path = SAVE_DIR / f"right_{idx:04d}.png"
+                cv2.imwrite(str(left_path),  left)
+                cv2.imwrite(str(right_path), right)
+                idx += 1
+                pair_count += 1
+                print(f"[{idx-1:04d}] Saved pair  (total on disk: {pair_count})")
                 status_lines = [
-                    f"Pairs: {pair_count}  (need {MIN_VIEWS})",
-                    msg,
+                    f"Pairs on disk: {pair_count}",
                     "SPACE=capture  C=calibrate  Q=quit",
                 ]
-                status_color = (0, 165, 255)
-            else:
-                print(f"Calibrating with {pair_count} pairs…")
-                status_lines = ["Calibrating — please wait…"]
-                status_color = (200, 200, 0)
-                # Briefly show the "calibrating" overlay before blocking call
-                display_small_copy = display_small.copy()
-                overlay_text(display_small_copy, status_lines, color=status_color)
-                cv2.imshow("Stereo Capture + Calibrate", display_small_copy)
-                cv2.waitKey(1)
+                status_color = (200, 200, 200)
 
-                success, rms, msg = try_calibrate_with_all_pairs(img_size)
-
-                if success is None:
+            elif key == ord('c'):
+                if pair_count < MIN_VIEWS:
+                    msg = f"Need {MIN_VIEWS} pairs to calibrate — only {pair_count} on disk"
                     print(f"       {msg}")
-                    status_lines = [f"Pairs: {pair_count}  ({msg})",
-                                    "SPACE=capture  C=calibrate  Q=quit"]
-                    status_color = (200, 200, 200)
-                elif success:
-                    print(f"       ✓ Valid — {msg}")
-                    status_lines = [f"Pairs: {pair_count}  ✓ {msg}",
-                                    "Calibration saved!  SPACE=add more  C=recalibrate  Q=quit"]
-                    status_color = (0, 255, 80)
+                    status_lines = [
+                        f"Pairs: {pair_count}  (need {MIN_VIEWS})",
+                        msg,
+                        "SPACE=capture  C=calibrate  Q=quit",
+                    ]
+                    status_color = (0, 165, 255)
                 else:
-                    print(f"       ✗ Failed — {msg}")
-                    status_lines = [f"Pairs: {pair_count}  ✗ FAILED",
-                                    f"Reason: {msg}",
-                                    "SPACE=capture  C=retry  Q=quit"]
-                    status_color = (0, 80, 255)
+                    print(f"Calibrating with {pair_count} pairs…")
+                    status_lines = ["Calibrating — please wait…"]
+                    status_color = (200, 200, 0)
+                    # Briefly show the "calibrating" overlay before blocking call
+                    display_small_copy = display_small.copy()
+                    overlay_text(display_small_copy, status_lines, color=status_color)
+                    cv2.imshow("Stereo Capture + Calibrate", display_small_copy)
+                    cv2.waitKey(1)
 
-    cv2.destroyAllWindows()
+                    success, rms, msg = try_calibrate_with_all_pairs(img_size)
+
+                    if success is None:
+                        print(f"       {msg}")
+                        status_lines = [f"Pairs: {pair_count}  ({msg})",
+                                        "SPACE=capture  C=calibrate  Q=quit"]
+                        status_color = (200, 200, 200)
+                    elif success:
+                        print(f"       ✓ Valid — {msg}")
+                        status_lines = [f"Pairs: {pair_count}  ✓ {msg}",
+                                        "Calibration saved!  SPACE=add more  C=recalibrate  Q=quit"]
+                        status_color = (0, 255, 80)
+                    else:
+                        print(f"       ✗ Failed — {msg}")
+                        status_lines = [f"Pairs: {pair_count}  ✗ FAILED",
+                                        f"Reason: {msg}",
+                                        "SPACE=capture  C=retry  Q=quit"]
+                        status_color = (0, 80, 255)
+    finally:
+        cams.close()
+        cv2.destroyAllWindows()
     print("\nDone.")
 
 

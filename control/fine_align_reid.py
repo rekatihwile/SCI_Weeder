@@ -115,38 +115,37 @@ def _draw_overlay(full_img, crop, detections, matches, chosen, side):
     x0, y0, x1, y1 = crop
     cv2.rectangle(ov, (x0, y0), (x1, y1), (0, 255, 255), 2)
 
+    key = "left_px" if side == "left" else "right_px"
+    match_points = set()
+    for match in matches:
+        pt = match.get(key)
+        if pt is not None:
+            match_points.add((int(round(pt[0])), int(round(pt[1]))))
+
     for i, det in enumerate(detections):
         px, py = int(round(det["point"][0])), int(round(det["point"][1]))
-        cv2.circle(ov, (px, py), 5, (0, 180, 255), -1)
+
+        if (px, py) in match_points:
+            half = 12
+            cv2.rectangle(ov, (px - half, py - half), (px + half, py + half), (0, 255, 0), 2)
+        else:
+            cv2.circle(ov, (px, py), 5, (0, 0, 255), -1)
+
         cv2.putText(
             ov,
             f"D{i} c{det.get('cls', '?')} {det.get('conf', 0.0):.2f}",
             (px + 6, py - 4),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.4,
-            (0, 200, 255),
+            (0, 0, 0),
             1,
         )
 
-    key = "left_px" if side == "left" else "right_px"
-    for match in matches:
-        pt = match.get(key)
-        if pt is None:
-            continue
-        cv2.circle(ov, (int(round(pt[0])), int(round(pt[1]))), 9, (255, 255, 0), 2)
-
     if chosen is not None and chosen.get(key) is not None:
         pt = chosen[key]
-        cv2.circle(ov, (int(round(pt[0])), int(round(pt[1]))), 14, (0, 255, 0), 3)
+        cv2.circle(ov, (int(round(pt[0])), int(round(pt[1]))), 6, (0, 128, 0), -1)
 
-    cv2.drawMarker(
-        ov,
-        (FRAME_WIDTH // 2, FRAME_HEIGHT // 2),
-        (0, 0, 255),
-        markerType=cv2.MARKER_CROSS,
-        markerSize=24,
-        thickness=2,
-    )
+ 
     return ov
 
 

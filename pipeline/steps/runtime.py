@@ -303,7 +303,13 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
             elif state == "HOME":
                 if DETECTOR_MODE == "ai" and hasattr(detector, "warmup"):
                     warmup_info = detector.warmup()
-                cameras.open(start_recorder=execute_targets)
+                try:
+                    cameras.open(start_recorder=execute_targets)
+                except RuntimeError as e:
+                    print(f"[CAM RECOVER] Initial camera open failed: {e}")
+                    cameras.recover()
+                    if execute_targets:
+                        cameras.start_recording()
                 _update_recording_context(cameras, "HOME", gantry, target_queue, None, None, actual_hits, logger)
                 if HOMING:
                     gantry.home()
@@ -648,6 +654,12 @@ def run_runtime(use_real_gantry=True, execute_targets=True):
                 clear_current_target_line()
                 print("\n  All targets complete.")
                 _print_final_targets(actual_hits)
+
+                # Return to survey position so the gantry is ready for the next pass.
+                print(f"[RUNTIME] Returning to survey position ({SURVEY_POS_X}, {SURVEY_POS_Y}) mm...")
+                _update_recording_context(cameras, "SURVEY", gantry, target_queue, None, None, actual_hits, logger)
+                gantry.move_absolute(SURVEY_POS_X, SURVEY_POS_Y)
+
                 if cameras is not None:
                     cameras.stop_recording()
                 _save_metrics(logger, "complete", cameras)

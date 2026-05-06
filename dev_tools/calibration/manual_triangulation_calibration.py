@@ -48,7 +48,11 @@ def main():
     try:
         gantry = Gantry(GRBL_PORT)
         cameras = StereoCameras()
-        cameras.open()
+        try:
+            cameras.open()
+        except RuntimeError:
+            cameras.recover()
+            cameras.start_recording()
 
         survey_detector = ManualDetectorLocal(display_scale=MANUAL_DISPLAY_SCALE)
         survey_detector.window_name = "Survey - Stereo Pair"

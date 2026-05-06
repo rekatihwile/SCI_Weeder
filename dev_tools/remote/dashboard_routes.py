@@ -14,6 +14,7 @@ from flask import Response, jsonify, render_template, request
 from dashboard_state import state
 from dashboard_workspace3d import register_workspace3d_routes
 from dashboard_fine_align import register_fine_align_routes
+from dashboard_triangulate import register_triangulate_routes
 
 from dashboard_camera import (
     get_preview_frame,
@@ -37,6 +38,7 @@ from dashboard_yolo import (
     get_class_names,
     run_debug_scan,
     run_cached_match,
+    run_survey_and_cache,
 )
 
 from dashboard_gantry import (
@@ -67,6 +69,7 @@ from dashboard_settings import (
 def register_routes(app):
     register_workspace3d_routes(app)
     register_fine_align_routes(app)
+    register_triangulate_routes(app)
 
     # =========================================================================
     # Page routes
@@ -248,6 +251,18 @@ def register_routes(app):
     @app.route("/api/run_survey", methods=["POST"])
     def api_run_survey():
         return api_run_scan()
+
+
+    @app.route("/api/run_survey_full", methods=["POST"])
+    def api_run_survey_full():
+        try:
+            params = request.get_json(force=True)
+            with state.camera_lock:
+                result = run_survey_and_cache(params)
+            result["ok"] = True
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({"ok": False, "error": repr(e)}), 500
 
 
     @app.route("/api/run_match", methods=["POST"])

@@ -234,7 +234,7 @@
 
         document.getElementById("liveBtn").innerText = "Resume Live";
         document.getElementById("status").innerText =
-          "Resetting cameras: close → flush left → flush right → reopen stereo...";
+          "Recovering cameras: soft reopen, escalating to USB reset if needed...";
         document.getElementById("diagnostics").innerText =
           "Reset running. Wait...";
 
@@ -261,10 +261,8 @@
 
           document.getElementById("diagnostics").innerText = JSON.stringify(
             {
-              left_index: data.left_index,
-              right_index: data.right_index,
-              left_flush: data.left_flush,
-              right_flush: data.right_flush,
+              recovery: data.recovery,
+              frame: data.frame,
             },
             null,
             2,

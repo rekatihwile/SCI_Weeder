@@ -283,7 +283,7 @@ FINAL_SNAP_POINT_MODE = "qpoint"
 # =============================================================================
 
 SURVEY_POS_X = 200.0
-SURVEY_POS_Y = 200.0
+SURVEY_POS_Y = 150.0
 # Used by main.py. Gantry pose where the global survey burst is captured.
 
 SURVEY_FRAME_WIDTH = None
@@ -291,7 +291,7 @@ SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 # Higher values can improve detection but cost camera switch/settling time.
 
-SURVEY_BURST_COUNT = 2
+SURVEY_BURST_COUNT = 20
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
 SURVEY_MIN_HITS = 1
@@ -321,15 +321,15 @@ SURVEY_CROP_W = 704
 SURVEY_CROP_H = 608
 # Crop height in pixels used when SURVEY_CROP_MODE is set.
 
-SURVEY_LEFT_OFFSET_X = -272
+SURVEY_LEFT_OFFSET_X = -328
 SURVEY_LEFT_OFFSET_Y = 44
 # Full-frame pixel offset applied to the left-camera crop center (on top of SURVEY_CROP_MODE geometry).
 
-SURVEY_RIGHT_OFFSET_X = 304
+SURVEY_RIGHT_OFFSET_X = 228
 SURVEY_RIGHT_OFFSET_Y = 48
 # Same as above for the right camera.
 
-SURVEY_CONFIDENCE_OVERRIDE = 0.6
+SURVEY_CONFIDENCE_OVERRIDE = 0.7
 # When set (float), overrides AI_CONFIDENCE for the survey burst only.
 # None = use AI_CONFIDENCE. Written by dev_tools "Save Config Settings".
 

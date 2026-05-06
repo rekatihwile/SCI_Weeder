@@ -59,7 +59,10 @@ def main():
 
     print("\n--- Opening cameras ---")
     cameras = StereoCameras()
-    cameras.open(start_recorder=False)
+    try:
+        cameras.open(start_recorder=False)
+    except RuntimeError:
+        cameras.recover()
 
     print("\n--- Building coarse_mover ---")
     coarse_mover = TriangulationCoarseMover()

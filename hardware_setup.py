@@ -3,6 +3,8 @@ os.environ["OPENCV_LOG_LEVEL"] = "OFF"
 
 import json
 import platform
+import subprocess
+import time
 from pathlib import Path
 
 import cv2
@@ -69,6 +71,47 @@ def detect_cameras_linux():
             pass
     return entries
 
+
+def reset_cameras_uhubctl(hub_loc="1-4", ports=(3, 4), delay=3):
+    """Power-cycle specific USB hub ports using uhubctl (surgical camera reset)."""
+    print(f"\n=== UHUBCTL CAMERA RESET (hub {hub_loc}, ports {ports}) ===")
+    for port in ports:
+        print(f"[RESET] Cycling port {port}...")
+        result = subprocess.run(
+            ["sudo", "uhubctl", "-l", hub_loc, "-p", str(port), "-a", "cycle", "-d", str(delay)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"[RESET] Port {port} cycle FAILED: {result.stderr.strip()}")
+            return False
+    time.sleep(2)  # let cameras enumerate after power restore
+    print("[RESET] Camera port reset complete.")
+    return True
+
+
+def nuclear_reset_usb_hub(hub_port="1-4"):
+    # Try surgical uhubctl reset first
+    if subprocess.run(["which", "uhubctl"], capture_output=True).returncode == 0:
+        return reset_cameras_uhubctl()
+
+    # Fallback: full hub unbind/rebind
+    print(f"\n=== NUCLEAR USB RESET (hub {hub_port}) ===")
+    for action, wait_after in [("unbind", 5.0), ("bind", 3.0)]:
+        path = f"/sys/bus/usb/drivers/usb/{action}"
+        print(f"[NUCLEAR] {action} -> {hub_port}")
+        result = subprocess.run(
+            ["sudo", "tee", path],
+            input=hub_port,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            print(f"[NUCLEAR] {action} FAILED (rc={result.returncode}): {result.stderr.strip()}")
+            return False
+        time.sleep(wait_after)
+    print("[NUCLEAR] USB hub reset complete.")
+    return True
 
 def assign_linux_left_right(cam_entries):
     if len(cam_entries) < 2:
@@ -142,6 +185,10 @@ def build_config():
 
     if system == "Linux":
         cams = detect_cameras_linux()
+        if len(cams) < 2:
+            print(f"[WARNING] Found {len(cams)} usable Linux cameras. Attempting nuclear USB reset...")
+            if nuclear_reset_usb_hub():
+                cams = detect_cameras_linux()
         if len(cams) < 2:
             print(f"[ERROR] Found {len(cams)} usable Linux cameras by physical path. Need 2.")
         else:

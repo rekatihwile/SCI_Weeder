@@ -107,6 +107,52 @@ PD_MINIMAP_SIZE = 172
 
 HEADER_H = 46  # pixels reserved at top for progress bars
 
+# =============================================================================
+# Rectification helpers
+# =============================================================================
+
+_RENDER_RECT_MAPS_CACHE = {}
+
+
+def _find_rect_npz_key(data, candidates):
+    for key in candidates:
+        if key in data:
+            return key
+    return None
+
+
+def _load_render_rect_maps():
+    if _RENDER_RECT_MAPS_CACHE:
+        return _RENDER_RECT_MAPS_CACHE
+    if RECT_NPZ_PATH is None or not Path(str(RECT_NPZ_PATH)).exists():
+        return None
+    data = np.load(str(RECT_NPZ_PATH))
+    left_x_key = _find_rect_npz_key(data, ["map1L", "left_map_x", "map1_left", "left_map1", "mapLx", "mapxL", "lmapx", "map1x", "mapx1"])
+    left_y_key = _find_rect_npz_key(data, ["map2L", "left_map_y", "map2_left", "left_map2", "mapLy", "mapyL", "lmapy", "map1y", "mapy1"])
+    right_x_key = _find_rect_npz_key(data, ["map1R", "right_map_x", "map1_right", "right_map1", "mapRx", "mapxR", "rmapx", "map2x", "mapx2"])
+    right_y_key = _find_rect_npz_key(data, ["map2R", "right_map_y", "map2_right", "right_map2", "mapRy", "mapyR", "rmapy", "map2y", "mapy2"])
+    if None in (left_x_key, left_y_key, right_x_key, right_y_key):
+        print(f"[render] WARNING: could not find rect map keys in {RECT_NPZ_PATH}; available: {list(data.keys())}")
+        return None
+    _RENDER_RECT_MAPS_CACHE["left_map_x"] = data[left_x_key]
+    _RENDER_RECT_MAPS_CACHE["left_map_y"] = data[left_y_key]
+    _RENDER_RECT_MAPS_CACHE["right_map_x"] = data[right_x_key]
+    _RENDER_RECT_MAPS_CACHE["right_map_y"] = data[right_y_key]
+    return _RENDER_RECT_MAPS_CACHE
+
+
+def _rectify_frame_pair(left, right):
+    """Apply stereo rectification maps to a raw frame pair. Returns (left_rect, right_rect)."""
+    maps = _load_render_rect_maps()
+    if maps is None:
+        return left, right
+    left_rect = cv2.remap(left, maps["left_map_x"], maps["left_map_y"],
+                          interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    right_rect = cv2.remap(right, maps["right_map_x"], maps["right_map_y"],
+                           interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    return left_rect, right_rect
+
+
 # LK optical-flow parameters used in the renderer for visual tracking only.
 _LK_PARAMS = dict(
     winSize=(21, 21),
@@ -928,27 +974,11 @@ def _draw_continuous_stereo_guides(video_row, left_width, record):
     pd_y = h // 2
     pd_color = (255, 60, 0)
 
-    # This is the actual PD target row used by the controller: frame center in both cameras.
+    # PD target row: frame center in both cameras (where the controller drives the plant).
     cv2.line(video_row, (0, pd_y), (w - 1, pd_y), pd_color, 1, cv2.LINE_AA)
     cv2.drawMarker(video_row, (left_width // 2, pd_y), pd_color, cv2.MARKER_TILTED_CROSS, 14, 1, cv2.LINE_AA)
     cv2.drawMarker(video_row, (right_offset_x + (w - right_offset_x) // 2, pd_y), pd_color, cv2.MARKER_TILTED_CROSS, 14, 1, cv2.LINE_AA)
     _put_text(video_row, "PD target row", (12, max(24, pd_y - 10)), scale=0.42, color=pd_color)
-
-    # Also connect the planned survey/reference point continuously across both views.
-    active_id = _target_id(record.get("current_target_id"))
-    planned = _planned_target_for_id(record, active_id)
-    left_ref = _as_int_pt((planned or {}).get("left_px"))
-    right_ref = _as_int_pt((planned or {}).get("right_px"))
-    ref_color = (0, 165, 255)
-    if left_ref is not None and right_ref is not None:
-        lp = left_ref
-        rp = (right_offset_x + right_ref[0], right_ref[1])
-        cv2.line(video_row, (0, lp[1]), lp, ref_color, 1, cv2.LINE_AA)
-        cv2.line(video_row, lp, rp, ref_color, 2, cv2.LINE_AA)
-        cv2.line(video_row, rp, (w - 1, rp[1]), ref_color, 1, cv2.LINE_AA)
-        cv2.drawMarker(video_row, lp, ref_color, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
-        cv2.drawMarker(video_row, rp, ref_color, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
-        _put_text(video_row, "survey ref", (12, max(44, min(lp[1], rp[1]) - 8)), scale=0.42, color=ref_color)
 
 
 def _reid_crop_boxes():
@@ -963,70 +993,6 @@ def _reid_crop_boxes():
     return box, box
 
 
-def _draw_reid_crop_view(frame, raw_frame, crop_box, seed_pt, title, color, candidates=None, winner_id=None):
-    x0, y0, x1, y1 = crop_box
-    cv2.rectangle(frame, (x0, y0), (x1, y1), color, 2, cv2.LINE_AA)
-    _put_text(frame, title, (x0 + 6, max(22, y0 - 8)), scale=0.48, color=color)
-    crop_candidates = []
-    for candidate in candidates or []:
-        pt = candidate.get("pt")
-        p = _as_int_pt(pt)
-        if p is None:
-            continue
-        if not (x0 <= p[0] <= x1 and y0 <= p[1] <= y1):
-            continue
-        is_winner = winner_id is not None and candidate.get("id") == winner_id
-        crop_candidates.append((candidate, p, is_winner))
-        if is_winner and seed_pt is not None:
-            continue
-        _draw_cv_box(
-            frame,
-            pt,
-            "winner" if is_winner else None,
-            color=color if is_winner else (70, 220, 255),
-            half=22 if is_winner else 16,
-            confidence=None,
-            winner=is_winner,
-        )
-    if seed_pt is not None:
-        _draw_cv_box(frame, seed_pt, "winner", color=color, half=22, winner=True)
-
-    crop = raw_frame[y0:y1, x0:x1]
-    if crop.size == 0:
-        return
-    h, w = frame.shape[:2]
-    inset_w = min(230, max(150, w // 4))
-    inset_h = max(90, int(inset_w * crop.shape[0] / max(1, crop.shape[1])))
-    inset_h = min(inset_h, 180)
-    inset = cv2.resize(crop, (inset_w, inset_h), interpolation=cv2.INTER_LINEAR)
-    if seed_pt is not None:
-        sx = inset_w / max(1, crop.shape[1])
-        sy = inset_h / max(1, crop.shape[0])
-        for candidate, p, is_winner in crop_candidates:
-            if is_winner and seed_pt is not None:
-                continue
-            px = _clamp_int((p[0] - x0) * sx, 0, inset_w - 1)
-            py = _clamp_int((p[1] - y0) * sy, 0, inset_h - 1)
-            c = color if is_winner else (70, 220, 255)
-            half = 18 if is_winner else 12
-            cv2.rectangle(inset, (max(0, px - half), max(0, py - half)),
-                          (min(inset_w - 1, px + half), min(inset_h - 1, py + half)), c, 1, cv2.LINE_AA)
-            cv2.drawMarker(inset, (px, py), c, cv2.MARKER_CROSS, 11, 1, cv2.LINE_AA)
-
-        px = _clamp_int((seed_pt[0] - x0) * sx, 0, inset_w - 1)
-        py = _clamp_int((seed_pt[1] - y0) * sy, 0, inset_h - 1)
-        cv2.rectangle(inset, (max(0, px - 18), max(0, py - 18)),
-                      (min(inset_w - 1, px + 18), min(inset_h - 1, py + 18)), color, 2, cv2.LINE_AA)
-        cv2.drawMarker(inset, (px, py), color, cv2.MARKER_CROSS, 18, 2, cv2.LINE_AA)
-
-    ox = w - inset_w - 12
-    oy = 66
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (ox - 4, oy - 28), (ox + inset_w + 4, oy + inset_h + 4), (20, 20, 20), -1)
-    cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-    cv2.rectangle(frame, (ox - 4, oy - 28), (ox + inset_w + 4, oy + inset_h + 4), color, 1, cv2.LINE_AA)
-    _put_text(frame, title, (ox + 6, oy - 9), scale=0.45, color=color)
-    frame[oy:oy + inset_h, ox:ox + inset_w] = inset
 
 
 def _yolo_detections_in_box(core, raw_frame, crop_box, conf, class_filter=None):
@@ -1115,6 +1081,8 @@ def _precompute_reid_overlay_cache(run_dir, records, seed_points, detector, imgs
         if raw_left is None or raw_right is None:
             skipped += 1
             continue
+        # Rectify so detection coordinates align with the rectified displayed frames.
+        raw_left, raw_right = _rectify_frame_pair(raw_left, raw_right)
         lx0, ly0, lx1, ly1 = left_box
         rx0, ry0, rx1, ry1 = right_box
         class_filter = _active_target_class_id(record, seg["target_id"])
@@ -1191,10 +1159,13 @@ def _precompute_reid_overlay_cache(run_dir, records, seed_points, detector, imgs
 
 
 def _load_frame_pair(run_dir, record):
-    left = cv2.imread(str(run_dir / record["left_image_path"]))
-    right = cv2.imread(str(run_dir / record["right_image_path"]))
-    if left is None or right is None:
+    left_raw = cv2.imread(str(run_dir / record["left_image_path"]))
+    right_raw = cv2.imread(str(run_dir / record["right_image_path"]))
+    if left_raw is None or right_raw is None:
         return None, None, None, None
+    # Rectify so all annotated pixel positions (from manifest, which are in rectified
+    # frame space) align correctly with what is displayed and with LK optical flow.
+    left, right = _rectify_frame_pair(left_raw, right_raw)
     return left, right, left.copy(), right.copy()
 
 
@@ -1308,25 +1279,26 @@ def _draw_reid_overlay(left, right, raw_left, raw_right, record, active_id, seed
                 detector.cv_right, raw_right, right_box, right_seed)
         state["reid_detected"] = True
 
-    # Draw all detections: winner in green, losers in red.
-    for frame, dets_key, winner_key in (
-        (left,  "reid_dets_left",  "reid_winner_idx_left"),
-        (right, "reid_dets_right", "reid_winner_idx_right"),
+    # Draw only the winner detection box; suppress loser boxes to keep the overlay readable.
+    for frame, dets_key, winner_key, box in (
+        (left,  "reid_dets_left",  "reid_winner_idx_left",  left_box),
+        (right, "reid_dets_right", "reid_winner_idx_right", right_box),
     ):
         dets = state.get(dets_key) or []
         winner_idx = state.get(winner_key)
-        for i, det in enumerate(dets):
-            is_winner = (i == winner_idx)
-            color = (0, 220, 80) if is_winner else (0, 0, 220)
-            x1, y1, x2, y2 = det["box"]
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3 if is_winner else 2, cv2.LINE_AA)
+        n = len(dets)
+        bx0 = box[0]
+        if n:
+            _put_text(frame, f"{n} det{'s' if n != 1 else ''}", (bx0 + 6, 44), scale=0.40, color=(0, 220, 80))
+        if winner_idx is not None and 0 <= winner_idx < n:
+            det = dets[winner_idx]
+            wx1, wy1, wx2, wy2 = det["box"]
             cx, cy = det["center"]
-            cv2.drawMarker(frame, (cx, cy), color, cv2.MARKER_CROSS, 16, 2, cv2.LINE_AA)
-            cls_tag = ""
-            if det.get("cls") is not None:
-                cls_tag = f" c{int(det['cls'])}"
-            tag = f"{'winner' if is_winner else 'loser'} {det['conf']:.2f}{cls_tag}"
-            _put_text(frame, tag, (x1, max(14, y1 - 4)), scale=0.42, color=color)
+            cv2.rectangle(frame, (wx1, wy1), (wx2, wy2), (0, 220, 80), 3, cv2.LINE_AA)
+            cv2.drawMarker(frame, (cx, cy), (0, 220, 80), cv2.MARKER_CROSS, 20, 2, cv2.LINE_AA)
+            cls_tag = f" c{int(det['cls'])}" if det.get("cls") is not None else ""
+            _put_text(frame, f"winner {det['conf']:.2f}{cls_tag}",
+                      (wx1, max(14, wy1 - 4)), scale=0.48, color=(0, 220, 80))
 
 
 def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points, reid_delays, state,
@@ -1359,8 +1331,6 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
     segment_start = state.get("segment_start_ts")
     segment_elapsed = 0.0 if segment_start is None else max(0.0, timestamp - float(segment_start))
     reid_delay = float(reid_delays.get(active_id, 0.0))
-    pd_target_left = _draw_pd_target_marker(left, label="PD target")
-    pd_target_right = _draw_pd_target_marker(right, label="PD target")
 
     # RE-ID phase + brief flash after it ends.
     if segment_elapsed <= reid_delay + REID_CV_FLASH_SEC:
@@ -1371,6 +1341,10 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
                            state=state, precomputed=precomputed)
         if segment_elapsed < reid_delay:
             return  # still in RE-ID, skip PD display
+
+    # PD phase: draw target crosshair at frame center (not shown during pure re-ID).
+    pd_target_left = _draw_pd_target_marker(left, label="PD target")
+    pd_target_right = _draw_pd_target_marker(right, label="PD target")
 
     # PD phase: use LK to track the visual plant position frame-to-frame.
     # The manifest PD error values are accurate (from the live run); LK here
@@ -1391,8 +1365,21 @@ def _draw_pd_flow_overlay(left, right, raw_left, raw_right, record, seed_points,
         return (nx, ny) if (0 <= nx < w and 0 <= ny < h) else pt
 
     if not state.get("initialized"):
-        state["pt_left"]       = seed_left
-        state["pt_right"]      = seed_right
+        # Prefer the re-ID winner detection center (in rectified frame space)
+        # over the stored seed position from hit records.  The reid detections
+        # were run on the first FINE_ALIGN frame; using the winner center as the
+        # LK starting point keeps the tracker on the right plant from frame 1.
+        def _winner_center(dets_key, idx_key, fallback):
+            dets = state.get(dets_key) or []
+            idx = state.get(idx_key)
+            if dets and idx is not None and 0 <= idx < len(dets):
+                c = dets[idx].get("center")
+                if c is not None:
+                    return (float(c[0]), float(c[1]))
+            return fallback
+
+        state["pt_left"]       = _winner_center("reid_dets_left",  "reid_winner_idx_left",  seed_left)
+        state["pt_right"]      = _winner_center("reid_dets_right", "reid_winner_idx_right", seed_right)
         state["old_gray_left"] = gray_left
         state["old_gray_right"] = gray_right
         state["initialized"]   = True

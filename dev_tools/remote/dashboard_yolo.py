@@ -1,5 +1,6 @@
 """YOLO detection helpers: ensure detector, parameter parsers, debug scan, cached match."""
 
+import json
 import time
 
 from dashboard_state import (
@@ -19,6 +20,8 @@ from dashboard_rectify import maybe_rectify_pair
 import importlib.util
 from pathlib import Path
 
+import cv2
+
 _NMS_PATCH_PATH = Path(__file__).resolve().parents[2] / "bringup" / "_nms_patch.py"
 
 if _NMS_PATCH_PATH.exists():
@@ -30,6 +33,9 @@ else:
     
 from vision.detectors.ai_detector import AIDetector
 from vision.matching import match_points
+
+_CACHE_DIR = Path(__file__).resolve().parents[1] / "cache"
+_SURVEY_CACHE_DIR = _CACHE_DIR / "survey"
 
 # =============================================================================
 # Parameter parsers
@@ -281,18 +287,133 @@ def normalize_match(match):
     raise ValueError(f"Unknown match format: {type(match)} {match}")
 
 
+def _fallback_box(point, half=12.0):
+    x, y = map(float, point)
+    return (x - half, y - half, x + half, y + half)
+
+
+def _det_from_cached_match(src, side):
+    px_key = f"{side}_px"
+    box_key = f"{side}_box"
+    cls_key = f"{side}_cls"
+    conf_key = f"{side}_conf"
+    px_rect_key = f"{side}_px_rect"
+    box_rect_key = f"{side}_box_rect"
+
+    point = tuple(src[px_key])
+    det = {
+        "point": point,
+        "box": tuple(src.get(box_key) or _fallback_box(point)),
+        "cls": src.get(cls_key),
+        "conf": src.get(conf_key),
+    }
+    if px_rect_key in src:
+        det["point_rectified"] = tuple(src[px_rect_key])
+    if box_rect_key in src:
+        det["box_rectified"] = tuple(src[box_rect_key])
+    return det
+
+
+def _load_disk_cached_scan():
+    plan_path = _CACHE_DIR / "latest_plan.json"
+    left_path = _CACHE_DIR / "fine_align_debug" / "latest_full_left.jpg"
+    right_path = _CACHE_DIR / "fine_align_debug" / "latest_full_right.jpg"
+
+    if not plan_path.exists():
+        raise RuntimeError(
+            "No in-memory cached scan and no dev_tools/cache/latest_plan.json fallback found."
+        )
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    sources = [
+        t["raw"]["source_target"]
+        for t in plan.get("targets", [])
+        if isinstance(t, dict)
+        and isinstance(t.get("raw"), dict)
+        and isinstance(t["raw"].get("source_target"), dict)
+    ]
+    if not sources:
+        raise RuntimeError(f"Cached plan has no source matches: {plan_path}")
+
+    left_frame = cv2.imread(str(left_path)) if left_path.exists() else None
+    right_frame = cv2.imread(str(right_path)) if right_path.exists() else None
+    if left_frame is None or right_frame is None:
+        raise RuntimeError(
+            "Cached plan exists, but the saved full-frame images are missing "
+            f"or unreadable: {left_path}, {right_path}"
+        )
+
+    return {
+        "timestamp": plan.get("created_at", plan_path.stat().st_mtime),
+        "frame_mode": plan.get("frame_mode", "raw"),
+        "rectified": plan.get("frame_mode") == "rectified",
+        "left_frame": left_frame,
+        "right_frame": right_frame,
+        "left_detections": [_det_from_cached_match(src, "left") for src in sources],
+        "right_detections": [_det_from_cached_match(src, "right") for src in sources],
+        "left_crop": None,
+        "right_crop": None,
+        "params": {"source": str(plan_path)},
+        "class_names": {},
+        "disk_fallback": True,
+    }
+
+
+def _make_serializable(obj):
+    if isinstance(obj, dict):
+        return {k: _make_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_serializable(v) for v in obj]
+    return obj
+
+
+def run_survey_and_cache(params):
+    """Detect + stereo-match + persist raw frames and matched pixel coords to disk."""
+    scan_result = run_debug_scan(params)
+    match_result = run_cached_match()
+
+    _SURVEY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(_SURVEY_CACHE_DIR / "left.jpg"), state.last_scan["left_frame"])
+    cv2.imwrite(str(_SURVEY_CACHE_DIR / "right.jpg"), state.last_scan["right_frame"])
+
+    meta = {
+        "timestamp": state.last_scan["timestamp"],
+        "frame_mode": state.last_scan["frame_mode"],
+        "left_count": scan_result["left_count"],
+        "right_count": scan_result["right_count"],
+        "matched_count": match_result["matched_count"],
+        "matches": _make_serializable(match_result["matches"]),
+        "left_detections": _make_serializable(state.last_scan["left_detections"]),
+        "right_detections": _make_serializable(state.last_scan["right_detections"]),
+        "left_crop": state.last_scan.get("left_crop"),
+        "right_crop": state.last_scan.get("right_crop"),
+    }
+    (_SURVEY_CACHE_DIR / "meta.json").write_text(
+        json.dumps(meta, indent=2, default=str), encoding="utf-8"
+    )
+
+    return {
+        **scan_result,
+        "matched_count": match_result["matched_count"],
+        "match_s": match_result["match_s"],
+        "match_left_image": match_result["left_image"],
+        "match_right_image": match_result["right_image"],
+        "matches": match_result["matches"],
+        "cached_to_disk": True,
+    }
+
+
 def run_cached_match():
-    if state.last_scan is None:
-        raise RuntimeError("No cached scan yet. Run Scan / Save Points first.")
+    scan = state.last_scan or _load_disk_cached_scan()
 
     t0 = time.perf_counter()
 
-    left_dets = list(state.last_scan["left_detections"])
-    right_dets = list(state.last_scan["right_detections"])
+    left_dets = list(scan["left_detections"])
+    right_dets = list(scan["right_detections"])
 
     # Cached scan points are already in rectified pixel space when frame_mode=rectified.
     # Mark them explicitly so vision.matching does not apply raw->rectified remapping again.
-    if state.last_scan.get("frame_mode") == "rectified":
+    if scan.get("frame_mode") == "rectified":
         def _tag_rectified(dets):
             out = []
             for d in dets:
@@ -320,20 +441,21 @@ def run_cached_match():
 
     match_s = time.perf_counter() - t0
 
-    left_det_img = draw_detections(state.last_scan["left_frame"], state.last_scan["left_detections"])
-    right_det_img = draw_detections(state.last_scan["right_frame"], state.last_scan["right_detections"])
+    left_det_img = draw_detections(scan["left_frame"], scan["left_detections"])
+    right_det_img = draw_detections(scan["right_frame"], scan["right_detections"])
 
     left_match_img, right_match_img = draw_matches(left_det_img, right_det_img, matches)
 
     return {
-        "frame_mode": state.last_scan["frame_mode"],
-        "scan_timestamp": state.last_scan["timestamp"],
-        "left_count": len(state.last_scan["left_detections"]),
-        "right_count": len(state.last_scan["right_detections"]),
+        "frame_mode": scan["frame_mode"],
+        "scan_timestamp": scan["timestamp"],
+        "left_count": len(scan["left_detections"]),
+        "right_count": len(scan["right_detections"]),
         "matched_count": len(matches),
         "match_s": round(match_s, 3),
         "matches": matches,
         "left_image": b64_img(left_match_img),
         "right_image": b64_img(right_match_img),
-        "class_names": state.last_scan["class_names"],
+        "class_names": scan.get("class_names", {}),
+        "disk_fallback": bool(scan.get("disk_fallback", False)),
     }

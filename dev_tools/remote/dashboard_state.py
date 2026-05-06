@@ -43,6 +43,7 @@ class DashboardState:
     detector: object = None
     gantry: object = None
     last_scan: dict = None
+    last_triangulation: dict = None
     rectify_cache: dict = None
     workspace_projector: object = None
 

@@ -1,0 +1,698 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Triangulate</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+      }
+
+      .content { padding: 10px 14px; }
+
+      button {
+        font-size: 14px;
+        padding: 5px 12px;
+        cursor: pointer;
+        border-radius: 3px;
+        border: 1px solid #555;
+        background: #2a2a2a;
+        color: #eee;
+      }
+      button:hover { background: #3a3a3a; }
+      button.primary { background: #004d80; border-color: #0077cc; }
+      button.primary:hover { background: #005fa3; }
+      button.save-btn { background: #1a3d1a; border-color: #3a8a3a; color: #8eff8e; }
+      button.save-btn:hover { background: #254f25; }
+      button.danger { background: #5a1010; border-color: #aa2020; }
+      button.danger:hover { background: #7a1818; }
+      button:disabled { opacity: 0.45; cursor: default; }
+
+      #statusBar {
+        font-family: monospace;
+        font-size: 13px;
+        padding: 5px 10px;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 3px;
+        margin: 8px 0;
+        min-height: 28px;
+        white-space: pre-wrap;
+      }
+
+      /* ── pipeline panel ── */
+      .pipeline-panel {
+        background: #141a22;
+        border: 1px solid #2a4060;
+        border-radius: 4px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+      .pipeline-panel h2 {
+        margin: 0 0 10px 0;
+        font-size: 17px;
+        color: #88ccff;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      label { font-size: 13px; color: #aaa; }
+
+      input[type="number"] {
+        width: 72px;
+        background: #222;
+        color: #eee;
+        border: 1px solid #444;
+        border-radius: 3px;
+        padding: 3px 6px;
+        font-size: 13px;
+      }
+
+      input[type="range"] {
+        width: 140px;
+        accent-color: #0077cc;
+      }
+
+      .angle-controls {
+        display: none;
+        gap: 14px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 6px;
+        padding: 8px 10px;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 3px;
+      }
+      .angle-controls.visible { display: flex; }
+
+      .angle-group { display: flex; align-items: center; gap: 6px; }
+      .angle-group label { color: #aaa; }
+      .angle-val { font-family: monospace; font-size: 13px; width: 42px; color: #8ecbff; }
+
+      /* ── results ── */
+      .results-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 10px;
+      }
+      .result-panel { display: flex; flex-direction: column; }
+      .result-panel h3 {
+        margin: 0 0 6px 0;
+        font-size: 13px;
+        color: #aaa;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .result-panel img {
+        max-width: 100%;
+        border: 1px solid #444;
+        border-radius: 3px;
+        display: none;
+      }
+      .result-panel img.visible { display: block; }
+
+      #exportLinks {
+        display: none;
+        margin: 8px 0;
+        padding: 8px;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 3px;
+        font-size: 13px;
+      }
+      #exportLinks a { margin-right: 14px; color: #8ecbff; }
+
+      table.solved-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        font-family: monospace;
+        margin-top: 10px;
+      }
+      table.solved-table th {
+        background: #222;
+        color: #aaa;
+        padding: 4px 8px;
+        border: 1px solid #333;
+        text-align: left;
+      }
+      table.solved-table td {
+        padding: 3px 8px;
+        border: 1px solid #222;
+      }
+      table.solved-table tr:nth-child(even) td { background: #161616; }
+
+      /* ── manual section ── */
+      .manual-section {
+        margin-top: 16px;
+        border: 1px solid #333;
+        border-radius: 4px;
+      }
+      .manual-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #1a1a1a;
+        cursor: pointer;
+        user-select: none;
+        border-radius: 4px 4px 0 0;
+      }
+      .manual-toggle:hover { background: #222; }
+      .manual-toggle h3 { margin: 0; font-size: 14px; color: #888; }
+      .chevron { color: #666; transition: transform 0.2s; }
+      .chevron.open { transform: rotate(90deg); }
+
+      .manual-body {
+        display: none;
+        padding: 12px 14px;
+      }
+      .manual-body.open { display: block; }
+
+      .manual-layout {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 12px;
+      }
+      .sidebar-manual { font-size: 13px; }
+      .sidebar-manual h3 {
+        margin: 0 0 4px 0;
+        font-size: 12px;
+        color: #aaa;
+        text-transform: uppercase;
+      }
+      .point-list {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 8px 0;
+        max-height: 150px;
+        overflow-y: auto;
+      }
+      .point-list li {
+        font-family: monospace;
+        font-size: 11px;
+        padding: 2px 4px;
+        border-bottom: 1px solid #222;
+        display: flex;
+        justify-content: space-between;
+      }
+      .empty-hint { color: #555; font-style: italic; }
+      .hint { color: #666; font-size: 12px; margin: 4px 0; }
+
+      #mainCanvas {
+        display: block;
+        width: 100%;
+        border: 1px solid #444;
+        background: #000;
+        cursor: crosshair;
+      }
+
+      #manualMatchSummary {
+        font-family: monospace;
+        font-size: 12px;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        padding: 6px 8px;
+        border-radius: 3px;
+        margin-top: 8px;
+        white-space: pre-wrap;
+        max-height: 80px;
+        overflow-y: auto;
+      }
+
+      a { color: #8ecbff; }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+
+    <div class="content">
+
+      <!-- ── Survey Pipeline ──────────────────────────────────────────────── -->
+      <div class="pipeline-panel">
+        <h2>Triangulate from Survey Cache</h2>
+
+        <div class="row">
+          <label>Ref X mm</label>
+          <input id="refX" type="number" value="200" step="1">
+          <label>Ref Y mm</label>
+          <input id="refY" type="number" value="200" step="1">
+          <button class="primary" onclick="runFromSurvey()">Triangulate from Survey Cache</button>
+        </div>
+
+        <div id="statusBar">Idle — click Triangulate or run Survey first.</div>
+
+        <!-- Angle controls (shown after triangulation) -->
+        <div id="angleControls" class="angle-controls">
+          <span style="font-size:13px;color:#aaa">View angle:</span>
+          <div class="angle-group">
+            <label>Elev</label>
+            <input id="elev" type="range" min="-90" max="90" value="90" step="5"
+                   oninput="updateAngleLabels()">
+            <span id="elevVal" class="angle-val">90°</span>
+          </div>
+          <div class="angle-group">
+            <label>Azim</label>
+            <input id="azim" type="range" min="-180" max="180" value="-90" step="5"
+                   oninput="updateAngleLabels()">
+            <span id="azimVal" class="angle-val">-90°</span>
+          </div>
+          <button onclick="replot()">Re-render</button>
+          <button class="save-btn" onclick="saveResults()">Save Results</button>
+        </div>
+
+        <div id="exportLinks"></div>
+
+        <!-- Results: 3D plot + stitched overlay side by side -->
+        <div class="results-grid">
+          <div class="result-panel">
+            <h3>3D Triangulated Path</h3>
+            <img id="plot3d" alt="3D plot">
+          </div>
+          <div class="result-panel">
+            <h3>Stereo Overlay</h3>
+            <img id="stitchedOverlay" alt="Stitched stereo overlay">
+          </div>
+        </div>
+
+        <!-- Solved table -->
+        <table class="solved-table" id="solvedTable" style="display:none">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Left px (x, y)</th>
+              <th>Right px (x, y)</th>
+              <th>Target XY mm</th>
+              <th>Raw tri XY mm</th>
+            </tr>
+          </thead>
+          <tbody id="solvedBody"></tbody>
+        </table>
+      </div>
+
+      <!-- ── Manual Debug (collapsible) ──────────────────────────────────── -->
+      <div class="manual-section">
+        <div class="manual-toggle" onclick="toggleManual()">
+          <span class="chevron" id="chevron">▶</span>
+          <h3>Manual Click-to-Place Debug</h3>
+          <span style="font-size:12px;color:#555;margin-left:auto">capture frame → click to place raw points → triangulate</span>
+        </div>
+
+        <div class="manual-body" id="manualBody">
+          <div class="row">
+            <button onclick="captureFrame()">Capture Frame</button>
+            <button class="primary" onclick="runManualTriangulate()">Match &amp; Triangulate</button>
+            <button class="danger" onclick="resetManual()">Reset Points</button>
+            <button onclick="runCachedScanTriangulate()">Triangulate Cached Scan</button>
+          </div>
+
+          <div class="manual-layout">
+            <div class="sidebar-manual">
+              <h3>Left <span id="leftCount" style="color:#00e5ff">0</span></h3>
+              <ul id="leftList" class="point-list"><li class="empty-hint">none yet</li></ul>
+              <h3>Right <span id="rightCount" style="color:#ff6b6b">0</span></h3>
+              <ul id="rightList" class="point-list"><li class="empty-hint">none yet</li></ul>
+              <hr style="border-color:#333;margin:8px 0">
+              <div class="hint">
+                <b>Click</b> frame → zoom<br>
+                <b>Click</b> zoom → place point<br>
+                <b>U / Z</b> → undo<br>
+                <b>Enter / T</b> → triangulate
+              </div>
+              <hr style="border-color:#333;margin:8px 0">
+              <div style="font-size:12px;color:#888">
+                Ref X <input id="manRefX" type="number" value="200" step="1"
+                             style="width:64px;background:#222;color:#eee;border:1px solid #444;padding:2px 4px">
+                Y <input id="manRefY" type="number" value="200" step="1"
+                          style="width:64px;background:#222;color:#eee;border:1px solid #444;padding:2px 4px">
+              </div>
+            </div>
+            <div>
+              <canvas id="mainCanvas"></canvas>
+              <pre id="manualMatchSummary">No manual triangulation run yet.</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- .content -->
+
+    <script>
+      // ── Survey pipeline ─────────────────────────────────────────────────
+
+      function setStatus(msg) {
+        document.getElementById("statusBar").textContent = msg;
+      }
+
+      function updateAngleLabels() {
+        document.getElementById("elevVal").textContent = document.getElementById("elev").value + "°";
+        document.getElementById("azimVal").textContent = document.getElementById("azim").value + "°";
+      }
+
+      function renderExports(files) {
+        const el = document.getElementById("exportLinks");
+        el.innerHTML = "";
+        if (!files) return;
+        const labels = { plot_png: "3D Plot PNG", stitched_png: "Stitched PNG", graph_csv: "Graph CSV" };
+        for (const [key, info] of Object.entries(files)) {
+          if (!info || !info.url) continue;
+          const a = document.createElement("a");
+          a.href = info.url; a.target = "_blank";
+          a.textContent = labels[key] || key;
+          el.appendChild(a);
+        }
+        el.style.display = el.children.length > 0 ? "block" : "none";
+      }
+
+      function renderSolvedTable(solved) {
+        const tbody = document.getElementById("solvedBody");
+        tbody.innerHTML = "";
+        if (!solved || solved.length === 0) {
+          document.getElementById("solvedTable").style.display = "none";
+          return;
+        }
+        solved.forEach((s, i) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML =
+            `<td>${i + 1}</td>` +
+            `<td>(${s.left_px[0].toFixed(1)}, ${s.left_px[1].toFixed(1)})</td>` +
+            `<td>(${s.right_px[0].toFixed(1)}, ${s.right_px[1].toFixed(1)})</td>` +
+            `<td>(${s.target_xy_mm[0].toFixed(2)}, ${s.target_xy_mm[1].toFixed(2)})</td>` +
+            `<td>(${s.raw_triangulated_xy_mm[0].toFixed(2)}, ${s.raw_triangulated_xy_mm[1].toFixed(2)})</td>`;
+          tbody.appendChild(tr);
+        });
+        document.getElementById("solvedTable").style.display = "table";
+      }
+
+      function showResults(data) {
+        if (data.plot_b64) {
+          const el = document.getElementById("plot3d");
+          el.src = "data:image/png;base64," + data.plot_b64;
+          el.classList.add("visible");
+        }
+        if (data.stitched_b64) {
+          const el = document.getElementById("stitchedOverlay");
+          el.src = "data:image/png;base64," + data.stitched_b64;
+          el.classList.add("visible");
+        }
+        renderSolvedTable(data.solved);
+        renderExports(data.files);
+        document.getElementById("angleControls").classList.add("visible");
+      }
+
+      async function runFromSurvey() {
+        const refX = parseFloat(document.getElementById("refX").value) || 200;
+        const refY = parseFloat(document.getElementById("refY").value) || 200;
+        setStatus("Loading survey cache and triangulating…");
+        document.getElementById("angleControls").classList.remove("visible");
+        document.getElementById("exportLinks").style.display = "none";
+
+        try {
+          const res = await fetch("/api/triangulate/from_survey", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ref_x: refX, ref_y: refY }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            setStatus("Error: " + data.error);
+            return;
+          }
+          const sanity = data.orientation_sanity ? `\n${data.orientation_sanity}` : "";
+          const msg = data.message || "";
+          setStatus(
+            `Done — ${data.solved_count} point(s) triangulated from ${data.matched_count} match(es)` +
+            (data.scan_timestamp ? `  |  scan: ${data.scan_timestamp}` : "") +
+            sanity + (msg ? `\n${msg}` : ""),
+          );
+          showResults(data);
+        } catch (e) {
+          setStatus("Fetch error: " + e);
+        }
+      }
+
+      async function replot() {
+        const elev = parseFloat(document.getElementById("elev").value);
+        const azim = parseFloat(document.getElementById("azim").value);
+        setStatus(`Re-rendering at elev=${elev}° azim=${azim}°…`);
+        try {
+          const res = await fetch("/api/triangulate/replot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ elev, azim }),
+          });
+          const data = await res.json();
+          if (!data.ok) { setStatus("Replot error: " + data.error); return; }
+          document.getElementById("plot3d").src = "data:image/png;base64," + data.plot_b64;
+          document.getElementById("plot3d").classList.add("visible");
+          setStatus(`Plot updated — elev=${elev}° azim=${azim}°. Click Save Results when happy.`);
+        } catch (e) {
+          setStatus("Fetch error: " + e);
+        }
+      }
+
+      async function saveResults() {
+        const elev = parseFloat(document.getElementById("elev").value);
+        const azim = parseFloat(document.getElementById("azim").value);
+        setStatus("Saving results…");
+        try {
+          const res = await fetch("/api/triangulate/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ elev, azim }),
+          });
+          const data = await res.json();
+          if (!data.ok) { setStatus("Save error: " + data.error); return; }
+          setStatus("Saved! See download links below.");
+          renderExports(data.files);
+          if (data.stitched_b64) {
+            const el = document.getElementById("stitchedOverlay");
+            el.src = "data:image/png;base64," + data.stitched_b64;
+            el.classList.add("visible");
+          }
+        } catch (e) {
+          setStatus("Fetch error: " + e);
+        }
+      }
+
+      // ── Manual toggle ───────────────────────────────────────────────────
+
+      function toggleManual() {
+        const body = document.getElementById("manualBody");
+        const chevron = document.getElementById("chevron");
+        const open = body.classList.toggle("open");
+        chevron.classList.toggle("open", open);
+        chevron.textContent = open ? "▼" : "▶";
+        if (open && leftImg) resizeCanvas();
+      }
+
+      // ── Manual mode ─────────────────────────────────────────────────────
+
+      const ZOOM_HALF = 40;
+      let appState = "idle";
+      let leftPoints = [], rightPoints = [], history = [];
+      let frameW = 0, frameH = 0;
+      let leftImg = null, rightImg = null;
+      let zoomSide = null, zoomSrcImg = null, zoomCrop = null;
+
+      const canvas = document.getElementById("mainCanvas");
+      const ctx = canvas.getContext("2d");
+
+      function resizeCanvas() {
+        if (!leftImg) return;
+        const wrap = canvas.parentElement;
+        canvas.width = wrap.clientWidth;
+        const stereoH = Math.round(canvas.width * 0.5 * (frameH / frameW));
+        canvas.height = appState === "idle" ? stereoH : stereoH * 2;
+        redrawCanvas();
+      }
+      new ResizeObserver(() => { if (document.getElementById("manualBody").classList.contains("open")) resizeCanvas(); })
+          .observe(canvas.parentElement);
+
+      function drawDot(cx, cy, color, label) {
+        ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 2 * Math.PI);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.font = "bold 11px monospace";
+        ctx.fillText(label, cx + 9, cy - 5);
+      }
+
+      function drawStereoRow(y0, rowH) {
+        const w = canvas.width;
+        ctx.drawImage(leftImg, 0, y0, w / 2, rowH);
+        ctx.drawImage(rightImg, w / 2, y0, w / 2, rowH);
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(w / 2, y0); ctx.lineTo(w / 2, y0 + rowH); ctx.stroke();
+        const scaleX = (w / 2) / frameW, scaleY = rowH / frameH;
+        leftPoints.forEach(({rectX, rectY}, i) => drawDot(rectX * scaleX, y0 + rectY * scaleY, "#00e5ff", `L${i+1}`));
+        rightPoints.forEach(({rectX, rectY}, i) => drawDot(w/2 + rectX * scaleX, y0 + rectY * scaleY, "#ff6b6b", `R${i+1}`));
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(4, y0+4, 22, 20);
+        ctx.fillStyle = "#00e5ff"; ctx.font = "bold 13px sans-serif"; ctx.fillText("L", 8, y0+18);
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(w/2+4, y0+4, 22, 20);
+        ctx.fillStyle = "#ff6b6b"; ctx.fillText("R", w/2+8, y0+18);
+      }
+
+      function redrawCanvas() {
+        if (appState === "idle") {
+          if (!leftImg) return;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          drawStereoRow(0, canvas.height);
+        } else {
+          const w = canvas.width, h = canvas.height;
+          const rowH = h / 2;
+          const {x1, y1, x2, y2} = zoomCrop;
+          ctx.clearRect(0, 0, w, h);
+          drawStereoRow(0, rowH);
+          const zx = zoomSide === "left" ? 0 : w/2;
+          ctx.drawImage(zoomSrcImg, x1, y1, x2-x1, y2-y1, zx, rowH, w/2, rowH);
+          const otherImg = zoomSide === "left" ? rightImg : leftImg;
+          ctx.drawImage(otherImg, 0, 0, frameW, frameH, zoomSide === "left" ? w/2 : 0, rowH, w/2, rowH);
+          ctx.strokeStyle = "#ff9900"; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+          ctx.beginPath(); ctx.moveTo(zx+w/4, rowH); ctx.lineTo(zx+w/4, h); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(zx, rowH+rowH/2); ctx.lineTo(zx+w/2, rowH+rowH/2); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(0, rowH); ctx.lineTo(w, rowH); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(w/2, rowH); ctx.lineTo(w/2, h); ctx.stroke();
+          ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(zx, rowH, w/2, 40);
+          ctx.fillStyle = "#ff9900"; ctx.font = "bold 13px sans-serif";
+          ctx.fillText(`Zoom ${zoomSide.toUpperCase()} — click to place`, zx+8, rowH+20);
+          ctx.fillStyle = "#888"; ctx.font = "11px sans-serif";
+          ctx.fillText("U/Z = cancel", zx+8, rowH+36);
+        }
+      }
+
+      function updateManualSidebar() {
+        document.getElementById("leftCount").textContent = leftPoints.length;
+        document.getElementById("rightCount").textContent = rightPoints.length;
+        function renderList(el, pts, cls, prefix) {
+          el.innerHTML = pts.length === 0 ? `<li class="empty-hint">none yet</li>` :
+            pts.map((p, i) => `<li class="${cls}"><span>${prefix}${i+1}</span><span>(${Math.round(p.rawX)}, ${Math.round(p.rawY)})</span></li>`).join("");
+        }
+        renderList(document.getElementById("leftList"), leftPoints, "left-pt", "L");
+        renderList(document.getElementById("rightList"), rightPoints, "right-pt", "R");
+      }
+
+      async function captureFrame() {
+        try {
+          const res = await fetch("/api/triangulate/capture", {method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+          const data = await res.json();
+          if (!data.ok) { alert("Capture error: " + data.error); return; }
+          frameW = data.frame_w; frameH = data.frame_h;
+          await new Promise((resolve, reject) => {
+            leftImg = new Image();
+            leftImg.onload = () => { rightImg = new Image(); rightImg.onload = resolve; rightImg.onerror = reject; rightImg.src = "data:image/jpeg;base64," + data.right; };
+            leftImg.onerror = reject;
+            leftImg.src = "data:image/jpeg;base64," + data.left;
+          });
+          resizeCanvas();
+        } catch(e) { alert("Fetch error: " + e); }
+      }
+
+      canvas.addEventListener("click", async (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const cy = (e.clientY - rect.top) * (canvas.height / rect.height);
+        if (appState === "idle") {
+          if (!leftImg) return;
+          const side = cx < canvas.width/2 ? "left" : "right";
+          const halfW = canvas.width/2;
+          const imgX = side === "left" ? (cx/halfW)*frameW : ((cx-halfW)/halfW)*frameW;
+          const imgY = (cy/canvas.height)*frameH;
+          zoomSide = side;
+          zoomSrcImg = side === "left" ? leftImg : rightImg;
+          zoomCrop = {x1:Math.max(0,Math.round(imgX)-ZOOM_HALF), y1:Math.max(0,Math.round(imgY)-ZOOM_HALF), x2:Math.min(frameW,Math.round(imgX)+ZOOM_HALF), y2:Math.min(frameH,Math.round(imgY)+ZOOM_HALF)};
+          appState = "zoom_" + side;
+          resizeCanvas();
+        } else {
+          const rowH = canvas.height/2;
+          const zx = zoomSide === "left" ? 0 : canvas.width/2;
+          if (cy < rowH || cx < zx || cx > zx+canvas.width/2) return;
+          const {x1,y1,x2,y2} = zoomCrop;
+          const rect_x = x1 + ((cx-zx)/(canvas.width/2))*(x2-x1);
+          const rect_y = y1 + ((cy-rowH)/rowH)*(y2-y1);
+          try {
+            const res = await fetch("/api/triangulate/rect_to_raw", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({side:zoomSide, rect_x, rect_y})});
+            const data = await res.json();
+            if (!data.ok) return;
+            const pt = {rawX:data.raw_x, rawY:data.raw_y, rectX:rect_x, rectY:rect_y};
+            if (zoomSide === "left") { leftPoints.push(pt); history.push("left"); }
+            else { rightPoints.push(pt); history.push("right"); }
+            appState = "idle"; zoomSide = null; zoomCrop = null; zoomSrcImg = null;
+            updateManualSidebar(); resizeCanvas();
+          } catch(e) {}
+        }
+      });
+
+      document.addEventListener("keydown", (e) => {
+        if (!document.getElementById("manualBody").classList.contains("open")) return;
+        const k = e.key.toLowerCase();
+        if (k === "u" || k === "z") { e.preventDefault(); handleUndo(); }
+        if (k === "enter" || k === "t") { e.preventDefault(); runManualTriangulate(); }
+      });
+
+      function handleUndo() {
+        if (appState.startsWith("zoom_")) {
+          appState = "idle"; zoomSide = null; zoomCrop = null; zoomSrcImg = null;
+          resizeCanvas(); return;
+        }
+        if (history.length > 0) {
+          const last = history.pop();
+          if (last === "left") leftPoints.pop(); else rightPoints.pop();
+          updateManualSidebar(); redrawCanvas();
+        }
+      }
+
+      async function runManualTriangulate() {
+        if (leftPoints.length === 0 || rightPoints.length === 0) return;
+        const refX = parseFloat(document.getElementById("manRefX").value) || 200;
+        const refY = parseFloat(document.getElementById("manRefY").value) || 200;
+        document.getElementById("manualMatchSummary").textContent = "Running…";
+        try {
+          const res = await fetch("/api/triangulate/run", {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({left_raw_pts: leftPoints.map(p=>[p.rawX,p.rawY]), right_raw_pts: rightPoints.map(p=>[p.rawX,p.rawY]), ref_x:refX, ref_y:refY}),
+          });
+          const data = await res.json();
+          document.getElementById("manualMatchSummary").textContent =
+            data.ok ? `matched=${data.matched_count} unmatched_L=${data.unmatched_left} unmatched_R=${data.unmatched_right}` : "Error: " + data.error;
+        } catch(e) { document.getElementById("manualMatchSummary").textContent = "Error: " + e; }
+      }
+
+      async function runCachedScanTriangulate() {
+        const refX = parseFloat(document.getElementById("manRefX").value) || 200;
+        const refY = parseFloat(document.getElementById("manRefY").value) || 200;
+        document.getElementById("manualMatchSummary").textContent = "Running cached scan triangulation…";
+        try {
+          const res = await fetch("/api/triangulate/run_cached_scan", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ref_x:refX,ref_y:refY})});
+          const data = await res.json();
+          document.getElementById("manualMatchSummary").textContent =
+            data.ok ? `matched=${data.matched_count}  solved=${data.solved ? data.solved.length : 0}` : "Error: " + data.error;
+        } catch(e) { document.getElementById("manualMatchSummary").textContent = "Error: " + e; }
+      }
+
+      function resetManual() {
+        leftPoints = []; rightPoints = []; history = [];
+        appState = "idle"; zoomSide = null; zoomCrop = null; zoomSrcImg = null;
+        updateManualSidebar();
+        if (leftImg) redrawCanvas();
+        document.getElementById("manualMatchSummary").textContent = "Points reset.";
+      }
+
+    </script>
+  </body>
+</html>

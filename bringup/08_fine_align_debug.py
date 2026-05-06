@@ -154,7 +154,10 @@ def main():
 
             print("\n--- Opening cameras ---")
             cameras = StereoCameras()
-            cameras.open(start_recorder=False)
+            try:
+                cameras.open(start_recorder=False)
+            except RuntimeError:
+                cameras.recover()
 
             print("  Flushing 5 frames ...")
             for _ in range(5):
