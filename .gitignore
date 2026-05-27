@@ -12,14 +12,34 @@ Photo_Tests/
 *.avi
 *.mov
 
-*jpg
-*jpeg
-*png
-*gif
-*bmpS
-
 runs/
 *.log
 
 # json files
 *.json
+
+# Binary and Large Files
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.pth
+*.pt
+*.onnx
+*.engine
+*.asc
+*.tar.gz
+*.csv
+*.pdf
+*.bin
+*.weights
+*.pth.tar
+
+# Cache and logs
+dev_tools/cache/
+scout_logs/
+logs/
+bringup/logs/
+SurveyPics/
+training_photos*/
