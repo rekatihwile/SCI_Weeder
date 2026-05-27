@@ -1,0 +1,6 @@
+path: /home/eli/LaserWeeder_CleanRuntime/training_photos/left
+train: images
+val: images
+names:
+  0: dandelion
+  1: kale

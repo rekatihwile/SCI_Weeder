@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Lock
 
-from config import BASE_DIR
+from config import BASE_DIR, AVOID_CLASSES, AI_CLASS_CONFIDENCE, MODEL_MAP
 
 
 SETTINGS_PATH = BASE_DIR / "dev_tools" / "cache" / "dashboard_settings.json"
@@ -108,6 +108,7 @@ def update_page_settings(page_name: str, values: dict) -> dict:
 
 _CONFIG_PY_PATH        = BASE_DIR / "config" / "survey_params.py"
 _VISION_CONFIG_PY_PATH = BASE_DIR / "config" / "vision.py"
+_FINE_ALIGN_CONFIG_PATH = BASE_DIR / "config" / "alignment_params.py"
 _config_write_lock = Lock()
 
 # Maps suggested_config keys → (config_file_path, variable_name_in_file).
@@ -117,10 +118,7 @@ _SURVEY_CONFIG_MAP = {
     "BURST_COUNT":         (_CONFIG_PY_PATH,        "SURVEY_BURST_COUNT"),
     "MIN_HITS":            (_CONFIG_PY_PATH,         "SURVEY_MIN_HITS"),
     "POINT_MODE":          (_CONFIG_PY_PATH,         "SURVEY_POINT_MODE"),
-    "TARGET_CLASSES":      (_CONFIG_PY_PATH,         "SURVEY_TARGET_CLASSES"),
-    "AVOID_CLASSES":       (_CONFIG_PY_PATH,         "SURVEY_AVOID_CLASSES"),
     "YOLO_IMGSZ_USED":     (_CONFIG_PY_PATH,         "SURVEY_YOLO_IMGSZ"),
-    "CONFIDENCE_OVERRIDE": (_CONFIG_PY_PATH,         "SURVEY_CONFIDENCE_OVERRIDE"),
     "CROP_MODE":           (_CONFIG_PY_PATH,         "SURVEY_CROP_MODE"),
     "CROP_W":              (_CONFIG_PY_PATH,         "SURVEY_CROP_W"),
     "CROP_H":              (_CONFIG_PY_PATH,         "SURVEY_CROP_H"),
@@ -129,7 +127,26 @@ _SURVEY_CONFIG_MAP = {
     "RIGHT_OFFSET_X":      (_CONFIG_PY_PATH,         "SURVEY_RIGHT_OFFSET_X"),
     "RIGHT_OFFSET_Y":      (_CONFIG_PY_PATH,         "SURVEY_RIGHT_OFFSET_Y"),
     # written to config/vision.py
-    "GLOBAL_AVOID_CLASSES": (_VISION_CONFIG_PY_PATH, "AVOID_CLASSES"),
+    "TARGET_CLASSES":      (_VISION_CONFIG_PY_PATH,  "TARGET_CLASSES"),
+    "AVOID_CLASSES":       (_VISION_CONFIG_PY_PATH,  "AVOID_CLASSES"),
+    "CONFIDENCE_OVERRIDE": (_VISION_CONFIG_PY_PATH,  "AI_CONFIDENCE"),
+    "AI_CLASS_CONFIDENCE": (_VISION_CONFIG_PY_PATH,  "AI_CLASS_CONFIDENCE"),
+    "DEFAULT_MODEL":       (_VISION_CONFIG_PY_PATH,  "DEFAULT_MODEL"),
+    "DEFAULT_MODEL_PT":    (_VISION_CONFIG_PY_PATH,  "DEFAULT_MODEL_PT"),
+    "DEFAULT_MODEL_ENGINE": (_VISION_CONFIG_PY_PATH, "DEFAULT_MODEL_ENGINE"),
+    "YOLO_BACKEND":        (_VISION_CONFIG_PY_PATH,  "YOLO_BACKEND"),
+    "USE_TENSORRT_ENGINE": (_VISION_CONFIG_PY_PATH,  "USE_TENSORRT_ENGINE"),
+}
+
+
+_FINE_ALIGN_CONFIG_MAP = {
+    "burst_count":  (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_BURST_COUNT"),
+    "min_hits":     (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_MIN_HITS"),
+    "crop_half_px": (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_REID_CROP_HALF_PX"),
+    "y_gate_px":    (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_REID_MAX_Y_DIFF_PX"),
+    "min_disp_px":  (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_REID_MIN_DISPARITY_PX"),
+    "max_disp_px":  (_FINE_ALIGN_CONFIG_PATH, "FINE_ALIGN_REID_MAX_DISPARITY_PX"),
+    "point_mode":   (_CONFIG_PY_PATH,          "FINE_ALIGN_REID_POINT_MODE"),
 }
 
 
@@ -188,12 +205,61 @@ def save_survey_config_to_config_py(suggested_config: dict) -> list:
     Returns a list of {"var": name, "value": repr} dicts for each updated var.
     """
     with _config_write_lock:
+        payload = dict(suggested_config or {})
+
+        if "AVOID_CONFIDENCE_OVERRIDE" in payload:
+            avoid_conf = payload.get("AVOID_CONFIDENCE_OVERRIDE")
+            avoid_classes = payload.get("AVOID_CLASSES", AVOID_CLASSES)
+            class_conf = {
+                int(k): float(v)
+                for k, v in dict(AI_CLASS_CONFIDENCE or {}).items()
+            }
+            for cls_id in list(avoid_classes or []):
+                cls_id = int(cls_id)
+                if avoid_conf is None:
+                    class_conf.pop(cls_id, None)
+                else:
+                    class_conf[cls_id] = float(avoid_conf)
+            payload["AI_CLASS_CONFIDENCE"] = class_conf or None
+
+        if "SEGMENTATION_MODEL" in payload:
+            model_choice = str(payload.get("SEGMENTATION_MODEL") or "").strip()
+            if model_choice and model_choice != "__config__":
+                resolved_model = MODEL_MAP.get(model_choice, model_choice)
+                model_suffix = Path(str(resolved_model)).suffix.lower()
+
+                payload["DEFAULT_MODEL"] = model_choice if model_choice in MODEL_MAP else resolved_model
+                if model_suffix == ".engine":
+                    payload["DEFAULT_MODEL_ENGINE"] = resolved_model
+                    payload["YOLO_BACKEND"] = "engine"
+                    payload["USE_TENSORRT_ENGINE"] = True
+                else:
+                    payload["DEFAULT_MODEL_PT"] = resolved_model
+                    payload["YOLO_BACKEND"] = "pt"
+                    payload["USE_TENSORRT_ENGINE"] = False
+
         # Group updates by target file.
         by_file: dict[Path, dict] = {}
         for sc_key, (cfg_path, cfg_var) in _SURVEY_CONFIG_MAP.items():
-            if sc_key not in suggested_config:
+            if sc_key not in payload:
                 continue
-            by_file.setdefault(cfg_path, {})[cfg_var] = suggested_config[sc_key]
+            by_file.setdefault(cfg_path, {})[cfg_var] = payload[sc_key]
+
+        updated = []
+        for file_path, var_updates in by_file.items():
+            updated.extend(_write_config_vars(file_path, var_updates))
+
+        return updated
+
+
+def save_fine_align_config_to_config_py(config_values: dict) -> list:
+    """Write fine-align Re-ID tuning values into alignment_params.py and survey_params.py in-place."""
+    with _config_write_lock:
+        by_file: dict[Path, dict] = {}
+        for key, (cfg_path, cfg_var) in _FINE_ALIGN_CONFIG_MAP.items():
+            if key not in config_values:
+                continue
+            by_file.setdefault(cfg_path, {})[cfg_var] = config_values[key]
 
         updated = []
         for file_path, var_updates in by_file.items():

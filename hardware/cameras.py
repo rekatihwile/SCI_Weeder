@@ -525,6 +525,10 @@ class StereoCameras:
             "left": f"/dev/video{LEFT_CAMERA_INDEX}",
             "right": f"/dev/video{RIGHT_CAMERA_INDEX}"
         }
+        self.path_links = {
+            "left": None,
+            "right": None,
+        }
 
         hw_cfg = BASE_DIR / "params" / "hardware" / "hardware_config.json"
         if hw_cfg.exists():
@@ -533,8 +537,12 @@ class StereoCameras:
                 if "cameras" in hw:
                     if hw["cameras"].get("left") and "device" in hw["cameras"]["left"]:
                         self.dev_paths["left"] = hw["cameras"]["left"]["device"]
+                    if hw["cameras"].get("left") and "path" in hw["cameras"]["left"]:
+                        self.path_links["left"] = hw["cameras"]["left"]["path"]
                     if hw["cameras"].get("right") and "device" in hw["cameras"]["right"]:
                         self.dev_paths["right"] = hw["cameras"]["right"]["device"]
+                    if hw["cameras"].get("right") and "path" in hw["cameras"]["right"]:
+                        self.path_links["right"] = hw["cameras"]["right"]["path"]
 
     def _release_caps(self, settle_s=0.5):
         if self.left is not None:
@@ -546,10 +554,95 @@ class StereoCameras:
         if settle_s > 0:
             time.sleep(settle_s)
 
+    def _refresh_dev_paths_from_links(self):
+        """Resolve /dev/v4l/by-path links to current /dev/videoN device nodes."""
+        for side in ("left", "right"):
+            link = self.path_links.get(side)
+            if not link:
+                continue
+            try:
+                resolved = str(Path(link).resolve())
+            except Exception:
+                continue
+            if resolved.startswith("/dev/video") and os.path.exists(resolved):
+                self.dev_paths[side] = resolved
+
+    def _wait_for_camera_nodes(self, timeout_s=10.0):
+        """Wait until expected camera links/devices exist after USB reset."""
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            self._refresh_dev_paths_from_links()
+
+            left_ready = False
+            right_ready = False
+
+            left_link = self.path_links.get("left")
+            right_link = self.path_links.get("right")
+            left_dev = self.dev_paths.get("left")
+            right_dev = self.dev_paths.get("right")
+
+            if left_link:
+                left_ready = Path(left_link).exists()
+            if right_link:
+                right_ready = Path(right_link).exists()
+
+            if left_dev:
+                left_ready = left_ready or os.path.exists(left_dev)
+            if right_dev:
+                right_ready = right_ready or os.path.exists(right_dev)
+
+            if left_ready and right_ready:
+                return True
+            time.sleep(0.25)
+        return False
+
+    def _open_camera(self, side, index):
+        """Open camera by preferred source order: by-path link -> device path -> index."""
+        candidates = []
+
+        link = self.path_links.get(side)
+        if link:
+            candidates.append((f"{side} link", str(link)))
+
+        dev = self.dev_paths.get(side)
+        if dev:
+            candidates.append((f"{side} device", str(dev)))
+
+        candidates.append((f"{side} index", index))
+
+        tried = []
+        for label, source in candidates:
+            key = str(source)
+            if key in tried:
+                continue
+            tried.append(key)
+
+            cap = cv2.VideoCapture(source, BACKEND)
+            if cap.isOpened():
+                resolved_dev = None
+                if isinstance(source, str):
+                    try:
+                        resolved_dev = str(Path(source).resolve())
+                    except Exception:
+                        resolved_dev = source
+                else:
+                    resolved_dev = f"/dev/video{source}"
+
+                if resolved_dev and resolved_dev.startswith("/dev/video"):
+                    self.dev_paths[side] = resolved_dev
+
+                _rprint(f"[CAM OPEN] {side.upper()} source: {label} -> {source}")
+                return cap
+            cap.release()
+
+        return None
+
     def open(self, start_recorder=True):
         _rprint("\n=== OPENING CAMERAS ===")
         _rprint(f"Opening Left : {LEFT_CAMERA_INDEX}")
         _rprint(f"Opening Right: {RIGHT_CAMERA_INDEX}")
+
+        self._refresh_dev_paths_from_links()
 
         self._bg_stop.set()
         if self._bg_thread is not None:
@@ -570,12 +663,12 @@ class StereoCameras:
             except Exception:
                 return str(val)
 
-        self.left = cv2.VideoCapture(LEFT_CAMERA_INDEX, BACKEND)
-        self.right = cv2.VideoCapture(RIGHT_CAMERA_INDEX, BACKEND)
+        self.left = self._open_camera("left", LEFT_CAMERA_INDEX)
+        self.right = self._open_camera("right", RIGHT_CAMERA_INDEX)
 
         mjpg_fourcc = cv2.VideoWriter_fourcc(*"MJPG")
         for name, cap in [("Left", self.left), ("Right", self.right)]:
-            if not cap.isOpened():
+            if cap is None or not cap.isOpened():
                 self._release_caps(settle_s=0.0)
                 raise RuntimeError(f"Failed to open {name} camera.")
             # FOURCC must be set before width/height so V4L2 negotiates MJPG mode,
@@ -673,7 +766,7 @@ class StereoCameras:
             path = f"/sys/bus/usb/drivers/usb/{action}"
             _rprint(f"[NUCLEAR] {action} -> {hub_port}")
             result = subprocess.run(
-                ["sudo", "tee", path],
+                ["sudo", "-n", "tee", path],
                 input=hub_port,
                 text=True,
                 capture_output=True,
@@ -681,11 +774,23 @@ class StereoCameras:
             if result.returncode != 0:
                 _rprint(f"[NUCLEAR] {action} FAILED (rc={result.returncode})")
                 _rprint(f"[NUCLEAR]   stderr: {result.stderr.strip()}")
+                _rprint(
+                    "[NUCLEAR]   hint: configure passwordless sudo for '/usr/bin/tee "
+                    "/sys/bus/usb/drivers/usb/unbind' and '/usr/bin/tee "
+                    "/sys/bus/usb/drivers/usb/bind' to allow unattended recovery."
+                )
                 raise RuntimeError(f"USB hub {action} failed for port {hub_port}")
             time.sleep(wait_after)
 
         # Refresh dev_paths from hardware_config.json in case anything shuffled.
         self.__init__()
+
+        _rprint("[NUCLEAR] Waiting for camera nodes to reappear...")
+        if not self._wait_for_camera_nodes(timeout_s=12.0):
+            _rprint(
+                "[NUCLEAR] WARNING: expected camera links/devices did not fully reappear "
+                "before reopen attempt."
+            )
 
         _rprint("[NUCLEAR] Reopening cameras...")
         self.open()
@@ -1190,7 +1295,7 @@ def _run_ai_debug_burst_match(cams, detector, coarse_mover):
         SURVEY_BURST_COUNT,
         SURVEY_CLUSTER_RADIUS_PX,
         SURVEY_MIN_HITS,
-        SURVEY_TARGET_CLASSES,
+        TARGET_CLASSES,
     )
     from vision.matching import match_points
 
@@ -1199,7 +1304,7 @@ def _run_ai_debug_burst_match(cams, detector, coarse_mover):
     _rprint(
         f"[AI DEBUG] Running burst matching: frames={SURVEY_BURST_COUNT} "
         f"min_hits={SURVEY_MIN_HITS} cluster_radius={SURVEY_CLUSTER_RADIUS_PX} "
-        f"survey_classes={SURVEY_TARGET_CLASSES}"
+        f"target_classes={TARGET_CLASSES}"
     )
 
     stable_left, stable_right = coarse_mover.detect_stable_points(
@@ -1209,7 +1314,7 @@ def _run_ai_debug_burst_match(cams, detector, coarse_mover):
         burst_count=SURVEY_BURST_COUNT,
         min_hits=SURVEY_MIN_HITS,
         cluster_radius_px=SURVEY_CLUSTER_RADIUS_PX,
-        survey_classes=SURVEY_TARGET_CLASSES,
+        survey_classes=TARGET_CLASSES,
     )
 
     matched_targets, unmatched_left, unmatched_right = match_points(

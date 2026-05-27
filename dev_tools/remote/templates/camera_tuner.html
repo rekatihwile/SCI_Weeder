@@ -1,0 +1,562 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Camera Tuner</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 460px 1fr;
+        gap: 14px;
+        height: calc(100vh - 42px);
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .sidebar {
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .viewer {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow: hidden;
+      }
+
+      .side-tabs {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin: 10px 0;
+      }
+
+      .side-panel {
+        border: 1px solid #444;
+        background: #1b1b1b;
+        padding: 9px;
+      }
+
+      .side-panel h3 {
+        margin: 0 0 8px 0;
+      }
+
+      .check-row,
+      .slider-row {
+        display: grid;
+        grid-template-columns: 125px minmax(180px, 1fr) 56px;
+        gap: 7px;
+        align-items: center;
+        margin: 7px 0;
+      }
+
+      .check-row {
+        grid-template-columns: 1fr;
+      }
+
+      input,
+      select,
+      button {
+        font-size: 14px;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        min-width: 0;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 5px 10px;
+      }
+
+      .primary {
+        background: #003366;
+        border: 1px solid #0066cc;
+        color: #88ccff;
+        width: 100%;
+        padding: 7px 10px;
+        font-weight: bold;
+      }
+
+      .save {
+        background: #1a3a1a;
+        border: 1px solid #4a8a4a;
+        color: #8eff8e;
+        width: 100%;
+        padding: 7px 10px;
+      }
+
+      .status {
+        margin: 10px 0;
+        font-weight: bold;
+      }
+
+      .hint {
+        color: #bbb;
+        font-size: 13px;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        max-height: 260px;
+        overflow: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      .image-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        min-height: 0;
+        flex: 1;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .panel h3 {
+        margin: 0 0 6px 0;
+      }
+
+      img {
+        width: 100%;
+        min-height: 0;
+        object-fit: contain;
+        border: 1px solid #555;
+        background: #222;
+      }
+
+      a {
+        color: #8ecbff;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+    <div class="layout">
+      <div class="sidebar">
+        <h2>Camera Tuner</h2>
+
+        <label class="hint">
+          <input id="mirrorSides" type="checkbox" />
+          Mirror slider changes to both cameras
+        </label>
+
+        <div class="side-tabs">
+          <div class="side-panel">
+            <h3>Left</h3>
+            <div id="leftControls"></div>
+          </div>
+          <div class="side-panel">
+            <h3>Right</h3>
+            <div id="rightControls"></div>
+          </div>
+        </div>
+
+        <button onclick="applyNow()">Apply Live</button>
+        <button class="save" onclick="saveCameraConfig()">Save Camera Settings</button>
+        <button onclick="refreshPreview()">Refresh Preview</button>
+        <button onclick="resetCameras()">Camera Reset</button>
+        <button onclick="closeCameras()">Close Cameras</button>
+
+        <button class="primary" onclick="runSurveyFull()"
+          title="Runs the same Survey page scan + match + cache flow using the last saved Survey crop/settings.">
+          Scan + Match + Cache →
+        </button>
+        <div id="surveyFullResult" style="display:none;margin-top:8px;padding:6px 8px;background:#1a1a2e;border:1px solid #334;border-radius:3px;font-size:13px;">
+          <span id="surveyFullMsg"></span>
+          <a id="surveyFullLink" href="/triangulate" style="float:right;color:#88ccff;font-weight:bold;"></a>
+        </div>
+
+        <div class="status" id="status">Loading camera settings...</div>
+
+        <p class="hint">
+          Survey uses the last saved Survey page crop and detection parameters.
+          This page only tunes camera capture settings.
+        </p>
+
+        <h3>Current test</h3>
+        <pre id="summary"></pre>
+      </div>
+
+      <div class="viewer">
+        <div class="image-row">
+          <div class="panel">
+            <h3>Left</h3>
+            <img id="left_img" />
+          </div>
+          <div class="panel">
+            <h3>Right</h3>
+            <img id="right_img" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const DEFAULT_SURVEY = {{ survey_defaults | tojson }};
+      const SLIDERS = [
+        ["exposure", "Exposure", 1, 1000, 1],
+        ["gain", "Gain", 0, 255, 1],
+        ["brightness", "Brightness", -64, 64, 1],
+        ["contrast", "Contrast", 0, 100, 1],
+        ["saturation", "Saturation", 0, 100, 1],
+        ["white_balance", "White balance", 2000, 6500, 50],
+      ];
+
+      let surveySettings = null;
+      let live = true;
+      let timer = null;
+      let busy = false;
+      let applyTimer = null;
+
+      function el(id) {
+        return document.getElementById(id);
+      }
+
+      function sideControlId(side, key) {
+        return `${side}_${key}`;
+      }
+
+      function sliderMarkup(side, key, label, min, max, step) {
+        const id = sideControlId(side, key);
+        return `
+          <div class="slider-row">
+            <label for="${id}">${label}</label>
+            <input id="${id}" data-side="${side}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" />
+            <span id="${id}_label"></span>
+          </div>
+        `;
+      }
+
+      function buildControls(side) {
+        const target = el(`${side}Controls`);
+        target.innerHTML = `
+          <label class="check-row">
+            <span><input id="${sideControlId(side, "manual_exposure")}" data-side="${side}" data-key="manual_exposure" type="checkbox" /> Manual exposure</span>
+          </label>
+          ${SLIDERS.slice(0, 2).map((s) => sliderMarkup(side, ...s)).join("")}
+          ${SLIDERS.slice(2, 5).map((s) => sliderMarkup(side, ...s)).join("")}
+          <label class="check-row">
+            <span><input id="${sideControlId(side, "manual_wb")}" data-side="${side}" data-key="manual_wb" type="checkbox" /> Manual white balance</span>
+          </label>
+          ${SLIDERS.slice(5).map((s) => sliderMarkup(side, ...s)).join("")}
+        `;
+      }
+
+      function setSlider(side, key, value) {
+        const input = el(sideControlId(side, key));
+        if (!input) return;
+        input.value = value;
+        el(`${input.id}_label`).innerText = input.value;
+      }
+
+      function updateManualState(side) {
+        const manualExposure = el(sideControlId(side, "manual_exposure")).checked;
+        const manualWb = el(sideControlId(side, "manual_wb")).checked;
+        el(sideControlId(side, "exposure")).disabled = !manualExposure;
+        el(sideControlId(side, "white_balance")).disabled = !manualWb;
+      }
+
+      function applySettingsToUi(settings) {
+        ["left", "right"].forEach((side) => {
+          const cfg = (settings && settings[side]) || {};
+          el(sideControlId(side, "manual_exposure")).checked = Number(cfg.auto_exposure) === 1;
+          el(sideControlId(side, "manual_wb")).checked = Number(cfg.auto_wb) === 1;
+          SLIDERS.forEach(([key]) => setSlider(side, key, cfg[key]));
+          updateManualState(side);
+        });
+      }
+
+      function sideSettings(side) {
+        return {
+          auto_exposure: el(sideControlId(side, "manual_exposure")).checked ? 1 : 0,
+          auto_wb: el(sideControlId(side, "manual_wb")).checked ? 1 : 0,
+          exposure: Number(el(sideControlId(side, "exposure")).value),
+          gain: Number(el(sideControlId(side, "gain")).value),
+          brightness: Number(el(sideControlId(side, "brightness")).value),
+          contrast: Number(el(sideControlId(side, "contrast")).value),
+          saturation: Number(el(sideControlId(side, "saturation")).value),
+          white_balance: Number(el(sideControlId(side, "white_balance")).value),
+        };
+      }
+
+      function collectCameraSettings() {
+        return {
+          left: sideSettings("left"),
+          right: sideSettings("right"),
+        };
+      }
+
+      function updateSummary(extra) {
+        const survey = buildSurveyParams();
+        const payload = {
+          camera_settings: collectCameraSettings(),
+          survey_from_page: {
+            mode: survey.mode,
+            crop_w: survey.crop_w,
+            crop_h: survey.crop_h,
+            left_offset_x: survey.left_offset_x,
+            left_offset_y: survey.left_offset_y,
+            right_offset_x: survey.right_offset_x,
+            right_offset_y: survey.right_offset_y,
+            rectified: survey.rectified === "1",
+          },
+          ...(extra || {}),
+        };
+        el("summary").innerText = JSON.stringify(payload, null, 2);
+      }
+
+      function showImages(data) {
+        if (data.left_image) {
+          el("left_img").src = "data:image/jpeg;base64," + data.left_image;
+        }
+        if (data.right_image) {
+          el("right_img").src = "data:image/jpeg;base64," + data.right_image;
+        }
+      }
+
+      async function loadCameraConfig() {
+        const res = await fetch("/api/camera_tuner/config");
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+        applySettingsToUi(data.settings);
+        el("status").innerText = `Loaded ${data.path}`;
+        updateSummary();
+      }
+
+      async function loadSurveySettings() {
+        const res = await fetch("/api/settings/survey");
+        const data = await res.json();
+        surveySettings = data && data.ok ? (data.settings || {}) : {};
+        updateSummary();
+      }
+
+      function buildSurveyParams() {
+        const defaults = {
+          page_kind: "survey",
+          mode: DEFAULT_SURVEY.default_mode,
+          crop_w: String(DEFAULT_SURVEY.default_crop_w),
+          crop_h: String(DEFAULT_SURVEY.default_crop_h),
+          burst_count: String(DEFAULT_SURVEY.default_burst),
+          min_hits: String(DEFAULT_SURVEY.default_min_hits),
+          point_mode: "box_center",
+          classes: "",
+          avoid_classes: "",
+          conf: "",
+          imgsz_mode: "snap_crop",
+          rectified: false,
+          left_offset_x: "0",
+          left_offset_y: "0",
+          right_offset_x: "0",
+          right_offset_y: "0",
+        };
+        const merged = { ...defaults, ...(surveySettings || {}) };
+        merged.page_kind = "survey";
+        merged.rectified = ["1", "true", "yes", "on"].includes(String(merged.rectified).toLowerCase())
+          ? "1"
+          : "0";
+        return merged;
+      }
+
+      async function postJson(url, body) {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+        return await res.json();
+      }
+
+      async function applyNow() {
+        el("status").innerText = "Applying camera settings...";
+        const data = await postJson("/api/camera_tuner/apply", {
+          settings: collectCameraSettings(),
+        });
+        if (!data.ok) {
+          el("status").innerText = "Apply failed.";
+          updateSummary({ error: data.error });
+          return false;
+        }
+        el("status").innerText = "Applied live camera settings.";
+        updateSummary();
+        return true;
+      }
+
+      function scheduleApply() {
+        if (applyTimer) clearTimeout(applyTimer);
+        applyTimer = setTimeout(async () => {
+          const ok = await applyNow();
+          if (ok && live) refreshPreview();
+        }, 250);
+      }
+
+      async function saveCameraConfig() {
+        el("status").innerText = "Saving camera settings...";
+        const data = await postJson("/api/camera_tuner/save", {
+          settings: collectCameraSettings(),
+        });
+        if (!data.ok) {
+          el("status").innerText = "Save failed.";
+          updateSummary({ error: data.error });
+          return;
+        }
+        el("status").innerText = `Saved ${data.path}`;
+        updateSummary({ saved_to: data.path });
+      }
+
+      async function refreshPreview() {
+        if (busy) return;
+        busy = true;
+        el("status").innerText = "Reading stereo pair...";
+        const data = await postJson("/api/preview_frame", {
+          mode: "full",
+          crop_w: 1280,
+          crop_h: 720,
+          left_offset_x: 0,
+          left_offset_y: 0,
+          right_offset_x: 0,
+          right_offset_y: 0,
+          rectified: "0",
+        });
+        if (!data.ok) {
+          el("status").innerText = "Preview error.";
+          updateSummary({ error: data.error });
+          busy = false;
+          return;
+        }
+        showImages(data);
+        el("status").innerText = "Live preview OK.";
+        updateSummary({ preview_frame_mode: data.frame_mode });
+        busy = false;
+      }
+
+      async function runSurveyFull() {
+        live = false;
+        if (timer) clearTimeout(timer);
+        await loadSurveySettings();
+        const ok = await applyNow();
+        if (!ok) return;
+
+        el("status").innerText = "Running scan + match + caching to disk...";
+        el("summary").innerText = "Running YOLO + stereo match. Wait...";
+        el("surveyFullResult").style.display = "none";
+
+        const data = await postJson("/api/run_survey_full", buildSurveyParams());
+        if (!data.ok) {
+          el("status").innerText = "Survey error: " + data.error;
+          updateSummary({ error: data.error });
+          return;
+        }
+
+        showImages({
+          left_image: data.match_left_image || data.left_image,
+          right_image: data.match_right_image || data.right_image,
+        });
+
+        const msg = `L:${data.left_count} R:${data.right_count} matched:${data.matched_count} — cached to disk`;
+        el("status").innerText = msg;
+        el("surveyFullMsg").innerText = `${data.matched_count} matched pair(s) cached`;
+        el("surveyFullLink").textContent = "→ Triangulate";
+        el("surveyFullResult").style.display = "block";
+        updateSummary({
+          survey_result: {
+            left_count: data.left_count,
+            right_count: data.right_count,
+            matched_count: data.matched_count,
+            capture_s: data.capture_s,
+            yolo_s: data.yolo_s,
+            match_s: data.match_s,
+            cached_to_disk: data.cached_to_disk,
+          },
+        });
+      }
+
+      async function resetCameras() {
+        live = false;
+        if (timer) clearTimeout(timer);
+        el("status").innerText = "Resetting cameras...";
+        const data = await postJson("/api/reset_cameras", {});
+        if (!data.ok) {
+          el("status").innerText = "Camera reset error.";
+          updateSummary({ error: data.error });
+          return;
+        }
+        showImages(data);
+        await applyNow();
+        el("status").innerText = "Camera reset OK.";
+      }
+
+      async function closeCameras() {
+        live = false;
+        if (timer) clearTimeout(timer);
+        el("status").innerText = "Closing cameras...";
+        const data = await postJson("/api/close_cameras", {});
+        el("status").innerText = data.ok ? "Cameras closed." : data.error;
+      }
+
+      function loopTick() {
+        if (!live) return;
+        refreshPreview();
+        timer = setTimeout(loopTick, 800);
+      }
+
+      function bindControls() {
+        ["left", "right"].forEach((side) => {
+          ["manual_exposure", "manual_wb"].forEach((key) => {
+            el(sideControlId(side, key)).addEventListener("change", (ev) => {
+              if (el("mirrorSides").checked) {
+                const other = side === "left" ? "right" : "left";
+                el(sideControlId(other, key)).checked = ev.target.checked;
+                updateManualState(other);
+              }
+              updateManualState(side);
+              scheduleApply();
+            });
+          });
+
+          SLIDERS.forEach(([key]) => {
+            el(sideControlId(side, key)).addEventListener("input", (ev) => {
+              el(`${ev.target.id}_label`).innerText = ev.target.value;
+              if (el("mirrorSides").checked) {
+                const other = side === "left" ? "right" : "left";
+                setSlider(other, key, ev.target.value);
+              }
+              updateSummary();
+              scheduleApply();
+            });
+          });
+        });
+      }
+
+      buildControls("left");
+      buildControls("right");
+      bindControls();
+      Promise.all([loadCameraConfig(), loadSurveySettings()])
+        .then(() => {
+          loopTick();
+        })
+        .catch((err) => {
+          el("status").innerText = "Load failed.";
+          updateSummary({ error: String(err) });
+        });
+    </script>
+  </body>
+</html>

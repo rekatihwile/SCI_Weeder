@@ -2,21 +2,21 @@
     "left": {
         "auto_exposure": 0,
         "auto_wb": 1,
-        "exposure": 300,
-        "gain": 103,
+        "exposure": 98,
+        "gain": 72,
         "brightness": 0,
-        "contrast": 37,
-        "saturation": 84,
-        "white_balance": 2800
+        "contrast": 22,
+        "saturation": 50,
+        "white_balance": 3150
     },
     "right": {
         "auto_exposure": 0,
         "auto_wb": 1,
-        "exposure": 300,
-        "gain": 50,
+        "exposure": 250,
+        "gain": 72,
         "brightness": 0,
-        "contrast": 35,
-        "saturation": 67,
-        "white_balance": 2800
+        "contrast": 22,
+        "saturation": 50,
+        "white_balance": 3150
     }
 }

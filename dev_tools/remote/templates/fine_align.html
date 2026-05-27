@@ -257,6 +257,7 @@
             <select id="point_mode">
               <option value="box_center">box_center</option>
               <option value="qpoint">qpoint</option>
+              <option value="softargmax">softargmax</option>
             </select>
             <span></span>
 
@@ -296,6 +297,11 @@
           <button onclick="snapCrop()">Snap Crop to 32</button>
           <button class="primary" onclick="runFineAlignScan()">Run Fine Align Re-ID Scan</button>
           <button onclick="closeCameras()">Close Cameras</button>
+          <button onclick="saveToConfig()"
+            style="margin-top:8px;background:#1a3a1a;border:1px solid #4a8a4a;color:#8eff8e;width:100%;padding:7px 10px;"
+            title="Write current slider values to alignment_params.py">
+            Save Config → alignment_params.py
+          </button>
 
           <div class="status" id="status">Loading preview...</div>
 
@@ -827,6 +833,37 @@
         drawCanvas("right_canvas", null, null, "right");
 
         document.getElementById("status").innerText = data.ok ? "Cameras closed." : data.error;
+      }
+
+      function buildFineAlignConfigValues() {
+        const cropW = parseInt(val("crop_w"));
+        const cropH = parseInt(val("crop_h"));
+        return {
+          burst_count:  parseInt(val("burst_count")),
+          min_hits:     parseInt(val("min_hits")),
+          crop_half_px: Math.round(Math.max(cropW, cropH) / 2),
+          y_gate_px:    parseFloat(val("y_gate_px")),
+          min_disp_px:  parseFloat(val("min_disp_px")),
+          max_disp_px:  parseFloat(val("max_disp_px")),
+          point_mode:   val("point_mode"),
+        };
+      }
+
+      async function saveToConfig() {
+        document.getElementById("status").innerText = "Writing to alignment_params.py...";
+        try {
+          const res = await fetch("/api/save_fine_align_config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ config_values: buildFineAlignConfigValues() }),
+          });
+          const data = await res.json();
+          document.getElementById("status").innerText = data.ok
+            ? "✓ " + data.message + " (restart runtime to apply)"
+            : "Save failed: " + data.error;
+        } catch (e) {
+          document.getElementById("status").innerText = "Save failed: " + e;
+        }
       }
 
       ["crop_w", "crop_h", "mode"].forEach((id) => {

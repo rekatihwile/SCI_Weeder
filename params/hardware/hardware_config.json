@@ -6,20 +6,28 @@
         "left": {
             "index": 0,
             "device": "/dev/video0",
-            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.3:1.0-video-index0",
+            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.1:1.0-video-index0",
             "node": "LEFT_CAM"
         },
         "right": {
             "index": 2,
             "device": "/dev/video2",
-            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.4:1.0-video-index0",
+            "path": "/dev/v4l/by-path/platform-3610000.xhci-usb-0:4.2:1.0-video-index0",
             "node": "RIGHT_CAM"
         }
+    },
+    "scout": {
+        "found": true,
+        "channel": "can0",
+        "state": "up",
+        "is_up": true,
+        "bitrate": 500000
     },
     "runtime": {
         "has_display": false,
         "headless": true,
         "ui_mode": "headless",
         "display_backend": ""
-    }
+    },
+    "detected_stereo_pair": true
 }

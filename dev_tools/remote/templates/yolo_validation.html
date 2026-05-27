@@ -1,0 +1,319 @@
+<!doctype html>
+<html>
+  <head>
+    <title>YOLO Validation</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        background: #111;
+        color: #eee;
+        margin: 0;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 390px 1fr;
+        gap: 16px;
+        height: calc(100vh - 42px);
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .sidebar {
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .viewer {
+        overflow-y: auto;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 145px 1fr 58px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      input,
+      select,
+      button {
+        font-size: 14px;
+      }
+
+      select,
+      input[type="number"],
+      input[type="text"] {
+        width: 100%;
+      }
+
+      button {
+        margin-top: 8px;
+        padding: 6px 10px;
+      }
+
+      .status {
+        margin: 10px 0;
+        font-weight: bold;
+      }
+
+      pre {
+        background: #222;
+        padding: 10px;
+        max-height: 280px;
+        overflow: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+      }
+
+      .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        background: #1b1b1b;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 8px;
+      }
+
+      .card h4 {
+        margin: 0 0 6px 0;
+        font-size: 14px;
+      }
+
+      .card img {
+        width: 100%;
+        border: 1px solid #555;
+      }
+
+      .hint {
+        color: #bbb;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+
+    <div class="layout">
+      <div class="sidebar">
+        <h2>YOLO Validation</h2>
+        <p class="hint">Upload one or many training photos, then run survey-style detection using the same global detector settings and parameter semantics as Survey.</p>
+
+        <div class="controls">
+          <label>Images</label>
+          <input id="images" type="file" accept="image/*" multiple />
+          <span></span>
+
+          <label>Seg model</label>
+          <select id="model">
+            {% for opt in model_options %}
+            <option value="{{ opt.value }}" {% if opt.value == default_model_choice %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+          <span></span>
+
+          <label>Crop mode</label>
+          <select id="mode">
+            <option value="center">center</option>
+            <option value="full">full</option>
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="top">top</option>
+            <option value="bottom">bottom</option>
+          </select>
+          <span></span>
+
+          <label>Crop width px</label>
+          <input id="crop_w" type="number" value="{{ default_crop_w }}" min="32" max="2000" />
+          <span></span>
+
+          <label>Crop height px</label>
+          <input id="crop_h" type="number" value="{{ default_crop_h }}" min="32" max="2000" />
+          <span></span>
+
+          <label>Offset X</label>
+          <input id="offset_x" type="number" value="0" min="-2000" max="2000" />
+          <span></span>
+
+          <label>Offset Y</label>
+          <input id="offset_y" type="number" value="0" min="-2000" max="2000" />
+          <span></span>
+
+          <label>Burst count</label>
+          <input id="burst_count" type="number" value="{{ default_burst }}" min="1" max="30" />
+          <span></span>
+
+          <label>Min hits</label>
+          <input id="min_hits" type="number" value="{{ default_min_hits }}" min="1" max="30" />
+          <span></span>
+
+          <label>Point mode</label>
+          <select id="point_mode">
+            <option value="box_center">box_center</option>
+            <option value="qpoint">qpoint</option>
+            <option value="softargmax">softargmax</option>
+          </select>
+          <span></span>
+
+          <label>Classes (target)</label>
+          <input id="classes" type="text" value="" placeholder="all or 0,1,2" />
+          <span></span>
+
+          <label>Avoid classes</label>
+          <input id="avoid_classes" type="text" value="" placeholder="none or 0,1" />
+          <span></span>
+
+          <label>Confidence</label>
+          <input id="conf" type="text" value="" placeholder="blank=config" />
+          <span></span>
+
+          <label>Avoid confidence</label>
+          <input id="avoid_conf" type="text" value="" placeholder="blank=config" />
+          <span></span>
+
+          <label>YOLO imgsz</label>
+          <select id="imgsz_mode">
+            <option value="snap_crop">snap crop W/H</option>
+            <option value="config">use config</option>
+          </select>
+          <span></span>
+        </div>
+
+        <button onclick="runValidation()">Run Validation Scan</button>
+
+        <div class="status" id="status">Choose image(s), then run validation.</div>
+        <pre id="summary"></pre>
+      </div>
+
+      <div class="viewer">
+        <div class="results-grid" id="resultsGrid"></div>
+      </div>
+    </div>
+
+    <script>
+      const SETTINGS_PAGE = "yolo_validation";
+      const SETTINGS_FIELDS = [
+        "model", "mode", "crop_w", "crop_h", "offset_x", "offset_y",
+        "burst_count", "min_hits", "point_mode", "classes", "avoid_classes",
+        "conf", "avoid_conf", "imgsz_mode"
+      ];
+
+      function collectSettings() {
+        const out = {};
+        SETTINGS_FIELDS.forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          out[id] = el.type === "checkbox" ? !!el.checked : el.value;
+        });
+        return out;
+      }
+
+      function applySettings(settings) {
+        if (!settings || typeof settings !== "object") return;
+        SETTINGS_FIELDS.forEach((id) => {
+          if (!(id in settings)) return;
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.value = settings[id];
+        });
+      }
+
+      async function saveSettings() {
+        try {
+          await fetch(`/api/settings/${SETTINGS_PAGE}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings: collectSettings() }),
+          });
+        } catch (_) {}
+      }
+
+      async function loadSettings() {
+        try {
+          const res = await fetch(`/api/settings/${SETTINGS_PAGE}`);
+          const data = await res.json();
+          if (data && data.ok) applySettings(data.settings || {});
+        } catch (_) {}
+      }
+
+      function renderResults(items) {
+        const grid = document.getElementById("resultsGrid");
+        grid.innerHTML = "";
+        (items || []).forEach((item) => {
+          const card = document.createElement("div");
+          card.className = "card";
+          card.innerHTML = `
+            <h4>${item.filename} — detections: ${item.count} — ${item.inference_s}s</h4>
+            <img src="data:image/jpeg;base64,${item.image}" alt="${item.filename}" />
+          `;
+          grid.appendChild(card);
+        });
+      }
+
+      async function runValidation() {
+        await saveSettings();
+
+        const files = document.getElementById("images").files;
+        if (!files || files.length === 0) {
+          document.getElementById("status").innerText = "Please upload at least one image.";
+          return;
+        }
+
+        document.getElementById("status").innerText = `Running validation on ${files.length} image(s)...`;
+        document.getElementById("summary").innerText = "Running YOLO...";
+
+        const form = new FormData();
+        const settings = collectSettings();
+        Object.keys(settings).forEach((k) => form.append(k, settings[k]));
+        for (const file of files) {
+          form.append("images", file, file.name);
+        }
+
+        const res = await fetch("/api/run_validation_scan", {
+          method: "POST",
+          body: form,
+        });
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById("status").innerText = "Validation failed.";
+          document.getElementById("summary").innerText = data.error || "Unknown error";
+          return;
+        }
+
+        renderResults(data.results || []);
+        document.getElementById("status").innerText =
+          `Done. Processed ${data.files_processed} image(s), detections=${data.total_detections}.`;
+
+        document.getElementById("summary").innerText = JSON.stringify({
+          files_processed: data.files_processed,
+          total_detections: data.total_detections,
+          total_runtime_s: data.total_runtime_s,
+          requested_classes: data.requested_classes,
+          avoid_classes: data.avoid_classes,
+          confidence_override: data.confidence_override,
+          avoid_confidence_override: data.avoid_confidence_override,
+          burst_count: data.burst_count,
+          min_hits: data.min_hits,
+          point_mode: data.point_mode,
+          class_names: data.class_names,
+          model_info: data.model_info,
+        }, null, 2);
+      }
+
+      SETTINGS_FIELDS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("input", saveSettings);
+        el.addEventListener("change", saveSettings);
+      });
+
+      loadSettings();
+    </script>
+  </body>
+</html>

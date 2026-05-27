@@ -43,6 +43,7 @@ from config import (
     FINE_ALIGN_SNAP_CROP_HALF_PX,
     FINE_ALIGN_REID_EPIPOLAR_TOL_MULT,
     FINE_ALIGN_REID_MAX_TRI_DIST_MM,
+    FINE_ALIGN_REID_SETTLE_SEC,
     OVERRIDE_BURST_NUMBER,
     OVERRIDE_BURST_COUNT,
     OVERRIDE_POINT_MODE,
@@ -96,6 +97,7 @@ _REID_MIN_DISP = FINE_ALIGN_REID_MIN_DISPARITY_PX
 _REID_MAX_DISP = FINE_ALIGN_REID_MAX_DISPARITY_PX
 _REID_EPIPOLAR_TOL_MULT = FINE_ALIGN_REID_EPIPOLAR_TOL_MULT
 _REID_MAX_TRI_DIST_MM = FINE_ALIGN_REID_MAX_TRI_DIST_MM
+_REID_SETTLE_SEC = FINE_ALIGN_REID_SETTLE_SEC
 
 _WS_MARGIN = 5.0
 _FINE_WINDOW = "Fine Align"
@@ -103,6 +105,12 @@ _FINE_WINDOW = "Fine Align"
 
 def _fine_debug(msg):
     print(f"[FINE DEBUG] {msg}", flush=True)
+
+
+def _float_or(value, default=0.0):
+    if value is None:
+        return float(default)
+    return float(value)
 
 
 def _default_reid_settings():
@@ -116,6 +124,7 @@ def _default_reid_settings():
         "min_disparity_px": _REID_MIN_DISP,
         "max_disparity_px": _REID_MAX_DISP,
         "max_pd_error_px": _REID_MAX_PD_ERR,
+        "settle_sec": _REID_SETTLE_SEC,
         "point_mode": resolve_point_mode(FINE_ALIGN_REID_POINT_MODE),
     }
 
@@ -137,6 +146,7 @@ def _resolve_reid_settings(overrides=None):
     settings["min_disparity_px"] = float(settings["min_disparity_px"])
     settings["max_disparity_px"] = float(settings["max_disparity_px"])
     settings["max_pd_error_px"] = float(settings["max_pd_error_px"])
+    settings["settle_sec"] = max(0.0, float(settings["settle_sec"]))
     settings["point_mode"] = resolve_point_mode(settings.get("point_mode", FINE_ALIGN_REID_POINT_MODE))
     return settings
 
@@ -195,13 +205,17 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
     _burst_match_ai_points.last_timing = {
         "reid_point_mode": settings["point_mode"],
         "reid_burst_count": int(settings["burst_count"]),
+        "reid_settle_s": round(settings["settle_sec"], 6),
     }
 
     _fine_debug(
         f"RE-ID burst start: frames={settings['burst_count']} min_hits={settings['min_hits']} "
         f"radius={settings['cluster_radius_px']:.1f}px point_mode={settings['point_mode']} "
-        f"expected_cls={expected_cls}"
+        f"settle={settings['settle_sec']:.2f}s expected_cls={expected_cls}"
     )
+
+    if settings["settle_sec"] > 0:
+        time.sleep(settings["settle_sec"])
 
     left_frames, right_frames = [], []
     attempts = 0
@@ -224,6 +238,7 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
         _fine_debug(f"RE-ID no frames captured; total={time.perf_counter() - t_total:.2f}s")
         _burst_match_ai_points.last_timing.update({
             "reid_camera_read_time_s": round(read_time_total, 6),
+            "reid_settle_s": round(settings["settle_sec"], 6),
             "reid_total_time_s": round(time.perf_counter() - t_total, 6),
         })
         return ([], None) if return_debug else []
@@ -282,17 +297,18 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
     )
     _burst_match_ai_points.last_timing.update({
         "reid_camera_read_time_s": round(read_time_total, 6),
+        "reid_settle_s": round(settings["settle_sec"], 6),
         "reid_yolo_time_s": round(max(
-            float(left_timing.get("yolo_time_s", 0.0)),
-            float(right_timing.get("yolo_time_s", 0.0)),
+            _float_or(left_timing.get("yolo_time_s"), 0.0),
+            _float_or(right_timing.get("yolo_time_s"), 0.0),
         ), 6),
         "reid_grouping_time_s": round(max(
-            float(left_timing.get("grouping_time_s", 0.0)),
-            float(right_timing.get("grouping_time_s", 0.0)),
+            _float_or(left_timing.get("grouping_time_s"), 0.0),
+            _float_or(right_timing.get("grouping_time_s"), 0.0),
         ), 6),
         "reid_qpoint_time_s": round(max(
-            float(left_timing.get("qpoint_time_s", 0.0)),
-            float(right_timing.get("qpoint_time_s", 0.0)),
+            _float_or(left_timing.get("qpoint_time_s"), 0.0),
+            _float_or(right_timing.get("qpoint_time_s"), 0.0),
         ), 6),
         "reid_detection_wall_time_s": round(detect_dt, 6),
     })
@@ -391,23 +407,25 @@ def _burst_match_ai_points(cameras, detector, expected_cls=None, reid_settings=N
     )
     _burst_match_ai_points.last_timing = {
         "reid_camera_read_time_s": round(read_time_total, 6),
+        "reid_settle_s": round(settings["settle_sec"], 6),
         "reid_yolo_time_s": round(max(
-            float(left_timing.get("yolo_time_s", 0.0)),
-            float(right_timing.get("yolo_time_s", 0.0)),
+            _float_or(left_timing.get("yolo_time_s"), 0.0),
+            _float_or(right_timing.get("yolo_time_s"), 0.0),
         ), 6),
         "reid_grouping_time_s": round(max(
-            float(left_timing.get("grouping_time_s", 0.0)),
-            float(right_timing.get("grouping_time_s", 0.0)),
+            _float_or(left_timing.get("grouping_time_s"), 0.0),
+            _float_or(right_timing.get("grouping_time_s"), 0.0),
         ), 6),
         "reid_qpoint_time_s": round(max(
-            float(left_timing.get("qpoint_time_s", 0.0)),
-            float(right_timing.get("qpoint_time_s", 0.0)),
+            _float_or(left_timing.get("qpoint_time_s"), 0.0),
+            _float_or(right_timing.get("qpoint_time_s"), 0.0),
         ), 6),
         "reid_detection_wall_time_s": round(detect_dt, 6),
         "reid_matching_time_s": round(match_dt, 6),
         "reid_total_time_s": round(time.perf_counter() - t_total, 6),
         "reid_point_mode": settings["point_mode"],
         "reid_burst_count": int(settings["burst_count"]),
+        "reid_settle_s": round(settings["settle_sec"], 6),
     }
     if return_debug:
         return filtered, {
@@ -494,8 +512,11 @@ def _rank_reid_matches(gantry, coarse_mover, planned_target, actual_hits, matche
     # deviate more due to depth variation and gantry-position effects.
     # Apply multiplier + floor so very tight survey fits don't create too-narrow windows.
     ep_slope = getattr(coarse_mover, "epipolar_slope", None)
-    ep_tol_raw = getattr(coarse_mover, "epipolar_slope_tol", 0.1)
-    ep_tol = max(ep_tol_raw * _REID_EPIPOLAR_TOL_MULT, 0.15)
+    ep_tol_raw = getattr(coarse_mover, "epipolar_slope_tol", None)
+    if ep_tol_raw is None:
+        ep_tol_raw = 1.0  # sensible fallback if survey fit skipped
+    
+    ep_tol = max(float(ep_tol_raw) * float(_REID_EPIPOLAR_TOL_MULT or 1.0), 0.15)
 
     candidates = []
     rejects = {"crop": 0, "duplicate": 0, "pd": 0, "epipolar": 0, "max_tri_dist": 0}
@@ -681,6 +702,7 @@ def debug_reid_target(
         planned_target=planned_target,
         actual_hits=actual_hits,
         gantry=gantry,
+        settle_sec=float(settings["settle_sec"]),
         return_debug=True,
     )
 
@@ -705,14 +727,14 @@ def debug_reid_target(
             "right_cls": chosen.get("right_cls"),
             "left_conf": chosen.get("left_conf"),
             "right_conf": chosen.get("right_conf"),
-            "score": float(chosen.get("score", 0.0)),
+            "score": _float_or(chosen.get("score"), 0.0),
             "left_box": chosen.get("left_box"),
             "right_box": chosen.get("right_box"),
         },
     }
     print(
         f"[RE-ID DEBUG OK] chosen L={left_px} R={right_px} "
-        f"pd_err={float(chosen.get('pd_err_px', 0.0)):.1f}px"
+        f"pd_err={_float_or(chosen.get('pd_err_px'), 0.0):.1f}px"
     )
     return selected_target
 
@@ -746,6 +768,7 @@ def _pick_best_ai_target(
         planned_target=planned_target,
         actual_hits=actual_hits,
         gantry=gantry,
+        settle_sec=float(settings["settle_sec"]),
         return_debug=True,
     )
 
@@ -757,15 +780,17 @@ def _pick_best_ai_target(
         "reid_filter_rejects": dict(reid_result.get("filter_rejects") or {}),
         "reid_left_count": len(reid_result.get("left_detections", [])),
         "reid_right_count": len(reid_result.get("right_detections", [])),
+        "reid_base_match_count": int(reid_result.get("base_match_count", 0)),
         "reid_match_count": len(reid_result.get("matches", [])),
         "reid_expected_cls": expected_cls,
         "reid_point_mode": settings["point_mode"],
         "reid_burst_count": int(settings["burst_count"]),
+        "reid_settle_s": float(settings["settle_sec"]),
         "reid_chosen": bool(chosen is not None),
         "reid_chosen_detail": {
-            "pd_err_px": float(chosen.get("pd_err_px", 0.0)) if chosen is not None else None,
-            "tri_dist_mm": float(chosen.get("tri_dist_mm", 0.0)) if chosen is not None else None,
-            "geo_score": float(chosen.get("geo_score", 0.0)) if chosen is not None else None,
+            "pd_err_px": _float_or(chosen.get("pd_err_px"), 0.0) if chosen is not None else None,
+            "tri_dist_mm": _float_or(chosen.get("tri_dist_mm"), 0.0) if chosen is not None else None,
+            "geo_score": _float_or(chosen.get("geo_score"), 0.0) if chosen is not None else None,
         },
     }
 
@@ -773,9 +798,10 @@ def _pick_best_ai_target(
     timing.update({
         "reid_point_mode": settings["point_mode"],
         "reid_burst_count": int(settings["burst_count"]),
-        "reid_total_time_s": float(timing.get("total_s", 0.0)),
-        "reid_yolo_time_s": float(timing.get("yolo_left_s", 0.0)) + float(timing.get("yolo_right_s", 0.0)),
-        "reid_matching_time_s": float(timing.get("match_s", 0.0)),
+        "reid_settle_s": _float_or(timing.get("settle_s"), settings["settle_sec"]),
+        "reid_total_time_s": _float_or(timing.get("total_s"), 0.0),
+        "reid_yolo_time_s": _float_or(timing.get("yolo_left_s"), 0.0) + _float_or(timing.get("yolo_right_s"), 0.0),
+        "reid_matching_time_s": _float_or(timing.get("match_s"), 0.0),
     })
     _pick_best_ai_target.last_reid_debug.update({
         "reid_timing": timing,
@@ -785,6 +811,17 @@ def _pick_best_ai_target(
         print("[RE-ID FAIL] No candidate selected by unified Re-ID pipeline.")
         _fine_debug(f"initial target pick failed after {time.perf_counter() - t_pick:.2f}s")
         _fine_debug(f"reid error={reid_result.get('error')}")
+        _fine_debug(
+            "reid counts: "
+            f"L={len(reid_result.get('left_detections', []))} "
+            f"R={len(reid_result.get('right_detections', []))} "
+            f"base_matches={int(reid_result.get('base_match_count', 0))} "
+            f"candidates={len(reid_result.get('matches', []))} "
+            f"filter={reid_result.get('filter_mode')} "
+            f"rejects={reid_result.get('filter_rejects')}"
+        )
+        if reid_result.get("error_traceback"):
+            _fine_debug(f"reid traceback:\n{reid_result.get('error_traceback')}")
         return None, None, None, None, None, None
 
     debug_frames = reid_result.get("debug_frames") or {}
@@ -797,10 +834,13 @@ def _pick_best_ai_target(
 
     left_px = [float(chosen["left_px"][0]), float(chosen["left_px"][1])]
     right_px = [float(chosen["right_px"][0]), float(chosen["right_px"][1])]
+    tri_xy = chosen.get("tri_xy_mm") or planned_target["target_xy_mm"]
+    if len(tri_xy) < 2 or tri_xy[0] is None or tri_xy[1] is None:
+        tri_xy = planned_target["target_xy_mm"]
     selected_target = {
         "target_xy_mm": [
-            float(chosen.get("tri_xy_mm", planned_target["target_xy_mm"])[0]),
-            float(chosen.get("tri_xy_mm", planned_target["target_xy_mm"])[1]),
+            float(tri_xy[0]),
+            float(tri_xy[1]),
         ],
         "source_target": {
             "left_px": left_px,
@@ -809,7 +849,7 @@ def _pick_best_ai_target(
             "right_cls": chosen.get("right_cls"),
             "left_conf": chosen.get("left_conf"),
             "right_conf": chosen.get("right_conf"),
-            "score": float(chosen.get("score", 0.0)),
+            "score": _float_or(chosen.get("score"), 0.0),
             "left_box": chosen.get("left_box"),
             "right_box": chosen.get("right_box"),
         },
@@ -817,11 +857,11 @@ def _pick_best_ai_target(
 
     print(
         f"[RE-ID OK] {len(reid_result.get('matches', []))} candidate(s) — "
-        f"picked pd_err={float(chosen.get('pd_err_px', 0.0)):.1f}px"
+        f"picked pd_err={_float_or(chosen.get('pd_err_px'), 0.0):.1f}px"
     )
     _fine_debug(f"initial target pick took {time.perf_counter() - t_pick:.2f}s")
     reid_info = {
-        "pd_error_px": round(float(chosen.get("pd_err_px", 0.0)), 1),
+        "pd_error_px": round(_float_or(chosen.get("pd_err_px"), 0.0), 1),
         "n_candidates": len(reid_result.get("matches", [])),
         "tri_xy_mm": [round(v, 3) for v in selected_target["target_xy_mm"]],
         "timing": timing,
@@ -939,12 +979,13 @@ def fine_align_target(
         reid_timing = getattr(_burst_match_ai_points, "last_timing", {})
     if reid_timing:
         fine_align_target.last_timing.update({
-            "fine_align_reid_yolo_time_s": float(reid_timing.get("reid_yolo_time_s", 0.0)),
-            "fine_align_reid_total_time_s": float(reid_timing.get("reid_total_time_s", 0.0)),
-            "fine_align_reid_grouping_time_s": float(reid_timing.get("reid_grouping_time_s", 0.0)),
-            "fine_align_reid_matching_time_s": float(reid_timing.get("reid_matching_time_s", 0.0)),
+            "fine_align_reid_yolo_time_s": _float_or(reid_timing.get("reid_yolo_time_s"), 0.0),
+            "fine_align_reid_total_time_s": _float_or(reid_timing.get("reid_total_time_s"), 0.0),
+            "fine_align_reid_grouping_time_s": _float_or(reid_timing.get("reid_grouping_time_s"), 0.0),
+            "fine_align_reid_matching_time_s": _float_or(reid_timing.get("reid_matching_time_s"), 0.0),
             "fine_align_reid_point_mode": reid_timing.get("reid_point_mode"),
             "fine_align_reid_burst_count": reid_timing.get("reid_burst_count"),
+            "fine_align_reid_settle_s": _float_or(reid_timing.get("reid_settle_s"), 0.0),
         })
 
     if left_pt_full is None or right_pt_full is None:
@@ -989,7 +1030,7 @@ def fine_align_target(
     t_pd_loop = time.perf_counter()
 
     def _update_pd_timing():
-        snap_time = float(fine_align_target.last_timing.get("final_snap_time_s", 0.0))
+        snap_time = _float_or(fine_align_target.last_timing.get("final_snap_time_s"), 0.0)
         fine_align_target.last_timing.update({
             "fine_align_pd_lk_time_s": round(max(0.0, time.perf_counter() - t_pd_loop - snap_time), 6),
             "fine_align_iterations": int(iterations),

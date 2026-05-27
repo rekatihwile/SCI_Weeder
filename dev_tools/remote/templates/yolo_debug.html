@@ -124,6 +124,14 @@
         <h2>{{ title }}</h2>
 
         <div class="controls">
+          <label>Seg model</label>
+          <select id="model">
+            {% for opt in model_options %}
+            <option value="{{ opt.value }}" {% if opt.value == default_model_choice %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+          <span></span>
+
           <label>Crop mode</label>
           <select id="mode">
             <option value="center">center</option>
@@ -182,6 +190,7 @@
           <select id="point_mode">
             <option value="box_center">box_center</option>
             <option value="qpoint">qpoint</option>
+            <option value="softargmax">softargmax</option>
           </select>
           <span></span>
 
@@ -190,11 +199,15 @@
           <span></span>
 
           <label>Avoid classes</label>
-          <input id="avoid_classes" type="text" value="" placeholder="none or 0,1" title="Detections in these classes suppress overlapping target detections with lower confidence" />
+          <input id="avoid_classes" type="text" value="" placeholder="blank=config, none=disable, or 0,1" title="Avoid detections can suppress overlapping targets. Leave blank to use config defaults; use 'none' to disable avoid filtering for this run." />
           <span></span>
 
           <label>Confidence</label>
           <input id="conf" type="text" value="" placeholder="blank=config" />
+          <span></span>
+
+          <label>Avoid confidence</label>
+          <input id="avoid_conf" type="text" value="" placeholder="blank=config" title="Optional threshold for avoid classes only" />
           <span></span>
 
           <label>YOLO imgsz</label>
@@ -225,7 +238,10 @@
         </button>
         <div id="surveyFullResult" style="display:none;margin-top:8px;padding:6px 8px;background:#1a1a2e;border:1px solid #334;border-radius:3px;font-size:13px;">
           <span id="surveyFullMsg"></span>
-          <a id="surveyFullLink" href="/triangulate" style="float:right;color:#88ccff;font-weight:bold;"></a>
+          <span style="float:right;">
+            <a id="surveyFullLink" href="/triangulate" style="color:#88ccff;font-weight:bold;"></a>
+            <a id="surveyFullFineLink" href="/fine_align" style="margin-left:10px;color:#8eff8e;font-weight:bold;"></a>
+          </span>
         </div>
         <button id="saveConfigBtn" onclick="saveConfigSettings()" disabled
           title="Run a scan first, then click to write these settings into config.py"
@@ -325,6 +341,7 @@
       let lastSuggestedConfig = null;
 
       const SETTINGS_FIELDS = [
+        "model",
         "mode",
         "crop_w",
         "crop_h",
@@ -334,6 +351,7 @@
         "classes",
         "avoid_classes",
         "conf",
+        "avoid_conf",
         "imgsz_mode",
         "rectified",
         "left_offset_x",
@@ -408,6 +426,7 @@
       function getParams() {
         return {
           page_kind: PAGE_KIND,
+          model: val("model"),
           mode: val("mode"),
           crop_w: val("crop_w"),
           crop_h: val("crop_h"),
@@ -423,6 +442,7 @@
           classes: val("classes"),
           avoid_classes: val("avoid_classes"),
           conf: val("conf"),
+          avoid_conf: val("avoid_conf"),
           imgsz_mode: val("imgsz_mode"),
           rectified: document.getElementById("rectified").checked ? "1" : "0",
         };
@@ -599,6 +619,7 @@
           rectified: document.getElementById("rectified").checked,
 
           model_classes: classNames,
+          segmentation_model: val("model"),
 
           left_crop_full_frame: leftCrop,
           right_crop_full_frame: rightCrop,
@@ -606,8 +627,9 @@
           yolo_imgsz_if_snap_crop: [snap32(cropH), snap32(cropW)],
 
           requested_classes: val("classes") || "all",
-          avoid_classes: val("avoid_classes") || "none (config default)",
+          avoid_classes: val("avoid_classes") || "config default",
           confidence_override: val("conf") || "config default",
+          avoid_confidence_override: val("avoid_conf") || "config default",
 
           suggested_debug_values: {
             crop_mode: val("mode"),
@@ -676,10 +698,13 @@
         drawCanvas("left_canvas", latestLeft, null, "left");
         drawCanvas("right_canvas", latestRight, null, "right");
 
-        const msg = `L:${data.left_count} R:${data.right_count} matched:${data.matched_count} — cached to disk`;
+        const fineCache = data.fine_align_cache || {};
+        const plannedCount = fineCache.target_count ?? fineCache.planned_count ?? 0;
+        const msg = `L:${data.left_count} R:${data.right_count} matched:${data.matched_count} planned:${plannedCount} — cached to disk`;
         document.getElementById("status").innerText = msg;
-        document.getElementById("surveyFullMsg").innerText = `${data.matched_count} matched pair(s) cached`;
+        document.getElementById("surveyFullMsg").innerText = `${data.matched_count} matched pair(s), ${plannedCount} Fine Align target(s) cached`;
         document.getElementById("surveyFullLink").textContent = "→ Triangulate";
+        document.getElementById("surveyFullFineLink").textContent = "→ Fine Align";
         document.getElementById("surveyFullResult").style.display = "block";
 
         lastSuggestedConfig = data.suggested_config || null;
@@ -693,8 +718,14 @@
           matched_count: data.matched_count,
           capture_s: data.capture_s,
           yolo_s: data.yolo_s,
+          total_runtime_s: data.total_runtime_s,
+          boxpoint_runtime_s: data.boxpoint_runtime_s,
+          qpoint_runtime_s: data.qpoint_runtime_s,
+          timing: data.timing,
           match_s: data.match_s,
           cached_to_disk: data.cached_to_disk,
+          model_info: data.model_info,
+          avoid_confidence_override: data.avoid_confidence_override,
         }, null, 2);
       }
 
@@ -749,16 +780,22 @@
             cached: data.cached,
 
             model_classes: classNames,
+            model_info: data.model_info,
 
             left_count: data.left_count,
             right_count: data.right_count,
 
             capture_s: data.capture_s,
             yolo_s: data.yolo_s,
+            total_runtime_s: data.total_runtime_s,
+            boxpoint_runtime_s: data.boxpoint_runtime_s,
+            qpoint_runtime_s: data.qpoint_runtime_s,
+            timing: data.timing,
 
             requested_classes: data.requested_classes,
             avoid_classes: data.avoid_classes,
             confidence_override: data.confidence_override,
+            avoid_confidence_override: data.avoid_confidence_override,
             yolo_imgsz_used: data.imgsz,
 
             left_crop_full_frame: data.left_crop,
@@ -817,6 +854,7 @@
             match_s: data.match_s,
             matches: data.matches,
             model_classes: data.class_names,
+            model_info: data.model_info,
           },
           null,
           2,
@@ -894,12 +932,14 @@
       });
 
       [
+        "model",
         "burst_count",
         "min_hits",
         "point_mode",
         "classes",
         "avoid_classes",
         "conf",
+        "avoid_conf",
         "imgsz_mode",
         "rectified",
       ].forEach((id) => {

@@ -31,27 +31,36 @@ from config import (
     SURVEY_BURST_COUNT,
     SURVEY_MIN_HITS,
     SURVEY_YOLO_IMGSZ,
-    SURVEY_TARGET_CLASSES,
-    SURVEY_AVOID_CLASSES,
     SURVEY_POINT_MODE,
+    AI_CONFIDENCE,
+    AI_CLASS_CONFIDENCE,
     TARGET_CLASSES,
     AVOID_CLASSES,
     GRBL_PORT,
+    SURVEY_TARGET_CLASSES,
 )
+
+# SURVEY_EVAL_MODEL_CHOICE is not in config, defining it as None for backward compat.
+SURVEY_EVAL_MODEL_CHOICE = None
 
 
 @dataclass
 class DashboardState:
     cameras: object = None
     detector: object = None
+    detector_model_choice: str = None
     gantry: object = None
+    scout: object = None
     last_scan: dict = None
     last_triangulation: dict = None
     rectify_cache: dict = None
     workspace_projector: object = None
+    last_scout_check: dict = None
+    last_scout_move: dict = None
 
     camera_lock: Lock = field(default_factory=Lock)
     gantry_lock: Lock = field(default_factory=Lock)
+    scout_lock: Lock = field(default_factory=Lock)
 
 
 state = DashboardState()

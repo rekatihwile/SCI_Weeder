@@ -7,9 +7,12 @@ via the dashboard UI are written here.  You can also edit values manually.
 KNOBS most often changed:
   SURVEY_BURST_COUNT       — frames per burst (more = more stable, slower)
   SURVEY_MIN_HITS          — min frames a plant must appear in to be counted
-  SURVEY_CONFIDENCE_OVERRIDE — confidence threshold for survey only (None → AI_CONFIDENCE)
   SURVEY_CROP_MODE         — which part of the frame to search ("center_facing" is usually best)
   SURVEY_POS_X/Y           — where the gantry parks for the global survey
+
+Class/confidence behavior now uses global settings from config/vision.py:
+    AI_CONFIDENCE, AI_CLASS_CONFIDENCE, TARGET_CLASSES, AVOID_CLASSES
+Survey-specific class/conf overrides are deprecated and ignored.
 """
 
 # =============================================================================
@@ -22,11 +25,11 @@ OVERRIDE_BURST_COUNT      = 1
 
 OVERRIDE_POINT_MODE       = False
 OVERRIDE_POINT_MODE_VALUE = "box_center"
-# Options: "box_center", "qpoint", "heatmap". True forces every CV state to this mode.
+# Options: "box_center", "qpoint", "softargmax". True forces every CV state to this mode.
 
 SURVEY_POINT_MODE          = 'box_center'
-FINE_ALIGN_REID_POINT_MODE = "box_center"
-FINAL_SNAP_POINT_MODE      = "qpoint"
+FINE_ALIGN_REID_POINT_MODE = 'softargmax'
+FINAL_SNAP_POINT_MODE      = "softargmax"
 # Survey/Re-ID defaults stay fast. Final snap may use qpoint only when snap is enabled.
 
 
@@ -35,57 +38,58 @@ FINAL_SNAP_POINT_MODE      = "qpoint"
 # =============================================================================
 
 SURVEY_POS_X = 200.0
-SURVEY_POS_Y = 150.0
+SURVEY_POS_Y = 200.0
 # Used by main.py. Gantry pose where the global survey burst is captured.
 
 SURVEY_FRAME_WIDTH  = None
 SURVEY_FRAME_HEIGHT = None
 # Used by coarse_move.py. Set both to higher resolution for HD survey.
 
-SURVEY_BURST_COUNT = 20
+SURVEY_BURST_COUNT = 12
 # Used by main.py/coarse_move.py. Turn UP for more stable survey detections; slower.
 
-SURVEY_MIN_HITS = 5
+SURVEY_MIN_HITS = 1
 # Used by main.py/coarse_move.py. Turn UP to require repeat detections; DOWN to catch weak plants.
 
 SURVEY_CLUSTER_RADIUS_PX = 10.0
 # Used by coarse_move.py. Turn UP if burst detections jitter; DOWN to split nearby plants.
 
-SURVEY_YOLO_IMGSZ = [448, 672]
-# Used by coarse_move.py survey burst. None = use actual frame size.
+SURVEY_YOLO_IMGSZ = [672, 960]
+# Used by coarse_move.py survey burst. None = use AIDetector default (640).
 
 SURVEY_CROP_HALF_PX = None
 # Legacy symmetric square crop. Overridden by SURVEY_CROP_MODE when that is set.
 
-SURVEY_CROP_MODE = 'center_facing'
+SURVEY_CROP_MODE = 'center'
 # Crop mode for the survey burst. Options:
 # "center_facing": left cam crops right-of-center, right cam crops left-of-center.
 # "center", "full", "left", "right", "top", "bottom"
 # None disables mode-based cropping and falls back to SURVEY_CROP_HALF_PX.
 # Written by dashboard "Save Config Settings"; can also be set manually.
 
-SURVEY_CROP_W = 660
-SURVEY_CROP_H = 448
+SURVEY_CROP_W = 972
+SURVEY_CROP_H = 680
 # Crop dimensions in pixels used when SURVEY_CROP_MODE is set.
 
-SURVEY_LEFT_OFFSET_X  = -348
-SURVEY_LEFT_OFFSET_Y  = 84
+SURVEY_LEFT_OFFSET_X  = 0
+SURVEY_LEFT_OFFSET_Y  = -4
 # Full-frame pixel offset applied to the left-camera crop center.
 
-SURVEY_RIGHT_OFFSET_X = 244
-SURVEY_RIGHT_OFFSET_Y = 92
+SURVEY_RIGHT_OFFSET_X = 0
+SURVEY_RIGHT_OFFSET_Y = -4
 # Same as above for the right camera.
 
-SURVEY_CONFIDENCE_OVERRIDE = 0.7
-# When set (float), overrides AI_CONFIDENCE for the survey burst only.
-# None = use AI_CONFIDENCE. Written by dashboard "Save Config Settings".
+SURVEY_CONFIDENCE_OVERRIDE = .1
+# Deprecated — ignored. Use AI_CONFIDENCE in config/vision.py.
 
-SURVEY_TARGET_CLASSES = [1]
-# Used by main.py/coarse_move.py. None uses AI_TARGET_CLASS; list[int] overrides survey only.
+SURVEY_AVOID_CONFIDENCE_OVERRIDE = None
+# Deprecated — ignored. Use AI_CLASS_CONFIDENCE in config/vision.py.
 
-SURVEY_AVOID_CLASSES = [0,2]
-# Classes to detect but never target during a survey. None = use AVOID_CLASSES from vision.py.
-# list[int] overrides at survey time only without changing the global detector default.
+SURVEY_TARGET_CLASSES = [0, 1]
+# Deprecated — ignored. Use TARGET_CLASSES in config/vision.py.
+
+SURVEY_AVOID_CLASSES = None
+# Deprecated — ignored. Use AVOID_CLASSES in config/vision.py.
 
 SURVEY_CONF_SENSITIVITY_DEBUG = False
 # Used by coarse_move.py. True runs extra YOLO passes after survey; very slow/noisy.
@@ -127,6 +131,6 @@ def resolve_point_mode(default_mode):
     mode = str(mode or "box_center").strip().lower()
     if mode == "heatmap":
         mode = "qpoint"
-    if mode not in ("box_center", "qpoint", "none"):
+    if mode not in ("box_center", "qpoint", "softargmax", "none"):
         raise ValueError(f"Unknown point mode: {mode!r}")
     return mode

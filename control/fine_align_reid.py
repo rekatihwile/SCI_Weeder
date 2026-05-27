@@ -1,5 +1,6 @@
 import math
 import time
+import traceback
 
 import cv2
 import numpy as np
@@ -11,11 +12,18 @@ from config import (
     FINE_ALIGN_REID_EPIPOLAR_TOL_MULT,
     FINE_ALIGN_REID_MAX_TRI_DIST_MM,
     FINE_ALIGN_REID_MAX_PD_ERROR_PX,
+    FINE_ALIGN_REID_SETTLE_SEC,
 )
 from vision.matching import match_points
 
 
 _rect_maps_cache = {}
+
+
+def _float_or(value, default=0.0):
+    if value is None:
+        return float(default)
+    return float(value)
 
 
 def _find_npz_key(data, candidates):
@@ -96,7 +104,7 @@ def _translate_to_full(stable_list, ox, oy):
         full = {
             "point": [float(px + ox), float(py + oy)],
             "cls": int(det.get("cls", -1)),
-            "conf": float(det.get("conf", 0.0)),
+            "conf": _float_or(det.get("conf"), 0.0),
             "views": int(det.get("views", 1)),
         }
         if box is not None:
@@ -203,8 +211,12 @@ def _apply_geometry_filters(
     ]
 
     ep_slope = getattr(coarse_mover, "epipolar_slope", None)
-    ep_tol_raw = getattr(coarse_mover, "epipolar_slope_tol", 0.1)
-    ep_tol = max(float(ep_tol_raw) * float(epipolar_tol_mult), 0.15)
+    ep_tol_raw = getattr(coarse_mover, "epipolar_slope_tol", None)
+    if ep_tol_raw is None:
+        ep_tol_raw = 1.0  # sensible default if survey fit failed
+    
+    safe_mult = epipolar_tol_mult if epipolar_tol_mult is not None else 1.0
+    ep_tol = max(float(ep_tol_raw) * float(safe_mult), 0.15)
 
     rejects = {"crop": 0, "duplicate": 0, "pd": 0, "epipolar": 0, "max_tri_dist": 0}
     ranked = []
@@ -253,7 +265,7 @@ def _apply_geometry_filters(
         geo_score = _survey_geo_score(tri_xy, all_tri_xys, planned_xy, coarse_mover)
         ranked.append((solved, pd_err, tri_dist_mm, geo_score))
 
-    ranked.sort(key=lambda item: (-item[3], item[2], item[1], -float(item[0]["source_target"].get("score", 0.0))))
+    ranked.sort(key=lambda item: (-item[3], item[2], item[1], -_float_or(item[0]["source_target"].get("score"), 0.0)))
 
     candidates = []
     for solved, pd_err, tri_dist_mm, geo_score in ranked:
@@ -263,9 +275,9 @@ def _apply_geometry_filters(
             "right_px": [float(src["right_px"][0]), float(src["right_px"][1])],
             "left_cls": int(src.get("left_cls")) if src.get("left_cls") is not None else None,
             "right_cls": int(src.get("right_cls")) if src.get("right_cls") is not None else None,
-            "left_conf": float(src.get("left_conf", 0.0)),
-            "right_conf": float(src.get("right_conf", 0.0)),
-            "score": float(src.get("score", 0.0)),
+            "left_conf": _float_or(src.get("left_conf"), 0.0),
+            "right_conf": _float_or(src.get("right_conf"), 0.0),
+            "score": _float_or(src.get("score"), 0.0),
             "y_diff_px": float(abs(src["left_px"][1] - src["right_px"][1])),
             "disp_px": float(src["left_px"][0] - src["right_px"][0]),
             "pd_err_px": float(pd_err),
@@ -307,6 +319,7 @@ def run_fine_align_reid(
     ref_xy=None,
     epipolar_tol_mult=FINE_ALIGN_REID_EPIPOLAR_TOL_MULT,
     max_tri_dist_mm=FINE_ALIGN_REID_MAX_TRI_DIST_MM,
+    settle_sec=FINE_ALIGN_REID_SETTLE_SEC,
     return_debug=True,
 ):
     t_total = time.perf_counter()
@@ -319,6 +332,7 @@ def run_fine_align_reid(
         "left_detections": [],
         "right_detections": [],
         "matches": [],
+        "base_match_count": 0,
         "chosen": None,
         "crop": {},
         "timing": timing,
@@ -326,6 +340,7 @@ def run_fine_align_reid(
         "filter_mode": "basic",
         "filter_rejects": None,
         "error": None,
+        "error_traceback": None,
     }
 
     try:
@@ -347,6 +362,11 @@ def run_fine_align_reid(
             "left": {"x0": x0, "y0": y0, "x1": x1, "y1": y1},
             "right": {"x0": x0, "y0": y0, "x1": x1, "y1": y1},
         }
+
+        settle_sec = max(0.0, float(settle_sec or 0.0))
+        timing["settle_s"] = round(settle_sec, 6)
+        if settle_sec > 0:
+            time.sleep(settle_sec)
 
         left_frames = []
         right_frames = []
@@ -409,8 +429,8 @@ def run_fine_align_reid(
 
         if conf_override is not None:
             min_conf = float(conf_override)
-            left_stable_crop = [d for d in left_stable_crop if float(d.get("conf", 0.0)) >= min_conf]
-            right_stable_crop = [d for d in right_stable_crop if float(d.get("conf", 0.0)) >= min_conf]
+            left_stable_crop = [d for d in left_stable_crop if _float_or(d.get("conf"), 0.0) >= min_conf]
+            right_stable_crop = [d for d in right_stable_crop if _float_or(d.get("conf"), 0.0) >= min_conf]
 
         left_detections = _translate_to_full(left_stable_crop, x0, y0)
         right_detections = _translate_to_full(right_stable_crop, x0, y0)
@@ -465,9 +485,9 @@ def run_fine_align_reid(
                 "right_px": [rx, ry],
                 "left_cls": int(left_cls) if left_cls is not None else None,
                 "right_cls": int(right_cls) if right_cls is not None else None,
-                "left_conf": float(m.get("left_conf", 0.0)),
-                "right_conf": float(m.get("right_conf", 0.0)),
-                "score": float(m.get("score", 0.0)),
+                "left_conf": _float_or(m.get("left_conf"), 0.0),
+                "right_conf": _float_or(m.get("right_conf"), 0.0),
+                "score": _float_or(m.get("score"), 0.0),
             }
             if "left_box" in m:
                 base_match["left_box"] = [float(v) for v in m["left_box"]]
@@ -484,17 +504,18 @@ def run_fine_align_reid(
                 "right_px": [rx, ry],
                 "left_cls": int(left_cls) if left_cls is not None else None,
                 "right_cls": int(right_cls) if right_cls is not None else None,
-                "left_conf": float(m.get("left_conf", 0.0)),
-                "right_conf": float(m.get("right_conf", 0.0)),
+                "left_conf": _float_or(m.get("left_conf"), 0.0),
+                "right_conf": _float_or(m.get("right_conf"), 0.0),
                 "y_diff_px": float(y_diff),
                 "disp_px": float(disp),
                 "pd_err_px": float(pd_err),
-                "score": float(m.get("score", 0.0)),
+                "score": _float_or(m.get("score"), 0.0),
             }
             if "left_box" in m:
                 candidate["left_box"] = [float(v) for v in m["left_box"]]
             if "right_box" in m:
                 candidate["right_box"] = [float(v) for v in m["right_box"]]
+        result["base_match_count"] = len(base_matches)
         candidates = []
         geometry_ctx_ok = (
             coarse_mover is not None
@@ -531,12 +552,12 @@ def run_fine_align_reid(
                     "right_px": [rx, ry],
                     "left_cls": m.get("left_cls"),
                     "right_cls": m.get("right_cls"),
-                    "left_conf": float(m.get("left_conf", 0.0)),
-                    "right_conf": float(m.get("right_conf", 0.0)),
+                    "left_conf": _float_or(m.get("left_conf"), 0.0),
+                    "right_conf": _float_or(m.get("right_conf"), 0.0),
                     "y_diff_px": float(abs(ly - ry)),
                     "disp_px": float(lx - rx),
                     "pd_err_px": float(pd_err),
-                    "score": float(m.get("score", 0.0)),
+                    "score": _float_or(m.get("score"), 0.0),
                 }
                 if "left_box" in m:
                     candidate["left_box"] = [float(v) for v in m["left_box"]]
@@ -569,6 +590,7 @@ def run_fine_align_reid(
         result["ok"] = True
     except Exception as exc:
         result["error"] = repr(exc)
+        result["error_traceback"] = traceback.format_exc()
     finally:
         timing["total_s"] = round(time.perf_counter() - t_total, 6)
 

@@ -12,7 +12,7 @@ KNOBS most often changed:
 # Raw frame recorder (default path)
 # =============================================================================
 
-RECORD_RAW_FRAMES_ONLY = True
+RECORD_RAW_FRAMES_ONLY = False
 # Used by hardware/cameras.py. Default live path saves raw left/right images
 # plus a JSONL manifest.
 

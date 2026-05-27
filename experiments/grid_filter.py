@@ -19,9 +19,9 @@ class WorkspaceGrid:
         self,
         rows=5,
         cols=7,
-        x_min_mm=0.0,
+        x_min_mm=5.0,
         x_max_mm=420.0,
-        y_min_mm=0.0,
+        y_min_mm=5.0,
         y_max_mm=420.0,
         survey_origin_x_mm=200.0,
         survey_origin_y_mm=150.0,
@@ -199,6 +199,7 @@ def apply_trial_filter(
     occupied = sorted({t.get("cell_id") for t in eligible if t.get("cell_id")})
     selected_cells = set(occupied)
     filter_attempts = 1
+    selection_strategy = None
 
     if mode == "none":
         for target in targets:
@@ -211,13 +212,27 @@ def apply_trial_filter(
         by_cell = _targets_by_cell(eligible)
         attempts = 0
         max_attempts = 200
-        if count >= len(occupied):
+
+        # Requested count is a target-count goal first. If the request is at or
+        # above the available matched/eligible targets, keep every eligible target
+        # even when multiple targets share a cell. This makes high-count trials
+        # fail gracefully because stereo matching, not the grid, is the limiter.
+        if count >= len(eligible):
             selected_cells = set(occupied)
+            selection_strategy = "all_eligible_targets"
+            if count > len(eligible):
+                warnings.append(
+                    f"requested {count} target(s) but only {len(eligible)} eligible matched target(s) exist"
+                )
+        elif count >= len(occupied):
+            selected_cells = set(occupied)
+            selection_strategy = "all_occupied_cells"
             if count > len(occupied):
                 warnings.append(
-                    f"requested {count} active cells/targets but only {len(occupied)} occupied eligible cells and {len(eligible)} eligible matched target(s) exist"
+                    f"requested {count} target(s); all {len(occupied)} occupied eligible cell(s) were selected, covering {len(eligible)} eligible matched target(s)"
                 )
         else:
+            selection_strategy = "random_cells_target_goal"
             best_cells = set()
             best_target_count = -1
             while attempts < max_attempts:
@@ -236,6 +251,29 @@ def apply_trial_filter(
                     f"random cell sample could not cover {target_goal} target(s) in {max_attempts} attempt(s); topped up selected cells to prioritize target count"
                 )
         _mark_by_cells(targets, selected_cells, eligible)
+        if count < len(eligible):
+            selected_now = [t for t in targets if t.get("was_selected_by_trial_filter")]
+            if len(selected_now) > count:
+                # Drop extras from multi-target cells first (keep one random per cell)
+                by_cell_sel = {}
+                for t in selected_now:
+                    by_cell_sel.setdefault(t.get("cell_id"), []).append(t)
+                to_drop = []
+                for cell_targets in by_cell_sel.values():
+                    if len(cell_targets) > 1:
+                        keep = rng.choice(cell_targets)
+                        to_drop.extend(t for t in cell_targets if t is not keep)
+                # If still over count, randomly drop from remaining selected
+                still_over = len(selected_now) - len(to_drop) - count
+                if still_over > 0:
+                    drop_ids_so_far = {id(t) for t in to_drop}
+                    remaining = [t for t in selected_now if id(t) not in drop_ids_so_far]
+                    to_drop.extend(rng.sample(remaining, still_over))
+                drop_ids = {id(t) for t in to_drop}
+                for t in targets:
+                    if id(t) in drop_ids:
+                        t["was_selected_by_trial_filter"] = False
+                        t["selection_reason"] = "trimmed_to_target_count"
         filter_attempts = attempts if count < len(occupied) else 1
     elif mode == "custom_cells":
         selected_cells = set(active_cell_ids)
@@ -280,6 +318,7 @@ def apply_trial_filter(
         "eligible_target_count": len(eligible),
         "requested_target_goal": min(int(requested_active_cell_count or 0), len(eligible)) if mode == "random_cells" else None,
         "random_selection_attempts": filter_attempts,
+        "selection_strategy": selection_strategy,
         "selected_cell_target_counts": _cell_target_counts(eligible, selected_cells),
         "selected_cell_target_ids": _cell_target_ids(eligible, selected_cells),
         "warnings": warnings,
@@ -390,11 +429,14 @@ def print_filter_debug(mode, grid, all_targets, filter_info, requested_active_ce
     print(f"  Mode                       {mode}")
     print(f"  Grid                       {grid.cols}x{grid.rows}")
     print(f"  Occupied eligible cells    {filter_info.get('occupied_cell_ids', [])}")
-    print(f"  Requested random goal      {requested_active_cell_count}")
+    print(f"  Requested target goal      {requested_active_cell_count}")
     if filter_info.get("requested_target_goal") is not None:
         print(f"  Target goal after limits    {filter_info.get('requested_target_goal')}")
     print(f"  Eligible matched targets   {filter_info.get('eligible_target_count', len(all_targets or []))}")
-    print(f"  Random attempts            {filter_info.get('random_selection_attempts', 1)}")
+    if filter_info.get("selection_strategy"):
+        print(f"  Selection strategy         {filter_info.get('selection_strategy')}")
+    if filter_info.get("selection_strategy") == "random_cells_target_goal":
+        print(f"  Random attempts            {filter_info.get('random_selection_attempts', 1)}")
     print(f"  Selected cells             {filter_info.get('selected_cell_ids', [])}")
     if filter_info.get("selected_cell_target_counts"):
         print("  Selected cell target ids")

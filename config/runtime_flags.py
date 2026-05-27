@@ -16,7 +16,7 @@ KNOBS — the switches you flip most often:
 HOMING = False
 # Used by main.py. True = home the gantry at startup.
 
-FIRE = False
+FIRE = True
 # Used by control/strike.py. Keep False for dry runs; True actually pulses laser.
 
 MOCK_GANTRY = False
@@ -24,7 +24,7 @@ MOCK_GANTRY = False
 # without opening serial, homing, or physically moving hardware.
 # Set True for offline testing; always False in production.
 
-RECORD_TRIAL = True
+RECORD_TRIAL = False
 # Used by main.py/hardware/cameras.py. False disables trial recording.
 # When True, the default path records lightweight raw stereo frames plus a manifest.
 

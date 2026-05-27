@@ -17,6 +17,61 @@ OUT_CFG = BASE_DIR / "params" / "hardware" / "hardware_config.json"
 LEFT_PORT_HINT = ""
 RIGHT_PORT_HINT = ""
 
+SCOUT_CAN_CHANNEL = "can0"
+SCOUT_CAN_BITRATE = 500000
+
+
+def _run_privileged(cmd, *, input_text=None):
+    """Try command directly first, then fallback to sudo -n for unattended runs."""
+    direct = subprocess.run(cmd, input=input_text, capture_output=True, text=True)
+    if direct.returncode == 0:
+        return direct, "direct"
+
+    if direct.returncode != 0 and any(k in (direct.stderr or "").lower() for k in ["permission denied", "permission problem", "operation not permitted"]):
+        sudo_cmd = ["sudo", "-n", *cmd]
+        sudo_res = subprocess.run(sudo_cmd, input=input_text, capture_output=True, text=True)
+        return sudo_res, "sudo"
+
+    return direct, "direct"
+
+
+def detect_scout(channel=None, bitrate=None):
+    """Check if the Scout SocketCAN interface exists and report its state."""
+    channel = channel or SCOUT_CAN_CHANNEL
+    bitrate = bitrate or SCOUT_CAN_BITRATE
+
+    # Check if the interface exists at all
+    net_path = Path(f"/sys/class/net/{channel}")
+    if not net_path.exists():
+        return {"found": False, "channel": channel, "state": "absent"}
+
+    # Read operational state
+    try:
+        state = (net_path / "operstate").read_text().strip()
+    except Exception:
+        state = "unknown"
+
+    # Read actual bitrate from sysfs if available
+    detected_bitrate = None
+    try:
+        bitrate_path = net_path / "statistics" / "bitrate"
+        if not bitrate_path.exists():
+            # Try the CAN-specific location
+            bitrate_path = Path(f"/sys/class/net/{channel}/can_bitrate")
+        if bitrate_path.exists():
+            detected_bitrate = int(bitrate_path.read_text().strip())
+    except Exception:
+        pass
+
+    is_up = state == "up"
+    return {
+        "found": True,
+        "channel": channel,
+        "state": state,
+        "is_up": is_up,
+        "bitrate": detected_bitrate or bitrate,
+    }
+
 
 def detect_grbl_port():
     ports = serial.tools.list_ports.comports()
@@ -70,17 +125,20 @@ def detect_cameras_linux():
         except Exception:
             pass
     return entries
+
 def reset_cameras_uhubctl(hub_loc="1-4", ports=(4,), delay=3):
-    print(f"\n=== UHUBCTL CAMERA RESET (hub {hub_loc}, ports {ports}) ===")
-    for port in ports:
-        print(f"[RESET] Cycling port {port}...")
-        result = subprocess.run(
-            ["sudo", "uhubctl", "-l", hub_loc, "-p", str(port), "-a", "cycle", "-d", str(delay)],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            print(f"[RESET] Port {port} cycle FAILED: {result.stderr.strip()}")
-            return False
+    print(f"\n=== UHUBCTL CAMERA RESET (hub {hub_loc}) ===")
+    print(f"[RESET] Cycling entire hub {hub_loc}...")
+    result, mode = _run_privileged([
+        "uhubctl", "-l", hub_loc, "-a", "cycle", "-d", str(delay)
+    ])
+    if result.returncode != 0:
+        print(f"[RESET] Hub cycle FAILED: {result.stderr.strip()}")
+        if mode == "sudo":
+            print("[RESET] Hint: allow passwordless sudo for uhubctl to run unattended.")
+        else:
+            print("[RESET] Hint: run once with sudo or configure udev permissions for uhubctl.")
+        return False
 
     # Poll until cameras are actually readable by OpenCV (max 15s)
     print("[RESET] Waiting for cameras to become readable...")
@@ -94,24 +152,26 @@ def reset_cameras_uhubctl(hub_loc="1-4", ports=(4,), delay=3):
     print("[RESET] Camera port reset complete.")
     return True
 
+
 def nuclear_reset_usb_hub(hub_port="1-4"):
     # Try surgical uhubctl reset first
     if subprocess.run(["which", "uhubctl"], capture_output=True).returncode == 0:
-        return reset_cameras_uhubctl()
+        if reset_cameras_uhubctl():
+            return True
+        print("[RESET] uhubctl path failed; falling back to sysfs unbind/bind reset...")
 
     # Fallback: full hub unbind/rebind
     print(f"\n=== NUCLEAR USB RESET (hub {hub_port}) ===")
     for action, wait_after in [("unbind", 5.0), ("bind", 3.0)]:
         path = f"/sys/bus/usb/drivers/usb/{action}"
         print(f"[NUCLEAR] {action} -> {hub_port}")
-        result = subprocess.run(
-            ["sudo", "tee", path],
-            input=hub_port,
-            text=True,
-            capture_output=True,
-        )
+        result, mode = _run_privileged(["tee", path], input_text=hub_port)
         if result.returncode != 0:
             print(f"[NUCLEAR] {action} FAILED (rc={result.returncode}): {result.stderr.strip()}")
+            if mode == "sudo":
+                print("[NUCLEAR] Hint: allow passwordless sudo for sysfs usb bind/unbind writes.")
+            else:
+                print("[NUCLEAR] Hint: run once with sudo or configure permission for sysfs usb bind/unbind.")
             return False
         time.sleep(wait_after)
     print("[NUCLEAR] USB hub reset complete.")
@@ -169,10 +229,25 @@ def build_config():
     config = {
         "serial": {"grbl_port": ""},
         "cameras": {"left": None, "right": None},
+        "scout": {"found": False, "channel": SCOUT_CAN_CHANNEL},
         "runtime": detect_display(),
+        "detected_stereo_pair": False,
     }
 
     print(f"Detecting hardware on {system}...")
+
+    # --- Scout detection (Linux / SocketCAN only) ---
+    if system == "Linux":
+        scout_info = detect_scout()
+        config["scout"] = scout_info
+        if scout_info["found"]:
+            status = "UP" if scout_info.get("is_up") else scout_info["state"].upper()
+            print(f"[OK] Scout CAN interface {scout_info['channel']!r} found (state={status}, bitrate={scout_info['bitrate']})")
+        else:
+            print(f"[WARNING] Scout CAN interface {scout_info['channel']!r} not found (no SocketCAN device).")
+            config["scout"] = {"found": False, "channel": SCOUT_CAN_CHANNEL}
+    else:
+        config["scout"] = {"found": False, "channel": SCOUT_CAN_CHANNEL}
 
     grbl_port = detect_grbl_port()
     if grbl_port:
@@ -223,6 +298,7 @@ def build_config():
                 print("[OK] Assigned RIGHT camera:")
                 print(f"     path   = {right_cam['path']}")
                 print(f"     device = {right_cam['device']}")
+                config["detected_stereo_pair"] = True
     else:
         cam_indices = detect_cameras_windows()
         if system == "Windows" and len(cam_indices) > 2:
@@ -244,6 +320,7 @@ def build_config():
             }
             print(f"[OK] Right camera index: {cam_indices[0]}")
             print(f"[OK] Left camera index:  {cam_indices[1]}")
+            config["detected_stereo_pair"] = True
         else:
             print(f"[ERROR] Found {len(cam_indices)} usable cameras. Need 2.")
 
@@ -251,6 +328,24 @@ def build_config():
 
 
 def save_config(config):
+    # If detection failed to find both cameras, preserve the last known good
+    # camera mapping so runtime imports and recovery tools keep working.
+    if (
+        (config.get("cameras", {}).get("left") is None or config.get("cameras", {}).get("right") is None)
+        and OUT_CFG.exists()
+    ):
+        try:
+            with open(OUT_CFG, "r") as f:
+                prev = json.load(f)
+            prev_left = (prev or {}).get("cameras", {}).get("left")
+            prev_right = (prev or {}).get("cameras", {}).get("right")
+            if prev_left is not None and prev_right is not None:
+                print("[SAVE] Camera detection incomplete; preserving previous left/right camera config.")
+                config.setdefault("cameras", {})["left"] = prev_left
+                config.setdefault("cameras", {})["right"] = prev_right
+        except Exception:
+            pass
+
     with open(OUT_CFG, "w") as f:
         json.dump(config, f, indent=4)
     print(f"\nSaved: {OUT_CFG}")
@@ -259,6 +354,8 @@ def save_config(config):
 def main():
     config = build_config()
     save_config(config)
+    if not bool(config.get("detected_stereo_pair", False)):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

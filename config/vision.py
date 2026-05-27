@@ -17,18 +17,25 @@ from .paths import CV_WEIGHTS_DIR
 # =============================================================================
 
 MODEL_MAP = {
+    #params/cv_weights/yolo26n_seg_best_20260512_224747.pt
     "plastic_nano": "26_plastic_nano.pt",
+    "yolo26n": "yolo26n_seg_best_20260512_224747.pt",
+    "yolo26n_engine": "yolo26n_seg_best_20260512_224747_batch1.engine",
+    "yolo26n_engine_batch8": "yolo26n_seg_best_20260512_224747_batch8.engine",
     "targeting_tall_plastic": "new_best_targeting_tall_plastic.pth",
+    "combined": "yolo26s_seg_best_combined_20260518_003821",
+    "5-25n":"yolo26n_seg_5-25_new_data_20260526_062530.pt",
+    "5-25s":"yolo26s_seg_5-25_new_data_20260526_073520.pt"
 }
 # Used by vision/detectors/ai_detector.py and hardware/cameras.py debug mode.
 # You can also set DEFAULT_MODEL/DEFAULT_QPOINT_MODEL directly to a filename.
 
-DEFAULT_MODEL        = "plastic_nano"
-DEFAULT_MODEL_PT     = DEFAULT_MODEL
-DEFAULT_MODEL_ENGINE = None
-DEFAULT_QPOINT_MODEL = "targeting_tall_plastic"
+DEFAULT_MODEL        = '5-25s'
+DEFAULT_MODEL_PT     = 'yolo26s_seg_5-25_new_data_20260526_073520.pt'
+DEFAULT_MODEL_ENGINE = "yolo26n_seg_best_20260512_224747_batch8.engine"
+DEFAULT_QPOINT_MODEL = "5-25_best_no_skip_softargmax.pth"
 
-YOLO_BACKEND      = "auto"
+YOLO_BACKEND      = 'pt'
 # Used by AIDetector. Options: "pt", "engine", or "auto".
 
 USE_TENSORRT_ENGINE = False
@@ -40,31 +47,41 @@ YOLO_DEVICE = "cuda:0"
 YOLO_HALF = True
 # Used by AIDetector YOLO inference on CUDA.
 
+YOLO_ENGINE_BATCH_SIZE = None
+# Used only for static TensorRT .engine files. None infers "_batchN" from filename;
+# falls back to 1 when no batch size is encoded in the filename.
+
 YOLO_WARMUP       = True
-YOLO_WARMUP_IMGSZ = 640
+YOLO_WARMUP_IMGSZ = 1280
 YOLO_WARMUP_ITERS = 3
 # Used by main.py/AIDetector before live survey timing starts.
 
-AI_CONFIDENCE = 0.40
+AI_CONFIDENCE = 0.8
 # Used by AIDetector. Turn UP for fewer false positives; DOWN if plants are missed.
 
-AI_CLASS_CONFIDENCE = None
+AI_CLASS_CONFIDENCE = {"1": 0.05}
 # Used by AIDetector. Per-class overrides beat AI_CONFIDENCE.
 # Turn a class UP to be stricter for that class only.
 
 AI_IOM_THRESHOLD = 0.80
 # Used by AIDetector. Turn UP to merge only very-overlapping masks; DOWN to merge more.
 
-AI_TARGET_CLASS = 1
+AI_POINT_MODE = "box_center"
+# Options: "box_center", "qpoint", "softargmax". 
+# "softargmax" requires a model trained with SpatialSoftArgmax2d (e.g. 5-25_best_no_skip_softargmax.pth).
+# "qpoint" uses the heatmap-based MeristemPredictor.
+
+
+AI_TARGET_CLASS = None
 # Legacy alias kept for backward compat (ros2_ws/cv_node.py, etc.).
 # Prefer TARGET_CLASSES / AVOID_CLASSES below for new code.
 
-TARGET_CLASSES = [1]
+TARGET_CLASSES = [0]
 # Class IDs the laser should target. YOLO is run on TARGET_CLASSES + AVOID_CLASSES
 # together so avoid detections can suppress overlapping targets.
 # None = all classes (minus AVOID_CLASSES), list[int] = explicit set.
 
-AVOID_CLASSES = []
+AVOID_CLASSES = [1]
 # Class IDs to detect but NEVER target (e.g., crop rows, ornamentals).
 # When an avoid-class detection overlaps a target detection with higher
 # confidence (IoM >= AI_IOM_THRESHOLD), the target detection is suppressed.

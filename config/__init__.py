@@ -33,3 +33,4 @@ from .survey_params    import *   # noqa: F401, F403
 from .alignment_params import *   # noqa: F401, F403
 from .recording        import *   # noqa: F401, F403
 from .experiment       import *   # noqa: F401, F403
+from .scout            import *   # noqa: F401, F403

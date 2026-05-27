@@ -28,6 +28,7 @@ if str(REPO_ROOT) not in sys.path:
 from dashboard_routes import register_routes
 from dashboard_camera import close_all
 from dashboard_gantry import close_gantry
+from dashboard_scout import close_scout
 
 
 app = Flask(__name__)
@@ -139,6 +140,7 @@ if __name__ == "__main__":
         print("Starting LaserWeeder debug dashboard...")
         print("Home:    http://0.0.0.0:5000/")
         print("Camera:  http://0.0.0.0:5000/camera")
+        print("Survey Photos: http://0.0.0.0:5000/survey_photos")
         print("Survey:  http://0.0.0.0:5000/survey")
         print("Fine:    http://0.0.0.0:5000/fine")
         print("Match:   http://0.0.0.0:5000/match")
@@ -146,9 +148,11 @@ if __name__ == "__main__":
         print("Gantry:      http://0.0.0.0:5000/gantry")
         print("Workspace3D: http://0.0.0.0:5000/workspace3d")
         print("Fine Align:  http://0.0.0.0:5000/fine_align")
+        print("Scout:       http://0.0.0.0:5000/scout")
 
         app.run(host="0.0.0.0", port=5000, threaded=True)
 
     finally:
         close_all()
         close_gantry()
+        close_scout()

@@ -12,6 +12,12 @@ Photo_Tests/
 *.avi
 *.mov
 
+*jpg
+*jpeg
+*png
+*gif
+*bmpS
+
 runs/
 *.log
 

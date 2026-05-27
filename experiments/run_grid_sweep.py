@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -144,13 +145,26 @@ def main():
                 )
                 t0 = time.perf_counter()
                 with open(log_path, "w") as log:
-                    proc = subprocess.run(
+                    proc = subprocess.Popen(
                         [str(py), "main.py"],
                         cwd=str(ROOT),
-                        stdout=log,
+                        stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
+                        bufsize=1,
                     )
+
+                    def _tee(pipe, file_obj):
+                        for line in pipe:
+                            file_obj.write(line)
+                            file_obj.flush()
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+
+                    tee_thread = threading.Thread(target=_tee, args=(proc.stdout, log), daemon=True)
+                    tee_thread.start()
+                    proc.wait()
+                    tee_thread.join()
                 dt = time.perf_counter() - t0
                 metrics_path = _latest_metrics(json_before, trial_id=trial_id)
                 summary = _read_summary(metrics_path)

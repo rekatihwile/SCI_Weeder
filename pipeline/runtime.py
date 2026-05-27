@@ -12,6 +12,7 @@ if _os.path.exists(_nms_path):
 
 import json
 import math
+import threading
 import time
 from datetime import datetime
 
@@ -35,7 +36,6 @@ from config import (
     SURVEY_POINT_MODE,
     SURVEY_MIN_HITS,
     SURVEY_CLUSTER_RADIUS_PX,
-    SURVEY_TARGET_CLASSES,
     FINE_ALIGN_SETTLE_FRAMES,
     RECORD_TRIAL,
     TRIAL_RECORDINGS_DIR,
@@ -59,6 +59,12 @@ from config import (
     TRIAL_FILTER_MODE,
     RANDOM_SEED,
     DRY_RUN_GRID_FILTER,
+    SCOUT_ENABLED,
+    SCOUT_MOVE_AFTER_TRIAL,
+    SCOUT_ADVANCE_DISTANCE_M,
+    SCOUT_ADVANCE_SPEED_MPS,
+    SCOUT_ADVANCE_TIMEOUT_SEC,
+    SCOUT_SETTLE_SEC,
 )
 
 from control.coarse_move import TriangulationCoarseMover, is_in_workspace
@@ -110,6 +116,7 @@ def _save_manifest(manifest, timestamp, recording_dir=None):
     with open(path, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"[MANIFEST] Saved → {path}")
+    return path
 
 
 def _compact_target_list(target_queue):
@@ -281,7 +288,18 @@ def _save_metrics(logger, status, cameras=None):
         print(f"[METRICS] Warning: could not save metrics: {e}")
 
 
-def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=False):
+def run_runtime(
+    use_real_gantry=True,
+    execute_targets=True,
+    dry_run_grid_filter=False,
+    session=None,
+    keep_resources_open=False,
+    trial_index=1,
+    num_trials=1,
+    result=None,
+    scout=None,
+    is_last_trial=True,
+):
     gantry = None
     cameras = None
     state = "INIT"
@@ -290,6 +308,9 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
     logger = None
     model_load_time_s = 0.0
     warmup_info = {}
+    final_status = None
+    scout_thread = None
+    session = session if session is not None else {}
 
     left_detections = []
     right_detections = []
@@ -303,11 +324,21 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
     trial_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     manifest = {
         "trial_timestamp": trial_timestamp,
+        "trial_index": trial_index,
+        "num_trials": num_trials,
         "survey_position_mm": [SURVEY_POS_X, SURVEY_POS_Y],
         "experiment_grid_enabled": EXPERIMENT_GRID_ENABLED,
         "trial_filter_enabled": TRIAL_FILTER_ENABLED,
         "trial_filter_mode": TRIAL_FILTER_MODE,
         "random_seed": RANDOM_SEED,
+        "scout_enabled": SCOUT_ENABLED,
+        "scout_move_after_trial": SCOUT_MOVE_AFTER_TRIAL,
+        "scout_move_attempted": False,
+        "scout_move_ok": None,
+        "scout_move_distance_m": None,
+        "scout_move_speed_mps": None,
+        "scout_move_duration_s": None,
+        "scout_message": "",
         "targets": [],
     }
     effective_dry_run_grid_filter = bool(dry_run_grid_filter or DRY_RUN_GRID_FILTER)
@@ -315,14 +346,21 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
     try:
         while state != "DONE":
             if state == "INIT":
-                if MOCK_GANTRY or not use_real_gantry:
-                    gantry = MockGantry(start_x=SURVEY_POS_X, start_y=SURVEY_POS_Y)
-                else:
-                    gantry = Gantry(GRBL_PORT)
-                cameras = StereoCameras()
-                t_model = time.perf_counter()
-                detector = build_detector()
-                model_load_time_s = round(time.perf_counter() - t_model, 3)
+                gantry = session.get("gantry")
+                cameras = session.get("cameras")
+                detector = session.get("detector")
+
+                if gantry is None:
+                    if MOCK_GANTRY or not use_real_gantry:
+                        gantry = MockGantry(start_x=SURVEY_POS_X, start_y=SURVEY_POS_Y)
+                    else:
+                        gantry = Gantry(GRBL_PORT)
+                if cameras is None:
+                    cameras = StereoCameras()
+                if detector is None:
+                    t_model = time.perf_counter()
+                    detector = build_detector()
+                    model_load_time_s = round(time.perf_counter() - t_model, 3)
                 coarse_mover = TriangulationCoarseMover()
                 coarse_mover.clear_actual_targets_log()
                 if ENABLE_EXPERIMENT_LOGGING:
@@ -340,17 +378,23 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
                 state = "HOME"
 
             elif state == "HOME":
-                if DETECTOR_MODE == "ai" and hasattr(detector, "warmup"):
+                if DETECTOR_MODE == "ai" and hasattr(detector, "warmup") and not session.get("detector_warmed", False):
                     warmup_info = detector.warmup()
+                    session["detector_warmed"] = True
                 try:
-                    cameras.open(start_recorder=execute_targets)
+                    if not session.get("cameras_open", False):
+                        cameras.open(start_recorder=execute_targets)
+                        session["cameras_open"] = True
+                    elif execute_targets and RECORD_TRIAL:
+                        cameras.start_recording()
                 except RuntimeError as e:
                     print(f"[CAM RECOVER] Initial camera open failed: {e}")
                     cameras.recover()
+                    session["cameras_open"] = True
                     if execute_targets:
                         cameras.start_recording()
                 _update_recording_context(cameras, "HOME", gantry, target_queue, None, None, actual_hits, logger)
-                if HOMING:
+                if HOMING and trial_index == 1:
                     gantry.home()
                 if logger is not None:
                     logger.start_run(run_metadata={
@@ -454,6 +498,7 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
                     print("[GridFilter] dry-run enabled; stopping before target execution.")
                     if cameras is not None:
                         cameras.stop_recording()
+                    final_status = "grid_filter_dry_run"
                     _save_metrics(logger, "grid_filter_dry_run", cameras)
                     state = "DONE"
                     continue
@@ -490,6 +535,7 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
                 else:
                     if cameras is not None:
                         cameras.stop_recording()
+                    final_status = "complete"
                     _save_metrics(logger, "complete", cameras)
                     state = "DONE"
 
@@ -691,13 +737,57 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
                 print("\n  All targets complete.")
                 _print_final_targets(actual_hits)
 
-                # Return to survey position so the gantry is ready for the next pass.
-                print(f"[RUNTIME] Returning to survey position ({SURVEY_POS_X}, {SURVEY_POS_Y}) mm...")
+                # Parallel: start Scout advance (if between trials) while gantry
+                # returns to survey position — both begin the moment the last
+                # strike finishes so no time is wasted.
                 _update_recording_context(cameras, "SURVEY", gantry, target_queue, None, None, actual_hits, logger)
+
+                scout_move_result = {}
+                if scout is not None and not is_last_trial:
+                    def _do_scout_move(out):
+                        try:
+                            r = scout.move_forward(
+                                distance_m=SCOUT_ADVANCE_DISTANCE_M,
+                                speed_mps=SCOUT_ADVANCE_SPEED_MPS,
+                                timeout_s=SCOUT_ADVANCE_TIMEOUT_SEC,
+                            )
+                            out.update(r)
+                        except Exception as _exc:
+                            out.update({"ok": False, "message": str(_exc)})
+                    scout_thread = threading.Thread(
+                        target=_do_scout_move, args=(scout_move_result,), daemon=True
+                    )
+                    scout_thread.start()
+                    print(
+                        f"[RUNTIME] Parallel: Scout advancing + Gantry → survey "
+                        f"({SURVEY_POS_X}, {SURVEY_POS_Y}) mm"
+                    )
+                else:
+                    print(f"[RUNTIME] Returning to survey ({SURVEY_POS_X}, {SURVEY_POS_Y}) mm...")
+
                 gantry.move_absolute(SURVEY_POS_X, SURVEY_POS_Y)
+
+                if scout_thread is not None:
+                    scout_thread.join()
+                    scout_move_ok = scout_move_result.get("ok", False)
+                    if scout_move_ok:
+                        print(f"[SCOUT] Move complete: {scout_move_result.get('message', '')}")
+                    else:
+                        print(f"[SCOUT] Move failed: {scout_move_result.get('message', '')}")
+                    manifest.update({
+                        "scout_move_attempted": True,
+                        "scout_move_ok": scout_move_ok,
+                        "scout_move_distance_m": scout_move_result.get("distance_m"),
+                        "scout_move_speed_mps": scout_move_result.get("speed_mps"),
+                        "scout_move_duration_s": scout_move_result.get("duration_s"),
+                        "scout_message": scout_move_result.get("message", ""),
+                    })
+                    if SCOUT_SETTLE_SEC > 0:
+                        time.sleep(SCOUT_SETTLE_SEC)
 
                 if cameras is not None:
                     cameras.stop_recording()
+                final_status = "complete"
                 _save_metrics(logger, "complete", cameras)
                 state = "DONE"
 
@@ -706,14 +796,28 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
     except KeyboardInterrupt:
         clear_current_target_line()
         print("\nInterrupted by user.")
+        if scout is not None:
+            try:
+                scout.stop()
+            except Exception:
+                pass
+        final_status = "user_aborted"
         _save_metrics(logger, "user_aborted", cameras)
 
     except Exception as e:
         clear_current_target_line()
         print(f"\nERROR: {e}")
+        if scout is not None:
+            try:
+                scout.stop()
+            except Exception:
+                pass
+        final_status = "failed"
         _save_metrics(logger, "failed", cameras)
 
     finally:
+        if scout_thread is not None:
+            scout_thread.join(timeout=2.0)
         if logger is not None and getattr(logger, "run", None):
             for key in (
                 "planned_path_length_mm", "actual_path_length_mm",
@@ -724,12 +828,50 @@ def run_runtime(use_real_gantry=True, execute_targets=True, dry_run_grid_filter=
                 if key in logger.run:
                     manifest[key] = logger.run.get(key)
         recording_dir = cameras.get_recording_dir() if cameras is not None else None
-        _save_manifest(manifest, trial_timestamp, recording_dir=recording_dir)
-        if cameras is not None:
+        saved_path = _save_manifest(manifest, trial_timestamp, recording_dir=recording_dir)
+        if result is not None:
+            result["final_status"] = final_status or "complete"
+            result["manifest_path"] = str(saved_path) if saved_path else None
+            result["trial_timestamp"] = trial_timestamp
+        if keep_resources_open:
+            if cameras is not None:
+                cameras.stop_recording()
+            session["gantry"] = gantry
+            session["cameras"] = cameras
+            session["detector"] = detector
+            session["cameras_open"] = bool(cameras is not None)
+        else:
+            if cameras is not None:
+                cameras.stop_recording()
+                cameras.close()
+            if gantry is not None:
+                gantry.close()
+            session["cameras_open"] = False
+
+    return final_status or "complete"
+
+
+def close_runtime_session(session):
+    """Close shared runtime resources created by run_runtime(..., keep_resources_open=True)."""
+    if not session:
+        return
+    cameras = session.get("cameras")
+    gantry = session.get("gantry")
+    if cameras is not None:
+        try:
             cameras.stop_recording()
+        except Exception:
+            pass
+        try:
             cameras.close()
-        if gantry is not None:
+        except Exception:
+            pass
+    if gantry is not None:
+        try:
             gantry.close()
+        except Exception:
+            pass
+    session.clear()
 
 
 if __name__ == "__main__":

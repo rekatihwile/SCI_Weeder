@@ -11,16 +11,16 @@ KNOBS:
 # Experiment logging
 # =============================================================================
 
-ENABLE_EXPERIMENT_LOGGING = True
+ENABLE_EXPERIMENT_LOGGING = False
 # Used by main.py. False disables all metrics logging.
 
-EXPERIMENT_TRIAL_ID   = ""
+EXPERIMENT_TRIAL_ID = ''
 # Human-readable label for this trial, e.g. "N8_grid_01".
 
-EXPERIMENT_TRIAL_TYPE = "timing"
+EXPERIMENT_TRIAL_TYPE = ''
 # Category of experiment, e.g. "timing", "accuracy", "weed_plus_kale".
 
-EXPERIMENT_LAYOUT_TYPE = "grid"
+EXPERIMENT_LAYOUT_TYPE = ''
 # Spatial arrangement of plants, e.g. "grid", "random_uniform", "clustered", "manual".
 
 EXPECTED_WEED_COUNT = 0
@@ -29,7 +29,7 @@ EXPECTED_WEED_COUNT = 0
 EXPECTED_KALE_COUNT = 0
 # Number of kale/non-target plants physically placed in the workspace.
 
-EXPERIMENT_NOTES = ""
+EXPERIMENT_NOTES = ''
 # Free-text notes appended to every run row in the CSV.
 
 
@@ -51,11 +51,11 @@ GRID_Y_MAX_MM = 420.0
 # experiment workspace differs from gantry travel, update these bounds.
 
 SURVEY_ORIGIN_X_MM = 200.0
-SURVEY_ORIGIN_Y_MM = 150.0
+SURVEY_ORIGIN_Y_MM = 200.0
 # Origin for radius/angle/ring labels. Defaults mirror SURVEY_POS_X/Y.
 
-TRIAL_FILTER_ENABLED = True
-TRIAL_FILTER_MODE = "random_cells"
+TRIAL_FILTER_ENABLED = False
+TRIAL_FILTER_MODE = 'none'
 # Modes: "none", "random_cells", "custom_cells", "radius_cells", "ring".
 # Filtering happens after survey/stereo/triangulation and before path planning.
 
@@ -71,3 +71,13 @@ FILTER_ONLY_WEED_CLASSES = True
 DRY_RUN_GRID_FILTER = False
 # When True, stop after survey/stereo/triangulation/grid filtering and metrics
 # manifest write; no path execution, movement to targets, fine-align, or firing.
+
+# =============================================================================
+# Multi-trial repeat
+# =============================================================================
+# Multi-trial repeat
+# =============================================================================
+
+NUM_TRIALS = 1
+# Number of full laser-weeder trials to run in sequence.
+# Set > 1 to repeat trials automatically (e.g. after a Scout advance).

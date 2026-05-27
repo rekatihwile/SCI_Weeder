@@ -34,8 +34,8 @@ CROP_COLOR           = (0, 200, 255)   # orange  — survey crop window border
 MATCH_COLOR          = (255, 0, 255)   # magenta — stereo matched pair / epipolar
 
 LABEL_FONT       = cv2.FONT_HERSHEY_SIMPLEX
-LABEL_FONT_SCALE = 0.5
-LABEL_THICKNESS  = 1
+LABEL_FONT_SCALE = 0.8
+LABEL_THICKNESS  = 2
 
 QPOINT_RADIUS         = 7
 QPOINT_OUTLINE_RADIUS = 10
@@ -63,7 +63,15 @@ def b64_img(img, quality=85):
 # Internal helpers
 # =============================================================================
 
-def _label_text(cls_name, conf, views=None):
+def _label_text(cls_name, conf, views=None, all_confs=None):
+    if all_confs:
+        # Show "0:0.25, 1:0.03" as requested by user
+        conf_strs = [f"{c}:{v:.2f}" for c, v in sorted(all_confs.items())]
+        label = ", ".join(conf_strs)
+        if SHOW_VIEW_COUNT and views is not None:
+            label += f" [{views}v]"
+        return label
+
     parts = [str(cls_name)]
     if SHOW_CONFIDENCE and conf is not None:
         parts.append(f"{conf:.2f}")
@@ -73,11 +81,21 @@ def _label_text(cls_name, conf, views=None):
 
 
 def _draw_box_with_label(img, x1, y1, x2, y2, label, color):
+    # Draw the box border
     cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+    
+    # Draw black background with white text for better readability
+    (tw, th), _ = cv2.getTextSize(label, LABEL_FONT, LABEL_FONT_SCALE, LABEL_THICKNESS)
+    ty = max(th + 4, y1 - 6)
+    
+    # Black background rectangle
+    cv2.rectangle(img, (x1, ty - th - 4), (x1 + tw + 4, ty + 2), (0, 0, 0), -1)
+    
+    # White text
     cv2.putText(
         img, label,
-        (x1, max(18, y1 - 6)),
-        LABEL_FONT, LABEL_FONT_SCALE, color, LABEL_THICKNESS,
+        (x1 + 2, ty - 2),
+        LABEL_FONT, LABEL_FONT_SCALE, (255, 255, 255), LABEL_THICKNESS,
     )
 
 
@@ -107,7 +125,7 @@ def draw_detections(frame, detections, color=None):
     for d in detections:
         px, py = int(d["point"][0]), int(d["point"][1])
         x1, y1, x2, y2 = (int(v) for v in d["box"])
-        label = _label_text(d.get("cls", "?"), d.get("conf"), d.get("views"))
+        label = _label_text(d.get("cls", "?"), d.get("conf"), d.get("views"), all_confs=d.get("all_confs"))
         _draw_box_with_label(out, x1, y1, x2, y2, label, color)
         _draw_qpoint(out, px, py)
     return out
@@ -131,7 +149,7 @@ def draw_stable_detections(frame, stable_points, cls_names=None):
         x1, y1, x2, y2 = (int(v) for v in s["box"])
         cls_id   = s.get("cls", 0)
         cls_name = (cls_names or {}).get(cls_id, str(cls_id))
-        label    = _label_text(cls_name, s.get("conf"), s.get("views"))
+        label    = _label_text(cls_name, s.get("conf"), s.get("views"), all_confs=s.get("all_confs"))
         _draw_box_with_label(out, x1, y1, x2, y2, label, BOX_COLOR_CONFIRMED)
         px, py = int(s["point"][0]), int(s["point"][1])
         _draw_qpoint(out, px, py)

@@ -62,6 +62,23 @@ def test_random_prioritizes_requested_eligible_targets():
     assert targets[0]["selection_reason"] != "inside_selected_cell"
 
 
+def test_random_selects_all_available_when_request_is_high():
+    grid = WorkspaceGrid(rows=5, cols=7, x_min_mm=0, x_max_mm=700, y_min_mm=0, y_max_mm=500,
+                         survey_origin_x_mm=350, survey_origin_y_mm=250)
+    targets = assign_grid_metadata(_targets([(10, 10), (20, 20), (110, 10)]), grid)
+    selected, info = apply_trial_filter(
+        targets,
+        enabled=True,
+        mode="random_cells",
+        requested_active_cell_count=15,
+        random_seed=99,
+    )
+    assert len(selected) == 3
+    assert info["requested_target_goal"] == 3
+    assert info["selection_strategy"] == "all_eligible_targets"
+    assert all(t["was_selected_by_trial_filter"] for t in targets)
+
+
 def test_custom_radius_ring():
     grid = WorkspaceGrid(rows=5, cols=7, x_min_mm=0, x_max_mm=700, y_min_mm=0, y_max_mm=500,
                          survey_origin_x_mm=350, survey_origin_y_mm=250)
@@ -86,6 +103,7 @@ def main():
     test_cell_assignment()
     test_random_reproducible()
     test_random_prioritizes_requested_eligible_targets()
+    test_random_selects_all_available_when_request_is_high()
     test_custom_radius_ring()
     print("grid_filter tests passed")
 

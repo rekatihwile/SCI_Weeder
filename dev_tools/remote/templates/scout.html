@@ -1,0 +1,336 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Scout Dashboard</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0f0f0f;
+        color: #f2f2f2;
+        font-family: Arial, sans-serif;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 14px;
+        padding: 14px;
+        box-sizing: border-box;
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel {
+        background: #171717;
+        border: 1px solid #333;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .panel h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        flex-wrap: wrap;
+      }
+
+      .row label {
+        min-width: 100px;
+      }
+
+      input[type="number"],
+      input[type="text"] {
+        background: #232323;
+        color: #f2f2f2;
+        border: 1px solid #555;
+        padding: 6px 8px;
+        width: 110px;
+        box-sizing: border-box;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+      }
+
+      button {
+        background: #232323;
+        color: #f2f2f2;
+        border: 1px solid #555;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #2e2e2e;
+      }
+
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .danger {
+        border-color: #aa4444;
+      }
+
+      .status-box {
+        background: #111;
+        border: 1px solid #444;
+        padding: 10px;
+        white-space: pre-wrap;
+        overflow: auto;
+        min-height: 200px;
+        max-height: 50vh;
+        font-family: Consolas, monospace;
+        font-size: 13px;
+      }
+
+      .ok    { color: #4caf50; }
+      .fail  { color: #f44336; }
+      .small { color: #bdbdbd; font-size: 13px; }
+
+      .kv-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      .kv-table td {
+        padding: 3px 6px;
+        border-bottom: 1px solid #2a2a2a;
+        vertical-align: top;
+      }
+
+      .kv-table td:first-child {
+        color: #aaa;
+        min-width: 160px;
+      }
+    </style>
+  </head>
+
+  <body>
+    {% include '_nav.html' %}
+
+    <div class="layout">
+      <!-- ================================================================ -->
+      <!-- SIDEBAR                                                           -->
+      <!-- ================================================================ -->
+      <div class="sidebar">
+
+        <!-- Config status -->
+        <div class="panel">
+          <h3>Scout Config</h3>
+          <table class="kv-table">
+            <tr><td>SCOUT_ENABLED</td>       <td id="cfg_enabled">—</td></tr>
+            <tr><td>CAN interface</td>        <td id="cfg_interface">—</td></tr>
+            <tr><td>Default dry-run</td>      <td id="cfg_dry_run">—</td></tr>
+            <tr><td>Advance distance (m)</td> <td id="cfg_dist">—</td></tr>
+            <tr><td>Advance speed (m/s)</td>  <td id="cfg_speed">—</td></tr>
+            <tr><td>Advance timeout (s)</td>  <td id="cfg_timeout">—</td></tr>
+          </table>
+          <div class="btn-row" style="margin-top: 10px">
+            <button onclick="refreshStatus()">Refresh</button>
+          </div>
+        </div>
+
+        <!-- Connection -->
+        <div class="panel">
+          <h3>Connection</h3>
+          <div class="btn-row">
+            <button onclick="checkConnection()">Check Scout Connection</button>
+          </div>
+          <p class="small">
+            Verifies CAN link state and reads Scout telemetry. Safe to run at any time.
+          </p>
+        </div>
+
+        <!-- Safety stop -->
+        <div class="panel">
+          <h3>Stop</h3>
+          <div class="btn-row">
+            <button onclick="stopScout()" class="danger">Stop Scout</button>
+          </div>
+          <p class="small">
+            Sends zero-velocity command immediately. Use if Scout starts moving unexpectedly.
+          </p>
+        </div>
+
+        <!-- Move test -->
+        <div class="panel">
+          <h3>Move Test</h3>
+          <div class="row">
+            <label>Distance (m)</label>
+            <input id="move_dist" type="number" step="0.05" value="0.25" min="0.01" max="5.0" />
+          </div>
+          <div class="row">
+            <label>Speed (m/s)</label>
+            <input id="move_speed" type="number" step="0.01" value="0.10" min="0.01" max="1.5" />
+          </div>
+          <div class="row">
+            <label>Timeout (s)</label>
+            <input id="move_timeout" type="number" step="0.5" value="8.0" min="0.5" max="60" />
+          </div>
+          <div class="row">
+            <label>Dry-run</label>
+            <input id="move_dry_run" type="checkbox" checked />
+            <span class="small">(checked by default — uncheck to send real motion)</span>
+          </div>
+          <div class="btn-row" style="margin-top: 8px">
+            <button onclick="moveScout('forward')">Move Forward</button>
+            <button onclick="moveScout('backward')">Move Backward</button>
+          </div>
+          <p class="small">
+            Always stops Scout at the end of the move. Do not start if Scout is not safe to move.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- ================================================================ -->
+      <!-- MAIN PANEL                                                        -->
+      <!-- ================================================================ -->
+      <div>
+        <div class="panel">
+          <h3>Last Connection Check</h3>
+          <div id="check_result" class="status-box">— no check yet —</div>
+        </div>
+
+        <div class="panel" style="margin-top: 14px">
+          <h3>Last Move / Stop Result</h3>
+          <div id="move_result" class="status-box">— no action yet —</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // =====================================================================
+      // Helpers
+      // =====================================================================
+
+      function fmtJson(obj) {
+        if (!obj) return "—";
+        return JSON.stringify(obj, null, 2);
+      }
+
+      function setStatus(id, html) {
+        document.getElementById(id).innerHTML = html;
+      }
+
+      // =====================================================================
+      // Refresh config status
+      // =====================================================================
+
+      function refreshStatus() {
+        fetch("/api/scout/status")
+          .then(r => r.json())
+          .then(d => {
+            document.getElementById("cfg_enabled").textContent    = d.scout_enabled;
+            document.getElementById("cfg_interface").textContent  = d.interface;
+            document.getElementById("cfg_dry_run").textContent    = d.dry_run_default;
+            document.getElementById("cfg_dist").textContent       = d.advance_distance_m;
+            document.getElementById("cfg_speed").textContent      = d.advance_speed_mps;
+            document.getElementById("cfg_timeout").textContent    = d.advance_timeout_sec;
+
+            if (d.last_check) {
+              setStatus("check_result", fmtJson(d.last_check));
+            }
+            if (d.last_move) {
+              setStatus("move_result", fmtJson(d.last_move));
+            }
+          })
+          .catch(e => console.error("refreshStatus:", e));
+      }
+
+      // =====================================================================
+      // Actions
+      // =====================================================================
+
+      function checkConnection() {
+        setStatus("check_result", "Checking…");
+        fetch("/api/scout/check", { method: "POST" })
+          .then(r => r.json())
+          .then(d => {
+            const cls = d.ok ? "ok" : "fail";
+            setStatus("check_result",
+              `<span class="${cls}">${d.ok ? "OK" : "FAIL"}: ${d.message || ""}</span>\n\n` +
+              fmtJson(d)
+            );
+          })
+          .catch(e => setStatus("check_result", "Error: " + e));
+      }
+
+      function stopScout() {
+        setStatus("move_result", "Stopping…");
+        fetch("/api/scout/stop", { method: "POST" })
+          .then(r => r.json())
+          .then(d => {
+            const cls = d.ok ? "ok" : "fail";
+            setStatus("move_result",
+              `<span class="${cls}">${d.ok ? "OK" : "FAIL"}: ${d.message || ""}</span>\n\n` +
+              fmtJson(d)
+            );
+          })
+          .catch(e => setStatus("move_result", "Error: " + e));
+      }
+
+      function moveScout(direction) {
+        const dist      = parseFloat(document.getElementById("move_dist").value);
+        const speed     = parseFloat(document.getElementById("move_speed").value);
+        const timeout   = parseFloat(document.getElementById("move_timeout").value);
+        const dry_run   = document.getElementById("move_dry_run").checked;
+        const dirLabel  = direction === "backward" ? "backward" : "forward";
+
+        if (isNaN(dist) || dist <= 0 || isNaN(speed) || speed <= 0) {
+          alert("Distance and speed must be positive numbers.");
+          return;
+        }
+
+        const label = dry_run
+          ? `dry-run ${dirLabel} move`
+          : `REAL ${dirLabel} move ${dist.toFixed(3)} m @ ${speed.toFixed(3)} m/s`;
+        if (!dry_run && !confirm(`Send REAL ${dirLabel} motion: ${dist.toFixed(3)} m @ ${speed.toFixed(3)} m/s?\n\nMake sure Scout is clear to move.`)) {
+          return;
+        }
+
+        setStatus("move_result", `Sending ${label}…`);
+        fetch("/api/scout/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            distance_m: dist,
+            speed_mps:  speed,
+            direction:  dirLabel,
+            timeout_s:  timeout,
+            dry_run:    dry_run,
+          }),
+        })
+          .then(r => r.json())
+          .then(d => {
+            const cls = d.ok ? "ok" : "fail";
+            setStatus("move_result",
+              `<span class="${cls}">${d.ok ? "OK" : "FAIL"}: ${d.message || ""}</span>\n\n` +
+              fmtJson(d)
+            );
+          })
+          .catch(e => setStatus("move_result", "Error: " + e));
+      }
+
+      // Load status on page load.
+      refreshStatus();
+    </script>
+  </body>
+</html>

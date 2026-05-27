@@ -1,6 +1,7 @@
 from pathlib import Path
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+import re
 import time
 import warnings
 import cv2
@@ -40,6 +41,7 @@ from config import (
     YOLO_BACKEND,
     USE_TENSORRT_ENGINE,
     YOLO_DEVICE,
+    YOLO_ENGINE_BATCH_SIZE,
     YOLO_HALF,
     YOLO_WARMUP,
     YOLO_WARMUP_IMGSZ,
@@ -65,6 +67,41 @@ class MeristemPredictor(nn.Module):
 
     def forward(self, x):
         return self.decoder(self.encoder(x))
+
+
+class SpatialSoftArgmax2d(nn.Module):
+    def __init__(self, temperature=1.0):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+        x = x.view(b, c, h * w)
+        softmax = torch.softmax(x / self.temperature, dim=-1)
+        softmax = softmax.view(b, c, h, w)
+
+        grid_y, grid_x = torch.meshgrid(
+            torch.linspace(0.0, 1.0, h, device=x.device),
+            torch.linspace(0.0, 1.0, w, device=x.device),
+            indexing='ij'
+        )
+
+        expected_x = torch.sum(softmax * grid_x, dim=[2, 3])
+        expected_y = torch.sum(softmax * grid_y, dim=[2, 3])
+        return torch.cat([expected_x, expected_y], dim=-1)
+
+
+class SniperSoftArgmaxModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.backbone = models.mobilenet_v3_small(weights=None).features
+        self.final_conv = nn.Conv2d(576, 1, kernel_size=1)
+        self.soft_argmax = SpatialSoftArgmax2d(temperature=1.0)
+
+    def forward(self, x):
+        features = self.backbone(x)
+        heatmap_logits = self.final_conv(features)
+        return self.soft_argmax(heatmap_logits)
 
 
 def _box_iou(b1, b2):
@@ -108,13 +145,13 @@ def _normalise_point_mode(point_mode, default="qpoint"):
         "heatmap": "qpoint",
     }
     mode = aliases.get(mode, mode)
-    if mode not in ("box_center", "qpoint"):
+    if mode not in ("box_center", "qpoint", "softargmax"):
         raise ValueError(f"Unknown point mode: {point_mode}")
     return mode
 
 
 def _uses_qpoint(point_mode):
-    return _normalise_point_mode(point_mode) == "qpoint"
+    return _normalise_point_mode(point_mode) in ("qpoint", "softargmax")
 
 
 def _is_cuda_device(device):
@@ -132,6 +169,23 @@ def _resolve_yolo_device(device_spec):
         print(f"[YOLO] Requested device {device_spec!r}, but CUDA is unavailable; using CPU.")
         return "cpu"
     return device_spec
+
+
+def _normalise_imgsz(imgsz):
+    if isinstance(imgsz, (tuple, list)):
+        if len(imgsz) == 1:
+            return int(imgsz[0])
+        return (int(imgsz[0]), int(imgsz[1]))
+    return int(imgsz)
+
+
+def _infer_engine_batch_size(path):
+    if YOLO_ENGINE_BATCH_SIZE is not None:
+        return max(1, int(YOLO_ENGINE_BATCH_SIZE))
+    match = re.search(r"(?:^|[_-])batch[_-]?(\d+)(?:[_\-.]|$)", Path(path).name, re.IGNORECASE)
+    if match:
+        return max(1, int(match.group(1)))
+    return 1
 
 
 def _select_yolo_model_path(explicit_path=None):
@@ -162,26 +216,31 @@ class _WeedCVCore:
                  iom_thresh=AI_IOM_THRESHOLD,
                  target_classes=TARGET_CLASSES, avoid_classes=AVOID_CLASSES,
                  class_conf=None, verbose=True, yolo_backend=None,
-                 yolo_device=YOLO_DEVICE, yolo_half=YOLO_HALF):
+                 yolo_device=YOLO_DEVICE, yolo_half=YOLO_HALF,
+                 iom_enabled=True):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.yolo_device = _resolve_yolo_device(yolo_device)
         self.yolo_half = bool(yolo_half and _is_cuda_device(self.yolo_device))
         self.yolo_path = Path(yolo_path)
         self.yolo_backend = yolo_backend or ("engine" if self.yolo_path.suffix.lower() == ".engine" else "pt")
+        self.yolo_engine_batch_size = _infer_engine_batch_size(self.yolo_path) if self.yolo_backend == "engine" else None
         self.qpoint_path = Path(qpoint_path) if qpoint_path is not None else None
         self.verbose = verbose
 
         self.target_classes = list(target_classes) if target_classes is not None else None
         self.avoid_classes  = list(avoid_classes)  if avoid_classes  else []
+        self.avoid_confidence_override = None
         # Per-class confidence thresholds: {class_id: conf}. Falls back to self.conf.
         self.class_conf = dict(class_conf or AI_CLASS_CONFIDENCE or {})
 
-        self.yolo = YOLO(str(self.yolo_path), task='segment')
+        # Use same loading as eval.py: infer task from weights
+        self.yolo = YOLO(str(self.yolo_path))
 
         if verbose:
             print(
                 f"[YOLO] backend={self.yolo_backend} model={self.yolo_path} "
                 f"device={self.yolo_device} half={self.yolo_half}"
+                f"{f' engine_batch={self.yolo_engine_batch_size}' if self.yolo_engine_batch_size else ''}"
             )
             if self.yolo.names:
                 print(f"[INFO] Model classes: {self.yolo.names}")
@@ -204,7 +263,9 @@ class _WeedCVCore:
 
         self.conf = conf
         self.iom_thresh = iom_thresh
+        self.iom_enabled = iom_enabled
         self.TRAIN_SIZE = 224
+        self.SOFT_IMG_SIZE = 320
 
         self._load_qpoint_model()
 
@@ -215,13 +276,21 @@ class _WeedCVCore:
             return
 
         try:
-            self.qpoint_model = MeristemPredictor().to(self.device)
+            # Determine which architecture to use based on filename.
+            # Filenames with 'softargmax' use the new SniperSoftArgmaxModel.
+            if "softargmax" in self.qpoint_path.name.lower():
+                self.qpoint_model = SniperSoftArgmaxModel().to(self.device)
+                self.qpoint_is_softargmax = True
+            else:
+                self.qpoint_model = MeristemPredictor().to(self.device)
+                self.qpoint_is_softargmax = False
+
             self.qpoint_model.load_state_dict(
                 torch.load(str(self.qpoint_path), map_location=self.device, weights_only=True)
             )
             self.qpoint_model.half().eval()
             if self.verbose:
-                print(f"[INFO] Using qpoint model: {self.qpoint_path.name}")
+                print(f"[INFO] Using qpoint model ({'SoftArgmax' if self.qpoint_is_softargmax else 'Heatmap'}): {self.qpoint_path.name}")
         except Exception as exc:
             if self.verbose:
                 print(f"[WARN] Could not load qpoint model ({self.qpoint_path}): {exc}")
@@ -249,6 +318,8 @@ class _WeedCVCore:
 
     def _is_target(self, cls_id, target_override=None):
         """True if cls_id should be targeted (not in avoid, in effective target set)."""
+        if target_override == "all":
+            return True
         if cls_id in self.avoid_classes:
             return False
         targets = target_override if target_override is not None else self.target_classes
@@ -263,14 +334,15 @@ class _WeedCVCore:
                 kept_m.append(m)
         return kept_b, kept_m
 
-    def _suppress_avoid_overlaps(self, stable):
-        """Remove target detections dominated by a higher-confidence avoid-class detection.
+    def _suppress_avoid_overlaps(self, stable, target_override=None):
+        """Remove targets overlapped by avoid-class detections.
 
-        Per-frame IoM suppression in _filter_yolo_result already handles the
-        common case (highest-conf box wins cross-class). This is the burst-level
-        safety net: if a target survived in some frames but an avoid-class detection
-        covers it in the merged stable list with higher mean confidence, suppress it.
+        With an explicit avoid confidence, any avoid detection at/above that
+        threshold can veto an overlapping target. Otherwise preserve the older
+        behavior: the avoid detection must be higher-confidence than the target.
         """
+        if target_override == "all":
+            return stable
         if not self.avoid_classes or not stable:
             return stable
         avoid = [s for s in stable if s["cls"] in self.avoid_classes]
@@ -281,13 +353,57 @@ class _WeedCVCore:
             if s["cls"] in self.avoid_classes:
                 kept.append(s)
                 continue
-            dominated = any(
-                self._iom(s["box"], a["box"]) >= self.iom_thresh and a["conf"] > s["conf"]
-                for a in avoid
-            )
+            if self.avoid_confidence_override is not None:
+                dominated = any(
+                    self._iom(s["box"], a["box"]) >= self.iom_thresh
+                    and a["conf"] >= float(self.avoid_confidence_override)
+                    for a in avoid
+                )
+            else:
+                dominated = any(
+                    self._iom(s["box"], a["box"]) >= self.iom_thresh and a["conf"] > s["conf"]
+                    for a in avoid
+                )
             if not dominated:
                 kept.append(s)
         return kept
+
+    def _avoid_threshold_for_class(self, cls_id):
+        cls_id = int(cls_id)
+        if self.avoid_confidence_override is not None:
+            return float(self.avoid_confidence_override)
+        if cls_id in self.class_conf:
+            return float(self.class_conf[cls_id])
+        return float(self.conf)
+
+    def _choose_group_class(self, class_mean_conf, target_override=None):
+        """Pick a representative class for one grouped burst detection.
+
+        If any avoid class in the group meets its configured avoid threshold and
+        the group also contains a target class, force the group to that avoid
+        class so target output is vetoed consistently.
+        """
+        if not class_mean_conf:
+            return None
+        
+        if target_override == "all":
+            return max(class_mean_conf.items(), key=lambda item: float(item[1]))[0]
+
+        target_present = any(
+            self._is_target(int(cls_id), target_override)
+            for cls_id in class_mean_conf.keys()
+        )
+        avoid_candidates = [
+            (int(cls_id), float(conf))
+            for cls_id, conf in class_mean_conf.items()
+            if int(cls_id) in self.avoid_classes
+            and float(conf) >= self._avoid_threshold_for_class(cls_id)
+        ]
+
+        if target_present and avoid_candidates:
+            return max(avoid_candidates, key=lambda item: item[1])[0]
+
+        return max(class_mean_conf.items(), key=lambda item: float(item[1]))[0]
 
     def _extract_qpoint(self, heatmap_224, mask_224):
         heat = heatmap_224.astype(np.float32)
@@ -340,68 +456,135 @@ class _WeedCVCore:
 
         return (float(peak_x), float(peak_y)), float(peak_conf)
 
-    def _run_qpoints_batch(self, frame, boxes, masks):
+    def _run_qpoints_batch(self, frame, boxes, masks, mode="qpoint"):
         """Batch qpoint inference. Returns [(gx, gy, box_idx, peak_conf), ...]."""
+        mode = _normalise_point_mode(mode)
+        is_soft = (mode == "softargmax")
+        
+        # Ensure we have the right model loaded for the requested mode
+        if is_soft and not getattr(self, "qpoint_is_softargmax", False):
+            if self.verbose:
+                print(f"[WARN] SoftArgmax requested but Heatmap model loaded. SoftArgmax may fail or be inaccurate.")
+        elif mode == "qpoint" and getattr(self, "qpoint_is_softargmax", False):
+            if self.verbose:
+                print(f"[WARN] Heatmap requested but SoftArgmax model loaded. Forcing SoftArgmax logic.")
+            is_soft = True
+
+        img_size = self.SOFT_IMG_SIZE if is_soft else self.TRAIN_SIZE
+
+        # Standard ImageNet normalization for legacy model
         norm_mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(3, 1, 1).half()
         norm_std  = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(3, 1, 1).half()
 
-        img_t = torch.from_numpy(frame).to(self.device)
-        img_t = img_t[:, :, [2, 1, 0]].permute(2, 0, 1).half() / 255.0
-        img_t = (img_t - norm_mean) / norm_std
+        # Convert frame to tensor [3, H, W] in 0.0-1.0 range
+        frame_t = torch.from_numpy(frame).to(self.device)
+        frame_t = frame_t[:, :, [2, 1, 0]].permute(2, 0, 1).half() / 255.0
 
         all_tensors, all_masks_t, all_metadata = [], [], []
 
         for i in range(len(boxes)):
+            if masks[i] is None:
+                continue
             b = boxes[i].xyxy[0].int()
-            x1, y1 = max(0, b[0].item()), max(0, b[1].item())
-            x2, y2 = min(frame.shape[1], b[2].item()), min(frame.shape[0], b[3].item())
+            
+            # Add padding like sniper_factory.py
+            padding = 5
+            x1 = max(0, b[0].item() - padding)
+            y1 = max(0, b[1].item() - padding)
+            x2 = min(frame.shape[1], b[2].item() + padding)
+            y2 = min(frame.shape[0], b[3].item() + padding)
+            
             if x2 <= x1 or y2 <= y1:
                 continue
 
-            crop_img  = img_t[:, y1:y2, x1:x2].unsqueeze(0)
-            crop_mask = masks[i][y1:y2, x1:x2].unsqueeze(0).unsqueeze(0)
-
+            # 1. Extract RGB crop and corresponding mask slice
+            crop_img  = frame_t[:, y1:y2, x1:x2]
+            crop_mask = masks[i][y1:y2, x1:x2].unsqueeze(0) # [1, h, w]
+            
+            # 2. Apply mask to image: black out everything outside the YOLO segmentation.
+            # We threshold the mask at 0.5 to ensure a clean cutout.
+            binary_mask = (crop_mask > 0.5).to(crop_img.dtype)
+            masked_crop = (crop_img * binary_mask).unsqueeze(0) # [1, 3, h, w]
+            
             ch, cw = y2 - y1, x2 - x1
-            scale = self.TRAIN_SIZE / max(ch, cw)
-            nw, nh = int(cw * scale), int(ch * scale)
-            dx, dy = (self.TRAIN_SIZE - nw) // 2, (self.TRAIN_SIZE - nh) // 2
-
-            crop_img_res  = F.interpolate(crop_img,  size=(nh, nw), mode='bilinear', align_corners=False)
-            crop_mask_res = F.interpolate(crop_mask, size=(nh, nw), mode='nearest')
-
-            pad_l, pad_r = dx, self.TRAIN_SIZE - nw - dx
-            pad_t, pad_b = dy, self.TRAIN_SIZE - nh - dy
-
-            final_img  = F.pad(crop_img_res,  (pad_l, pad_r, pad_t, pad_b), value=0)
-            final_mask = F.pad(crop_mask_res, (pad_l, pad_r, pad_t, pad_b), value=0)
+            
+            if is_soft:
+                # Squashing resize for softargmax (matches visualizer script)
+                final_img = F.interpolate(masked_crop, size=(img_size, img_size), mode='bilinear', align_corners=False)
+                # No padding or ImageNet normalization for softargmax
+                dx = dy = 0
+                scale_x = img_size / cw
+                scale_y = img_size / ch
+            else:
+                # Preserve aspect ratio with padding for heatmap model
+                scale = img_size / max(ch, cw)
+                nw, nh = int(cw * scale), int(ch * scale)
+                dx, dy = (img_size - nw) // 2, (img_size - nh) // 2
+                
+                crop_res = F.interpolate(masked_crop, size=(nh, nw), mode='bilinear', align_corners=False)
+                
+                pad_l, pad_r = dx, img_size - nw - dx
+                pad_t, pad_b = dy, img_size - nh - dy
+                
+                final_img = F.pad(crop_res, (pad_l, pad_r, pad_t, pad_b), value=0)
+                
+                # Apply ImageNet normalization only for legacy model
+                final_img = (final_img - norm_mean) / norm_std
+                
+                # Prepare mask for peak extraction logic
+                crop_mask_batch = crop_mask.unsqueeze(0)
+                crop_mask_res = F.interpolate(crop_mask_batch, size=(nh, nw), mode='nearest')
+                final_mask = F.pad(crop_mask_res, (pad_l, pad_r, pad_t, pad_b), value=0)
+                all_masks_t.append(final_mask.squeeze(0).squeeze(0))
+                
+                scale_x = scale_y = scale
 
             all_tensors.append(final_img.squeeze(0))
-            all_masks_t.append(final_mask.squeeze(0).squeeze(0))
-            all_metadata.append({'box_idx': i, 'x1': x1, 'y1': y1, 'scale': scale, 'dx': dx, 'dy': dy})
+            all_metadata.append({
+                'box_idx': i, 
+                'x1': x1, 'y1': y1, 
+                'scale_x': scale_x, 'scale_y': scale_y, 
+                'dx': dx, 'dy': dy, 
+                'cw': cw, 'ch': ch
+            })
 
         if not all_tensors:
             return []
 
         batch_t = torch.stack(all_tensors)
-        batch_m = torch.stack(all_masks_t)
-
+        
         with torch.no_grad():
-            heatmaps = self.qpoint_model(batch_t).squeeze(1)
-
-        heatmaps_cpu    = heatmaps.detach().cpu().float().numpy()
-        batch_masks_cpu = batch_m.detach().cpu().float().numpy()
+            output = self.qpoint_model(batch_t)
 
         results = []
-        for i, meta in enumerate(all_metadata):
-            pt_224, peak_conf = self._extract_qpoint(heatmaps_cpu[i], batch_masks_cpu[i])
-            if pt_224 is None:
-                continue
-            lx, ly = pt_224
-            gx = int(round((lx - meta['dx']) / meta['scale'])) + meta['x1']
-            gy = int(round((ly - meta['dy']) / meta['scale'])) + meta['y1']
-            gx = max(0, min(frame.shape[1] - 1, gx))
-            gy = max(0, min(frame.shape[0] - 1, gy))
-            results.append((gx, gy, meta['box_idx'], peak_conf))
+        if is_soft:
+            # SoftArgmax returns [B, 2] normalized coordinates [X, Y]
+            coords_cpu = output.detach().cpu().float().numpy()
+            for i, meta in enumerate(all_metadata):
+                pred_x_pct, pred_y_pct = coords_cpu[i, 0], coords_cpu[i, 1]
+                # Scale back to original box coordinates
+                lx = pred_x_pct * meta['cw']
+                ly = pred_y_pct * meta['ch']
+                gx = int(round(lx)) + meta['x1']
+                gy = int(round(ly)) + meta['y1']
+                gx = max(0, min(frame.shape[1] - 1, gx))
+                gy = max(0, min(frame.shape[0] - 1, gy))
+                results.append((gx, gy, meta['box_idx'], 1.0))
+        else:
+            # Heatmap returns [B, 1, H, W]
+            heatmaps = output.squeeze(1)
+            heatmaps_cpu    = heatmaps.detach().cpu().float().numpy()
+            batch_masks_cpu = torch.stack(all_masks_t).detach().cpu().float().numpy()
+            for i, meta in enumerate(all_metadata):
+                pt_224, peak_conf = self._extract_qpoint(heatmaps_cpu[i], batch_masks_cpu[i])
+                if pt_224 is None:
+                    continue
+                lx, ly = pt_224
+                gx = int(round((lx - meta['dx']) / meta['scale_x'])) + meta['x1']
+                gy = int(round((ly - meta['dy']) / meta['scale_y'])) + meta['y1']
+                gx = max(0, min(frame.shape[1] - 1, gx))
+                gy = max(0, min(frame.shape[0] - 1, gy))
+                results.append((gx, gy, meta['box_idx'], peak_conf))
 
         return results
 
@@ -413,11 +596,14 @@ class _WeedCVCore:
         return self.conf
 
     def _resolve_imgsz(self, frame_or_frames, imgsz):
+        if self.yolo_backend == "engine":
+            return _normalise_imgsz(YOLO_WARMUP_IMGSZ or 1280)
         if imgsz is not None:
             return imgsz
-        frame = frame_or_frames[0] if isinstance(frame_or_frames, (list, tuple)) else frame_or_frames
-        h, w = frame.shape[:2]
-        return (h, w)
+        # Default to 640 to match standard YOLO/eval.py behavior.
+        # Running at full-frame resolution (e.g. 1440) on a model trained at 640
+        # can significantly degrade detection performance.
+        return 640
 
     def _yolo_predict_kwargs(self):
         kwargs = {}
@@ -427,27 +613,87 @@ class _WeedCVCore:
             kwargs["half"] = True
         return kwargs
 
+    def _pad_engine_batch(self, frames):
+        batch_size = int(self.yolo_engine_batch_size or 1)
+        real_count = len(frames)
+        if real_count >= batch_size:
+            return list(frames), real_count
+
+        ref = frames[0]
+        dummy = np.zeros_like(ref)
+        padded = list(frames) + [dummy.copy() for _ in range(batch_size - real_count)]
+        return padded, real_count
+
+    def _run_yolo_batch(self, frames, classes_arg, conf, imgsz, retina_masks=True):
+        run_imgsz = self._resolve_imgsz(frames, imgsz)
+        results = self.yolo(
+            list(frames),
+            imgsz=run_imgsz,
+            verbose=False,
+            conf=conf,
+            retina_masks=retina_masks,
+            classes=classes_arg,
+            **self._yolo_predict_kwargs(),
+        )
+        if results is None:
+            return []
+        if not isinstance(results, list):
+            return [results]
+        return results
+
+    def _run_yolo_engine_frames(self, frames, classes_arg, conf, imgsz, retina_masks=True):
+        batch_size = int(self.yolo_engine_batch_size or 1)
+        all_results = []
+        for start in range(0, len(frames), batch_size):
+            chunk = list(frames[start:start + batch_size])
+            padded_chunk, real_count = self._pad_engine_batch(chunk)
+            results = self._run_yolo_batch(
+                padded_chunk,
+                classes_arg=classes_arg,
+                conf=conf,
+                imgsz=imgsz,
+                retina_masks=retina_masks,
+            )
+            all_results.extend(results[:real_count])
+        return all_results
+
     def _filter_yolo_result(self, result, conf_override=None):
         boxes = getattr(result, "boxes", None)
         masks = getattr(result, "masks", None)
-        if result is None or boxes is None or len(boxes) == 0 or masks is None:
+        if result is None or boxes is None or len(boxes) == 0:
             return [], []
 
         raw_boxes = boxes
-        raw_masks = masks.data.half()
+        raw_masks = masks.data.half() if masks is not None else [None] * len(boxes)
 
         # IoM suppression (keep highest-confidence non-overlapping boxes)
-        order = sorted(
-            range(len(raw_boxes)),
-            key=lambda i: float(raw_boxes[i].conf[0]),
-            reverse=True
-        )
+        if self.iom_enabled and self.iom_thresh < 1.0:
+            order = sorted(
+                range(len(raw_boxes)),
+                key=lambda i: float(raw_boxes[i].conf[0]),
+                reverse=True
+            )
 
-        keep = []
-        for i in order:
-            bi = raw_boxes[i].xyxy[0].cpu().numpy()
-            if all(self._iom(bi, raw_boxes[j].xyxy[0].cpu().numpy()) <= self.iom_thresh for j in keep):
-                keep.append(i)
+            keep = []
+            for i in order:
+                bi = raw_boxes[i].xyxy[0].cpu().numpy()
+                cls_i = int(raw_boxes[i].cls[0].cpu().item())
+                keep_i = True
+                for j in keep:
+                    bj = raw_boxes[j].xyxy[0].cpu().numpy()
+                    if self._iom(bi, bj) <= self.iom_thresh:
+                        continue
+                    cls_j = int(raw_boxes[j].cls[0].cpu().item())
+                    # Preserve target+avoid overlaps so avoid-veto logic can apply
+                    # the avoid-class confidence threshold after burst grouping.
+                    if (cls_i in self.avoid_classes) != (cls_j in self.avoid_classes):
+                        continue
+                    keep_i = False
+                    break
+                if keep_i:
+                    keep.append(i)
+        else:
+            keep = list(range(len(raw_boxes)))
 
         # Per-class confidence filter (applied after IoM so we deduplicate first)
         if self.class_conf and conf_override is None:
@@ -461,24 +707,38 @@ class _WeedCVCore:
         filtered_masks = [raw_masks[i] for i in keep]
         return filtered_boxes, filtered_masks
 
-    def _get_filtered_results(self, frame, classes_override=None, conf_override=None, imgsz=1280):
+    def _get_filtered_results(self, frame, classes_override=None, conf_override=None, imgsz=None):
         # Run YOLO on all relevant classes (target + avoid) so cross-class IoM
         # suppression can happen in _filter_yolo_result (highest conf wins).
-        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
-        classes_arg = self._all_detect_classes(target_override)
+        if classes_override == "all":
+            target_override = "all"
+            classes_arg = None
+        else:
+            target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+            classes_arg = self._all_detect_classes(target_override)
+            
         run_imgsz = self._resolve_imgsz(frame, imgsz)
 
         # Run at lowest effective threshold so per-class filtering happens
         # after IoM suppression rather than before it.
-        results = self.yolo(
-            frame,
-            imgsz=run_imgsz,
-            verbose=False,
-            conf=self._effective_yolo_conf(conf_override),
-            retina_masks=True,
-            classes=classes_arg,
-            **self._yolo_predict_kwargs(),
-        )
+        if self.yolo_backend == "engine":
+            results = self._run_yolo_engine_frames(
+                [frame],
+                classes_arg=classes_arg,
+                conf=self._effective_yolo_conf(conf_override),
+                imgsz=run_imgsz,
+                retina_masks=True,
+            )
+        else:
+            results = self.yolo(
+                frame,
+                imgsz=run_imgsz,
+                verbose=False,
+                conf=self._effective_yolo_conf(conf_override),
+                retina_masks=True,
+                classes=classes_arg,
+                **self._yolo_predict_kwargs(),
+            )
 
         result = results[0] if results else None
         # filtered_boxes holds all-class results (for debug visualization).
@@ -488,27 +748,35 @@ class _WeedCVCore:
         )
         return self.filtered_boxes, filtered_masks
 
-    def _get_filtered_results_batch(self, frames, classes_override=None, conf_override=None, imgsz=1280):
+    def _get_filtered_results_batch(self, frames, classes_override=None, conf_override=None, imgsz=None):
         if not frames:
             self.filtered_boxes = []
             return []
 
-        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
-        classes_arg = self._all_detect_classes(target_override)
+        if classes_override == "all":
+            target_override = "all"
+            classes_arg = None
+        else:
+            target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+            classes_arg = self._all_detect_classes(target_override)
+
         run_imgsz = self._resolve_imgsz(frames, imgsz)
-        results = self.yolo(
-            list(frames),
-            imgsz=run_imgsz,
-            verbose=False,
-            conf=self._effective_yolo_conf(conf_override),
-            retina_masks=True,
-            classes=classes_arg,
-            **self._yolo_predict_kwargs(),
-        )
-        if results is None:
-            results = []
-        if not isinstance(results, list):
-            results = [results]
+        if self.yolo_backend == "engine":
+            results = self._run_yolo_engine_frames(
+                list(frames),
+                classes_arg=classes_arg,
+                conf=self._effective_yolo_conf(conf_override),
+                imgsz=run_imgsz,
+                retina_masks=True,
+            )
+        else:
+            results = self._run_yolo_batch(
+                frames,
+                classes_arg=classes_arg,
+                conf=self._effective_yolo_conf(conf_override),
+                imgsz=run_imgsz,
+                retina_masks=True,
+            )
 
         batched = [
             self._filter_yolo_result(result, conf_override=conf_override)
@@ -525,11 +793,20 @@ class _WeedCVCore:
         Used for sensitivity analysis after a survey burst. Counts target-class only."""
         target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
         classes_arg = self._all_detect_classes(target_override)
-        results = self.yolo(
-            frame, imgsz=1280, verbose=False,
-            conf=conf_override, retina_masks=False, classes=classes_arg,
-            **self._yolo_predict_kwargs(),
-        )
+        if self.yolo_backend == "engine":
+            results = self._run_yolo_engine_frames(
+                [frame],
+                classes_arg=classes_arg,
+                conf=conf_override,
+                imgsz=1280,
+                retina_masks=False,
+            )
+        else:
+            results = self.yolo(
+                frame, imgsz=1280, verbose=False,
+                conf=conf_override, retina_masks=False, classes=classes_arg,
+                **self._yolo_predict_kwargs(),
+            )
         if not results or len(results[0].boxes) == 0:
             return 0
         return sum(
@@ -550,15 +827,26 @@ class _WeedCVCore:
         dummy = np.zeros((h, w, 3), dtype=np.uint8)
         t0 = time.perf_counter()
         for _ in range(iters):
-            self.yolo(
-                dummy,
-                imgsz=run_imgsz,
-                verbose=False,
-                conf=self._effective_yolo_conf(None),
-                retina_masks=True,
-                classes=self._all_detect_classes(),
-                **self._yolo_predict_kwargs(),
-            )
+            if self.yolo_backend == "engine":
+                batch_size = int(self.yolo_engine_batch_size or 1)
+                frames = [dummy.copy() for _ in range(batch_size)]
+                self._run_yolo_engine_frames(
+                    frames,
+                    classes_arg=self._all_detect_classes(),
+                    conf=self._effective_yolo_conf(None),
+                    imgsz=run_imgsz,
+                    retina_masks=True,
+                )
+            else:
+                self.yolo(
+                    dummy,
+                    imgsz=run_imgsz,
+                    verbose=False,
+                    conf=self._effective_yolo_conf(None),
+                    retina_masks=True,
+                    classes=self._all_detect_classes(),
+                    **self._yolo_predict_kwargs(),
+                )
         return time.perf_counter() - t0
 
     def detect_points(self, frame, classes_override=None, point_mode=None):
@@ -571,7 +859,9 @@ class _WeedCVCore:
             return []
 
         mode = _normalise_point_mode(point_mode, default="qpoint")
-        if self.qpoint_model is None or mode == "box_center":
+        use_qpoint = self.qpoint_model is not None and mode != "box_center" and (mode == "softargmax" or any(m is not None for m in masks))
+
+        if not use_qpoint:
             return [
                 (
                     int((b.xyxy[0][0] + b.xyxy[0][2]) / 2),
@@ -581,16 +871,16 @@ class _WeedCVCore:
             ]
 
         coords = []
-        for i, (gx, gy, box_idx, peak_conf) in enumerate(self._run_qpoints_batch(frame, boxes, masks)):
+        for i, (gx, gy, box_idx, peak_conf) in enumerate(self._run_qpoints_batch(frame, boxes, masks, mode=mode)):
             if QPOINT_DEBUG:
                 box = boxes[box_idx]
                 yolo_conf = float(box.conf[0].cpu().item())
                 cls_id    = int(box.cls[0].cpu().item())
                 cls_name  = self.yolo.names.get(cls_id, str(cls_id))
                 print(
-                    f"  [qpoint] det {i}: {cls_name} "
+                    f"  [{mode}] det {i}: {cls_name} "
                     f"yolo={yolo_conf:.2f} | "
-                    f"heatmap_peak={peak_conf:.4f} | "
+                    f"{'peak=' if mode=='qpoint' else 'soft='}{peak_conf:.4f} | "
                     f"px=({gx},{gy})"
                 )
             coords.append((gx, gy))
@@ -605,7 +895,9 @@ class _WeedCVCore:
             return []
 
         mode = _normalise_point_mode(point_mode, default="qpoint")
-        if self.qpoint_model is None or mode == "box_center":
+        use_qpoint = self.qpoint_model is not None and mode != "box_center" and (mode == "softargmax" or any(m is not None for m in masks))
+
+        if not use_qpoint:
             return [
                 {
                     "point": (
@@ -624,7 +916,7 @@ class _WeedCVCore:
                 "cls":   int(boxes[box_idx].cls[0].cpu().item()),
                 "conf":  float(boxes[box_idx].conf[0].cpu().item()),
             }
-            for gx, gy, box_idx, _ in self._run_qpoints_batch(frame, boxes, masks)
+            for gx, gy, box_idx, _ in self._run_qpoints_batch(frame, boxes, masks, mode=mode)
         ]
 
     def draw_detections(self, frame, boxes=None, points=None):
@@ -648,8 +940,12 @@ class _WeedCVCore:
             cv2.rectangle(out, (x1, y1), (x2, y2), BOX_COLOR_RAW, 2)
             label = f"{cls_name} {conf:.2f}"
             (tw, th), _ = cv2.getTextSize(label, LABEL_FONT, LABEL_FONT_SCALE, LABEL_THICKNESS)
-            cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 2, y1), BOX_COLOR_RAW, -1)
-            cv2.putText(out, label, (x1 + 1, y1 - 4), LABEL_FONT, LABEL_FONT_SCALE, (0, 0, 0), LABEL_THICKNESS)
+            
+            # Black background, white text for consistent readability
+            ty = max(th + 4, y1 - 6)
+            cv2.rectangle(out, (x1, ty - th - 4), (x1 + tw + 4, ty + 2), (0, 0, 0), -1)
+            cv2.putText(out, label, (x1 + 2, ty - 2), LABEL_FONT, LABEL_FONT_SCALE, (255, 255, 255), LABEL_THICKNESS)
+            
             if i < len(points):
                 px, py = int(points[i][0]), int(points[i][1])
                 cv2.circle(out, (px, py), QPOINT_RADIUS, QPOINT_COLOR, -1)
@@ -665,7 +961,7 @@ class _WeedCVCore:
         """
         return _vis_draw_stable(frame, stable_points, cls_names=self.yolo.names)
 
-    def refine_one_heatmap(self, crop_pt):
+    def refine_one_heatmap(self, crop_pt, mode="qpoint"):
         """Run heatmap on ONE detection using the last burst merged image.
         crop_pt: (x, y) box-center in crop space.
         Returns refined (x, y) in crop space, or None if unavailable."""
@@ -691,7 +987,7 @@ class _WeedCVCore:
         if best_i is None:
             return None
 
-        qpoints = self._run_qpoints_batch(merged, [last_boxes[best_i]], [last_masks[best_i]])
+        qpoints = self._run_qpoints_batch(merged, [last_boxes[best_i]], [last_masks[best_i]], mode=mode)
         if qpoints:
             gx, gy, _, _ = qpoints[0]
             return (gx, gy)
@@ -707,36 +1003,59 @@ class _WeedCVCore:
         if h < 4 or w < 4:
             return None
 
+        is_soft = getattr(self, "qpoint_is_softargmax", False)
+        img_size = self.SOFT_IMG_SIZE if is_soft else self.TRAIN_SIZE
+
         norm_mean = torch.tensor([0.485, 0.456, 0.406], device=self.device).view(3, 1, 1).half()
         norm_std  = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(3, 1, 1).half()
 
         img_t = torch.from_numpy(crop_img).to(self.device)
         img_t = img_t[:, :, [2, 1, 0]].permute(2, 0, 1).half() / 255.0
-        img_t = (img_t - norm_mean) / norm_std
 
-        scale = self.TRAIN_SIZE / max(h, w)
-        nw, nh = int(w * scale), int(h * scale)
-        dx = (self.TRAIN_SIZE - nw) // 2
-        dy = (self.TRAIN_SIZE - nh) // 2
-        pad_l = dx
-        pad_r = self.TRAIN_SIZE - nw - dx
-        pad_t = dy
-        pad_b = self.TRAIN_SIZE - nh - dy
+        if is_soft:
+            # Squashing resize for softargmax
+            final_img = F.interpolate(img_t.unsqueeze(0), size=(img_size, img_size), mode='bilinear', align_corners=False)
+            # No normalization for softargmax
+            dx = dy = 0
+            scale_x = img_size / w
+            scale_y = img_size / h
+        else:
+            # Aspect-ratio-preserving resize with padding for legacy model
+            scale = img_size / max(h, w)
+            nw, nh = int(w * scale), int(h * scale)
+            dx = (img_size - nw) // 2
+            dy = (img_size - nh) // 2
+            pad_l = dx
+            pad_r = img_size - nw - dx
+            pad_t = dy
+            pad_b = img_size - nh - dy
 
-        resized = F.interpolate(img_t.unsqueeze(0), size=(nh, nw), mode='bilinear', align_corners=False)
-        final_img = F.pad(resized, (pad_l, pad_r, pad_t, pad_b), value=0)
-        full_mask = np.ones((self.TRAIN_SIZE, self.TRAIN_SIZE), dtype=np.float32)
+            resized = F.interpolate(img_t.unsqueeze(0), size=(nh, nw), mode='bilinear', align_corners=False)
+            final_img = F.pad(resized, (pad_l, pad_r, pad_t, pad_b), value=0)
+            
+            # Apply normalization for legacy model
+            final_img = (final_img - norm_mean) / norm_std
+            scale_x = scale_y = scale
 
         with torch.no_grad():
-            heatmap = self.qpoint_model(final_img).squeeze(0).squeeze(0)
+            output = self.qpoint_model(final_img).squeeze(0)
 
-        heatmap_np = heatmap.detach().cpu().float().numpy()
-        pt_224, _ = self._extract_qpoint(heatmap_np, full_mask)
-        if pt_224 is None:
-            return None
-
-        gx = int(round((pt_224[0] - dx) / scale))
-        gy = int(round((pt_224[1] - dy) / scale))
+        if is_soft:
+            coords = output.detach().cpu().float().numpy()
+            pred_x_pct, pred_y_pct = coords[0], coords[1]
+            # Map percentages back to crop space
+            gx = int(round(pred_x_pct * w))
+            gy = int(round(pred_y_pct * h))
+        else:
+            heatmap = output.squeeze(0)
+            heatmap_np = heatmap.detach().cpu().float().numpy()
+            full_mask = np.ones((img_size, img_size), dtype=np.float32)
+            pt_224, _ = self._extract_qpoint(heatmap_np, full_mask)
+            if pt_224 is None:
+                return None
+            gx = int(round((pt_224[0] - dx) / scale_x))
+            gy = int(round((pt_224[1] - dy) / scale_y))
+            
         return (max(0, min(w - 1, gx)), max(0, min(h - 1, gy)))
 
     def return_burst_stable(
@@ -747,14 +1066,18 @@ class _WeedCVCore:
         group_radius_px=None,
         classes_override=None,
         debug_label=None,
-        imgsz=1280,
+        imgsz=None,
         heatmap_final=True,
         point_mode=None,
     ):
         t_total = time.perf_counter()
         mode = _normalise_point_mode(point_mode, default="qpoint")
         self.last_burst_timing = {}
-        target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
+        
+        if classes_override == "all":
+            target_override = "all"
+        else:
+            target_override = _resolve_classes(None, classes_override) if classes_override is not None else None
 
         def _debug(msg):
             if debug_label:
@@ -779,6 +1102,7 @@ class _WeedCVCore:
             f"point_mode={mode}: boxes={box_counts} in {yolo_dt:.2f}s"
         )
 
+        t_boxpoint = time.perf_counter()
         all_detections = []
         last_boxes = None
         last_masks = None
@@ -838,8 +1162,15 @@ class _WeedCVCore:
             mean_pt = np.mean(pts, axis=0)
             arr = np.array(g["boxes"])
             mean_box = tuple(np.mean(arr, axis=0).tolist())
-            modal_cls = Counter(g["cls_votes"]).most_common(1)[0][0]
-            mean_conf = float(np.mean(g["confs"]))
+
+            # Calculate average confidence for each class across the whole burst
+            n_frames = len(frames)
+            cls_totals = Counter()
+            for c, f in zip(g["cls_votes"], g["confs"]):
+                cls_totals[c] += f
+            class_mean_conf = {int(c): float(total / n_frames) for c, total in cls_totals.items()}
+            modal_cls = self._choose_group_class(class_mean_conf, target_override=target_override)
+            mean_conf = class_mean_conf.get(int(modal_cls), float(np.mean(g["confs"])))
 
             stable.append({
                 "point": (int(round(mean_pt[0])), int(round(mean_pt[1]))),
@@ -847,17 +1178,19 @@ class _WeedCVCore:
                 "views": g["views"],
                 "cls":   modal_cls,
                 "conf":  mean_conf,
+                "all_confs": class_mean_conf,
                 "point_source": "box_center",
             })
 
         # Suppress target detections dominated by a higher-confidence avoid-class
         # detection, then drop all non-target classes from the output.
         n_raw = len(stable)
-        stable = self._suppress_avoid_overlaps(stable)
+        stable = self._suppress_avoid_overlaps(stable, target_override=target_override)
         stable = [s for s in stable if self._is_target(s["cls"], target_override)]
         stable.sort(key=lambda d: d["box"][0])
 
         group_dt = time.perf_counter() - t_group
+        boxpoint_dt = time.perf_counter() - t_boxpoint
         suppressed = n_raw - len(stable)
         _debug(
             f"grouped {sum(len(d) for d in all_detections)} detection(s) "
@@ -882,16 +1215,17 @@ class _WeedCVCore:
         # One heatmap pass on the merged image using last-frame masks (scene is stationary).
         # Skip when heatmap_final=False — caller will run heatmap on the one winning detection.
         qpoint_dt = 0.0
+        is_soft = (mode == "softargmax")
         if (
             heatmap_final
             and _uses_qpoint(mode)
             and self.qpoint_model is not None
             and stable
             and last_boxes
-            and last_masks
+            and (last_masks or is_soft)
         ):
             t_qpoint = time.perf_counter()
-            qpoints = self._run_qpoints_batch(merged, last_boxes, last_masks)
+            qpoints = self._run_qpoints_batch(merged, last_boxes, last_masks, mode=mode)
             qpoint_dt = time.perf_counter() - t_qpoint
             _debug(
                 f"qpoint pass: {len(qpoints)} point(s) "
@@ -914,12 +1248,15 @@ class _WeedCVCore:
         total_dt = time.perf_counter() - t_total
         self.last_burst_timing = {
             "yolo_time_s": round(yolo_dt, 6),
+            "boxpoint_time_s": round(boxpoint_dt, 6),
             "grouping_time_s": round(group_dt, 6),
             "merge_time_s": round(merge_dt, 6),
             "qpoint_time_s": round(qpoint_dt, 6),
             "total_time_s": round(total_dt, 6),
             "point_mode": mode,
             "heatmap_final": bool(heatmap_final and _uses_qpoint(mode)),
+            "qpoint_batched": bool(self.qpoint_model is not None),
+            "qpoint_candidate_count": int(len(last_boxes) if last_boxes is not None else 0),
         }
         _debug(f"burst stable total: {total_dt:.2f}s")
         return stable
@@ -937,6 +1274,7 @@ class AIDetector:
         iom_thresh=AI_IOM_THRESHOLD,
         target_classes=TARGET_CLASSES,
         avoid_classes=AVOID_CLASSES,
+        iom_enabled=True,
     ):
         self.yolo_path, self.yolo_backend = _select_yolo_model_path(yolo_path)
 
@@ -963,6 +1301,7 @@ class AIDetector:
             yolo_backend=self.yolo_backend,
             yolo_device=YOLO_DEVICE,
             yolo_half=YOLO_HALF,
+            iom_enabled=iom_enabled,
         )
         self.cv_left  = _WeedCVCore(self.yolo_path, self.qpoint_path, verbose=True,  **core_kwargs)
         self.cv_right = _WeedCVCore(self.yolo_path, self.qpoint_path, verbose=False, **core_kwargs)
