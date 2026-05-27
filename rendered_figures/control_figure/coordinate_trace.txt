@@ -1,0 +1,118 @@
+CONTROL FIGURE COORDINATE TRACE
+
+Frame chain:
+  working:    StereoCameras.read_pair() captures left/right USB frames
+  working:    StereoCameras.read_pair() rotates both frames 180 degrees with cv2.ROTATE_180
+  working:    AIDetector/TriangulationCoarseMover.detect_stable_points detect in that production raw/calibration frame
+  working:    vision.matching.match_points maps raw detections to rectified coordinates only for correspondence scoring
+  working:    match_points returns raw/calibration-frame left_px/right_px for triangulation
+  working:    TriangulationCoarseMover._solve_geometry undistorts/rectifies those raw pixels, triangulates, subtracts stereo midpoint and laser offset, then applies TRI_SIGN_X/TRI_SIGN_Y
+  working:    TriangulationCoarseMover.solve_target_from_pose adds gantry survey pose and pixel-error correction to produce robot/gantry target_xy_mm
+  standalone: Input files are assumed already rectified; detections and annotations are in rectified image coordinates
+  standalone: Rectified detections are mapped back to raw/calibration pixel coordinates using dashboard_triangulate._rect_to_raw and dashboard_rectify.load_rectify_maps
+  standalone: vision.matching.match_points uses explicit rectified coordinates for matching but preserves raw/calibration left_px/right_px for solving
+  standalone: TriangulationCoarseMover.solve_all_from_pose is used unchanged for robot/gantry coordinates
+  standalone: planning.target_planner.plan_targets is used unchanged for path order
+
+Display rotates/flips in standalone: False
+Left/right ordering: left_px / right_px
+Rectification mapper: dashboard_triangulate._rect_to_raw
+TRI_SIGN_X/Y: 1.0 / -1.0
+Pixel error correction active: True
+
+Targets:
+  id=1 label=3 path_order=3 rectL=[457.0, 183.0] rawL=[464, 195] X_rect_mm=[-75.684, -71.411, 191.037] dxy=(-89.095,71.448) final_xy=(128.387,265.148)
+  id=2 label=2 path_order=2 rectL=[489.0, 321.0] rawL=[501, 333] X_rect_mm=[-65.938, -13.468, 202.987] dxy=(-79.350,13.505) final_xy=(133.641,209.879)
+  id=3 label=1 path_order=1 rectL=[573.0, 370.0] rawL=[584, 379] X_rect_mm=[-27.315, 8.179, 196.837] dxy=(-40.727,-8.142) final_xy=(170.432,189.654)
+  id=4 label=4 path_order=4 rectL=[791.0, 158.0] rawL=[795, 168] X_rect_mm=[66.398, -82.939, 193.395] dxy=(52.987,82.975) final_xy=(265.393,279.964)
+  id=5 label=5 path_order=5 rectL=[864.0, 364.0] rawL=[868, 371] X_rect_mm=[97.952, 5.492, 194.151] dxy=(84.540,-5.456) final_xy=(295.967,192.771)
+
+Dashboard compare:
+{
+  "available": true,
+  "method": "dashboard_triangulate._solve_matches on the raw/calibration pixels selected by the standalone matcher",
+  "dashboard_matched_count": 5,
+  "dashboard_unmatched_left": 0,
+  "dashboard_unmatched_right": 0,
+  "standalone_solved_count": 5,
+  "dashboard_solved_count": 5,
+  "max_abs_delta_mm": 0.0,
+  "matches_within_1e_6_mm": true,
+  "deltas": [
+    {
+      "index": 1,
+      "standalone_xy_mm": [
+        128.38709802386896,
+        265.14848894194205
+      ],
+      "dashboard_xy_mm": [
+        128.38709802386896,
+        265.14848894194205
+      ],
+      "delta_xy_mm": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "index": 2,
+      "standalone_xy_mm": [
+        133.64071631826795,
+        209.8786166339444
+      ],
+      "dashboard_xy_mm": [
+        133.64071631826795,
+        209.8786166339444
+      ],
+      "delta_xy_mm": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "index": 3,
+      "standalone_xy_mm": [
+        170.43203978077088,
+        189.6541982113251
+      ],
+      "dashboard_xy_mm": [
+        170.43203978077088,
+        189.6541982113251
+      ],
+      "delta_xy_mm": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "index": 4,
+      "standalone_xy_mm": [
+        265.39343224523344,
+        279.9636984234816
+      ],
+      "dashboard_xy_mm": [
+        265.39343224523344,
+        279.9636984234816
+      ],
+      "delta_xy_mm": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "index": 5,
+      "standalone_xy_mm": [
+        295.9667814927707,
+        192.77057378561582
+      ],
+      "dashboard_xy_mm": [
+        295.9667814927707,
+        192.77057378561582
+      ],
+      "delta_xy_mm": [
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

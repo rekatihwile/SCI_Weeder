@@ -1,0 +1,214 @@
+# README: Upgrading Inference to Spatial SoftArgmax
+
+[cite_start]This document outlines the structural and practical changes to our inference pipeline now that we have migrated from a **Dense Heatmap Predictor** to an optimized **Spatial SoftArgmax Model** at a **320x320** resolution[cite: 1].
+
+---
+
+## 1. What Changed Under the Hood?
+
+* [cite_start]**Old Method (`live_sniper_test.py`):** The model outputted a dense, heavy 2D probability map (heatmap) matching the image grid size[cite: 2]. [cite_start]Your Python post-processing script had to download this massive array to the CPU and execute numerical searches (`np.argmax` and `np.unravel_index`) to pinpoint the pixel with the highest confidence value[cite: 3].
+* [cite_start]**New Method (`SniperSoftArgmaxModel`):** The network preserves spatial information across convolutional feature maps, but applies an exponential weighting ("center of mass") trick directly on the GPU before exiting[cite: 4]. [cite_start]**The model now skips generating full-size heatmaps at inference and directly returns a 1D tensor of normalized [X, Y] coordinates[cite: 5].**
+
+---
+
+## 2. Structural Code Comparison
+
+### Old Heatmap Inference Loop (`live_sniper_test.py`)
+Previously, we spent computation slicing multi-dimensional arrays to extract peak positions manually:
+
+```python
+# --- OLD INFERENCE OUTPUT PROCESSING ---
+with torch.no_grad():
+    # Model returned a large, multi-dimensional spatial grid
+    output = model(img_t).squeeze().cpu().numpy()
+
+# Post-processing required to extract a single location
+max_conf = np.max(output)
+max_idx = np.argmax(output)
+y, x = np.unravel_index(max_idx, output.shape)  # Manual extraction step
+
+print(f"Coordinate found at: {x, y}")
+```
+
+### New SoftArgmax Inference Loop (320x320 Resolution)
+[cite_start]With Spatial SoftArgmax, manual array slicing and CPU coordinate decoding disappear entirely[cite: 6]. [cite_start]The model outputs percentages between `0.0` and `1.0`, which we simply scale back to our input bounds[cite: 6]:
+
+```python
+# --- NEW INFERENCE OUTPUT PROCESSING ---
+with torch.no_grad():
+    # Model directly outputs a 1D tensor with 2 continuous values: [X, Y]
+    coords = model(img_t).squeeze().cpu().numpy() 
+
+# SoftArgmax coordinates are natively normalized between 0.0 and 1.0
+pred_x_pct, pred_y_pct = coords[0], coords[1]
+
+# Map percentages straight back to pixels
+pixel_x = int(pred_x_pct * 320)
+pixel_y = int(pred_y_pct * 320)
+
+print(f"Target Crown Coordinates: X={pixel_x}, Y={pixel_y}")
+```
+
+---
+
+## 3. Mandatory Migration Steps for Production Integration
+
+### 1. Update Camera/Pre-Processing Frame Sizes
+Your live video capture frames must be downsampled to **320x320** instead of your old 640x640 setup to align with the optimized model inputs[cite: 7]. Because SoftArgmax handles sub-pixel precision seamlessly, accuracy remains protected despite the significantly lower computational footprint[cite: 8].
+
+### 2. Swap Your Model Architecture Definitions
+You can no longer import `SniperModel` from `mobilnet_training.py`[cite: 9]. You must copy over or import your updated `SniperSoftArgmaxModel` class containing the `SpatialSoftArgmax2d` processing tail[cite: 10]. Trying to load the new weights file into your old heatmap layout will instantly crash PyTorch due to structural mismatches[cite: 11].
+
+### 3. Remove 2D Heatmap Renderers and Overlays
+Because the network no longer evaluates a full 2D output matrix to your Python stack, visual helpers like `plt.imshow(output, cmap='jet')` or `cv2.applyColorMap()` will break[cite: 12]. To visually verify accuracy during development or field tests, draw a marker directly onto your input RGB image array instead[cite: 13]:
+
+```python
+import matplotlib.pyplot as plt
+
+plt.imshow(img_rgb)
+plt.scatter(pixel_x, pixel_y, c='red', marker='x', s=150, label='Prediction')
+plt.legend()
+plt.show()
+```
+
+---
+
+## 4. Full Implementation Example: Interactive Inference Visualizer
+
+Below is a complete, working script utilizing the new model structure. It serves as the primary reference for how to reconstruct the `SniperSoftArgmaxModel` classes, load the `.pth` weights, and mathematically scale the continuous coordinate percentages back into raw pixel locations on the original image crop.
+
+```python
+import os
+import cv2
+import torch
+import numpy as np
+from pathlib import Path
+from torchvision import models
+import torch.nn as nn
+
+# --- 1. CONFIGURATION ---
+TEST_DIR = Path(r"D:\5-8_rooftop_training\sniper_test_5-25")
+WEIGHTS_PATH = r"D:\5-8_rooftop_training\5-25_best_no_skip_softargmax.pth"
+IMG_SIZE = 320 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# --- UI SETTINGS ---
+DISPLAY_SCALE = 3.0   # Scale factor for viewing small cropped images
+MARKER_SIZE = 8       # Size of the Red 'X'
+MARKER_THICKNESS = 2  # Thickness of the 'X' lines
+
+# --- 2. REBUILD MODEL ARCHITECTURE ---
+class SpatialSoftArgmax2d(nn.Module):
+    def __init__(self, temperature=1.0):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, x):
+        b, c, h, w = x.size()
+        x = x.view(b, c, h * w)
+        softmax = torch.softmax(x / self.temperature, dim=-1)
+        softmax = softmax.view(b, c, h, w)
+
+        grid_y, grid_x = torch.meshgrid(
+            torch.linspace(0.0, 1.0, h, device=x.device),
+            torch.linspace(0.0, 1.0, w, device=x.device),
+            indexing='ij'
+        )
+
+        expected_x = torch.sum(softmax * grid_x, dim=[2, 3]) 
+        expected_y = torch.sum(softmax * grid_y, dim=[2, 3]) 
+        return torch.cat([expected_x, expected_y], dim=-1)   
+
+class SniperSoftArgmaxModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.backbone = models.mobilenet_v3_small(weights='DEFAULT').features
+        self.final_conv = nn.Conv2d(576, 1, kernel_size=1)
+        self.soft_argmax = SpatialSoftArgmax2d(temperature=1.0)
+
+    def forward(self, x):
+        features = self.backbone(x)          
+        heatmap_logits = self.final_conv(features)  
+        return self.soft_argmax(heatmap_logits)  
+
+# --- 3. LOAD MODEL ---
+print("Loading model weights...")
+model = SniperSoftArgmaxModel().to(DEVICE)
+model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=DEVICE, weights_only=True))
+model.eval()
+print("Model loaded successfully!")
+
+# --- 4. LOAD IMAGES ---
+image_files = [f for f in os.listdir(TEST_DIR) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+if not image_files:
+    print(f"Error: No images found in {TEST_DIR}")
+    exit()
+
+print(f"Found {len(image_files)} images for testing.")
+print("Controls: 'd' = Next | 'a' = Previous | 'q' or ESC = Quit")
+
+current_idx = 0
+
+# --- 5. INTERACTIVE LOOP ---
+while True:
+    img_name = image_files[current_idx]
+    img_path = str(TEST_DIR / img_name)
+    
+    # Read the raw image
+    raw_img = cv2.imread(img_path)
+    orig_h, orig_w = raw_img.shape[:2]
+    
+    # Pre-process for the model (Resize to 320x320 and normalize)
+    resized_img = cv2.resize(raw_img, (IMG_SIZE, IMG_SIZE))
+    img_rgb = cv2.cvtColor(resized_img, cv2.COLOR_BGR2RGB)
+    
+    # Convert to tensor
+    img_t = torch.from_numpy(img_rgb).permute(2, 0, 1).float().unsqueeze(0).to(DEVICE) / 255.0
+    
+    # --- INFERENCE ---
+    with torch.no_grad():
+        coords = model(img_t).squeeze().cpu().numpy()
+        
+    pred_x_pct, pred_y_pct = coords[0], coords[1]
+    
+    # Mathematical Target on the raw crop
+    target_x_raw = int(pred_x_pct * orig_w)
+    target_y_raw = int(pred_y_pct * orig_h)
+    
+    # --- VISUALIZATION SCALING ---
+    # 1. Blow the image up for the monitor (Using NEAREST to keep it sharp)
+    new_w, new_h = int(orig_w * DISPLAY_SCALE), int(orig_h * DISPLAY_SCALE)
+    display_img = cv2.resize(raw_img, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+    
+    # 2. Scale our target coordinate up to match the giant image
+    px_scaled = int(target_x_raw * DISPLAY_SCALE)
+    py_scaled = int(target_y_raw * DISPLAY_SCALE)
+    
+    # 3. Draw the crisp, small Red 'X'
+    color = (0, 0, 255) # BGR
+    cv2.line(display_img, (px_scaled - MARKER_SIZE, py_scaled - MARKER_SIZE), 
+             (px_scaled + MARKER_SIZE, py_scaled + MARKER_SIZE), color, MARKER_THICKNESS)
+    cv2.line(display_img, (px_scaled + MARKER_SIZE, py_scaled - MARKER_SIZE), 
+             (px_scaled - MARKER_SIZE, py_scaled + MARKER_SIZE), color, MARKER_THICKNESS)
+
+    # 4. Draw UI Text
+    cv2.putText(display_img, f"[{current_idx+1}/{len(image_files)}] {img_name}", 
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(display_img, f"Raw Crop Target: ({target_x_raw}, {target_y_raw})", 
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+    # Show the image window
+    cv2.imshow("Stem Crown Predictor (A/D to navigate)", display_img)
+    
+    # --- KEYBOARD CONTROLS ---
+    key = cv2.waitKey(0) & 0xFF
+    
+    if key == ord('d'): # Next
+        current_idx = (current_idx + 1) % len(image_files)
+    elif key == ord('a'): # Previous
+        current_idx = (current_idx - 1) % len(image_files)
+    elif key == 27 or key == ord('q'): # ESC or Q to quit
+        break
+
+cv2.destroyAllWindows()
+```
